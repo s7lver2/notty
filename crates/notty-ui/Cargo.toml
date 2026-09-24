@@ -1,0 +1,9 @@
+[package]
+name = "notty-ui"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+notty-core = { path = "../notty-core" }
+notty-io = { path = "../notty-io" }
