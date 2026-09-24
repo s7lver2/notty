@@ -121,6 +121,7 @@ dependencies = [
  "notty-io",
  "tempfile",
  "windows",
+ "windows-numerics",
 ]
 
 [[package]]
