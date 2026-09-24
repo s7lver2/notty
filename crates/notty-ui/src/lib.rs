@@ -3,6 +3,7 @@
 mod doc_io;
 mod keymap;
 mod viewport;
+pub mod window;
 
 pub use doc_io::{OpenedDoc, open_as_document, save_document};
 pub use keymap::{EditorAction, Modifiers, action_for_vk};
