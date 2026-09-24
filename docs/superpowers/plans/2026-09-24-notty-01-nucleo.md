@@ -1056,7 +1056,7 @@ git commit -m "feat(core): búsqueda y reemplazo (Aa, palabra, regex)"
   - `CodecError { Invalid(&'static str), Unmappable(&'static str) }`.
   - `decode(&[u8], TextEncoding) -> Result<String, CodecError>` (estricto, quita el BOM), `decode_lossy(&[u8], TextEncoding) -> String`, `encode(&str, TextEncoding) -> Result<Vec<u8>, CodecError>` (escribe el BOM).
 
-- [ ] **Step 1: Crear el crate**
+- [x] **Step 1: Crear el crate**
 
 `crates/notty-io/Cargo.toml`:
 
@@ -1086,7 +1086,7 @@ mod encoding;
 pub use encoding::{CodecError, Detected, TextEncoding, decode, decode_lossy, detect, encode};
 ```
 
-- [ ] **Step 2: Escribir los tests que fallan**
+- [x] **Step 2: Escribir los tests que fallan**
 
 `crates/notty-io/src/encoding.rs`:
 
@@ -1161,12 +1161,12 @@ mod tests {
 }
 ```
 
-- [ ] **Step 3: Ejecutar y ver que falla**
+- [x] **Step 3: Ejecutar y ver que falla**
 
 Run: `cargo test -p notty-io`
 Expected: FAIL de compilación, `cannot find type TextEncoding`.
 
-- [ ] **Step 4: Implementar**
+- [x] **Step 4: Implementar**
 
 Añadir **encima** del módulo de tests en `crates/notty-io/src/encoding.rs`:
 
@@ -1286,12 +1286,12 @@ pub fn encode(text: &str, enc: TextEncoding) -> Result<Vec<u8>, CodecError> {
 }
 ```
 
-- [ ] **Step 5: Ejecutar y ver que pasa**
+- [x] **Step 5: Ejecutar y ver que pasa**
 
 Run: `cargo test -p notty-io`
 Expected: PASS, 11 tests.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add Cargo.lock crates/notty-io
