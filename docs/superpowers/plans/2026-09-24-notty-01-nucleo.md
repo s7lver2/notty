@@ -1585,7 +1585,7 @@ git commit -m "feat(io): guardado atómico, crear carpetas y comprobar escritura
   - Regla: si `decode` estricto falla, `lossy = true` y `writable = false` (nunca se guarda un texto con U+FFFD inventados).
   - Aviso para el Plan 5: en Windows no se puede renombrar encima de un archivo mapeado; antes de guardar un raw hay que soltar el `Mmap`.
 
-- [ ] **Step 1: Escribir los tests que fallan**
+- [x] **Step 1: Escribir los tests que fallan**
 
 `crates/notty-io/src/open.rs`:
 
@@ -1721,12 +1721,12 @@ pub use fsutil::{atomic_write, can_write, create_parent_dirs};
 pub use open::{Opened, RawBytes, open, open_raw};
 ```
 
-- [ ] **Step 2: Ejecutar y ver que falla**
+- [x] **Step 2: Ejecutar y ver que falla**
 
 Run: `cargo test -p notty-io open`
 Expected: FAIL de compilación, `cannot find type Opened`.
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 Añadir **encima** del módulo de tests en `crates/notty-io/src/open.rs`:
 
@@ -1799,17 +1799,17 @@ pub fn open_raw(path: &Path) -> io::Result<Opened> {
 }
 ```
 
-- [ ] **Step 4: Ejecutar y ver que pasa**
+- [x] **Step 4: Ejecutar y ver que pasa**
 
 Run: `cargo test -p notty-io`
 Expected: PASS, 27 tests.
 
-- [ ] **Step 5: Comprobar todo el workspace con clippy**
+- [x] **Step 5: Comprobar todo el workspace con clippy**
 
 Run: `cargo clippy --workspace --all-targets -- -D warnings`
 Expected: sin avisos. Si clippy marca algo, corregirlo en el archivo que indique y volver a ejecutar `cargo test --workspace`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/notty-io
