@@ -253,7 +253,7 @@ git commit -m "feat(core): workspace y Buffer sobre ropey"
   - `History` (`Default`) con `record(Edit, Instant)`, `seal()`, `top_id() -> Option<u64>`, `undo(&mut Buffer) -> Option<usize>`, `redo(&mut Buffer) -> Option<usize>`. `undo`/`redo` devuelven la posición del cursor.
   - Regla de agrupado: se une al grupo anterior si no está sellado, han pasado < 1 s, y es escritura contigua sin salto de línea o borrado hacia atrás contiguo.
 
-- [ ] **Step 1: Escribir Edit**
+- [x] **Step 1: Escribir Edit**
 
 `crates/notty-core/src/edit.rs`:
 
@@ -310,7 +310,7 @@ pub use edit::Edit;
 pub use history::History;
 ```
 
-- [ ] **Step 2: Escribir los tests de History que fallan**
+- [x] **Step 2: Escribir los tests de History que fallan**
 
 `crates/notty-core/src/history.rs`:
 
@@ -408,12 +408,12 @@ mod tests {
 }
 ```
 
-- [ ] **Step 3: Ejecutar y ver que falla**
+- [x] **Step 3: Ejecutar y ver que falla**
 
 Run: `cargo test -p notty-core`
 Expected: FAIL de compilación, `cannot find type History`.
 
-- [ ] **Step 4: Implementar History**
+- [x] **Step 4: Implementar History**
 
 Añadir **encima** del módulo de tests en `crates/notty-core/src/history.rs`:
 
@@ -504,12 +504,12 @@ fn continues(prev: &Edit, next: &Edit) -> bool {
 }
 ```
 
-- [ ] **Step 5: Ejecutar y ver que pasa**
+- [x] **Step 5: Ejecutar y ver que pasa**
 
 Run: `cargo test -p notty-core`
 Expected: PASS, 12 tests.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/notty-core
