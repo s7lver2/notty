@@ -1310,7 +1310,7 @@ git commit -m "feat(io): detección texto/raw y codificaciones estrictas"
 - Consumes: nada.
 - Produces: `LineEnding { Crlf, Lf }` con `as_str() -> &'static str` y `label() -> &'static str` ("CRLF"/"LF"); `detect_eol(&str) -> LineEnding` (mayoría; sin saltos → `Crlf`); `convert(&str, LineEnding) -> String`.
 
-- [ ] **Step 1: Escribir los tests que fallan**
+- [x] **Step 1: Escribir los tests que fallan**
 
 `crates/notty-io/src/eol.rs`:
 
@@ -1357,12 +1357,12 @@ pub use encoding::{CodecError, Detected, TextEncoding, decode, decode_lossy, det
 pub use eol::{LineEnding, convert, detect_eol};
 ```
 
-- [ ] **Step 2: Ejecutar y ver que falla**
+- [x] **Step 2: Ejecutar y ver que falla**
 
 Run: `cargo test -p notty-io eol`
 Expected: FAIL de compilación, `cannot find type LineEnding`.
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 Añadir **encima** del módulo de tests en `crates/notty-io/src/eol.rs`:
 
@@ -1406,12 +1406,12 @@ pub fn convert(text: &str, to: LineEnding) -> String {
 }
 ```
 
-- [ ] **Step 4: Ejecutar y ver que pasa**
+- [x] **Step 4: Ejecutar y ver que pasa**
 
 Run: `cargo test -p notty-io`
 Expected: PASS, 15 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/notty-io
