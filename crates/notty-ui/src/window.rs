@@ -10,9 +10,9 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 use windows::Win32::UI::WindowsAndMessaging::{
     CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DispatchMessageW, GWLP_USERDATA, GetClientRect,
     GetMessageW, GetWindowLongPtrW, MSG, PostQuitMessage, RegisterClassExW, SW_SHOW, SetWindowLongPtrW,
-    ShowWindow, TranslateMessage, WHEEL_DELTA, WM_CHAR, WM_DESTROY, WM_KEYDOWN, WM_LBUTTONDOWN,
-    WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_PAINT, WM_SIZE, WNDCLASSEXW, WS_EX_APPWINDOW,
-    WS_OVERLAPPEDWINDOW,
+    SetWindowTextW, ShowWindow, TranslateMessage, WHEEL_DELTA, WM_CHAR, WM_DESTROY, WM_KEYDOWN,
+    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_PAINT, WM_SIZE, WNDCLASSEXW,
+    WS_EX_APPWINDOW, WS_OVERLAPPEDWINDOW,
 };
 use windows::core::{PCWSTR, Result, w};
 
@@ -34,6 +34,23 @@ fn point_from_lparam(lparam: LPARAM) -> (f32, f32) {
 
 fn to_wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+/// Título de la ventana: `"<ruta o 'sin título'>{ ' •' si hay cambios sin guardar} · notty"`.
+fn window_title(state: &EditorState) -> String {
+    let base = match &state.path {
+        Some(p) => p.display().to_string(),
+        None => "sin título".to_string(),
+    };
+    let dirty = if state.doc.is_dirty() { " •" } else { "" };
+    format!("{base}{dirty} · notty")
+}
+
+unsafe fn update_title(hwnd: HWND, state: &EditorState) {
+    unsafe {
+        let title_wide = to_wide(&window_title(state));
+        let _ = SetWindowTextW(hwnd, PCWSTR(title_wide.as_ptr()));
+    }
 }
 
 /// Abre la ventana principal de notty y bloquea hasta que se cierra.
@@ -86,7 +103,8 @@ pub fn run(path: Option<&str>) -> Result<()> {
         let mut client = RECT::default();
         let _ = GetClientRect(hwnd, &mut client);
         let height = (client.bottom - client.top).max(0) as f32;
-        state.viewport = Viewport::new(renderer.line_height(), height);
+        state.viewport = Viewport::new(renderer.line_height(), (height - renderer.line_height()).max(0.0));
+        update_title(hwnd, &state);
 
         let window_state = Box::new(WindowState { state, renderer, mouse_down: false, selection_anchor: 0 });
         let ptr = Box::into_raw(window_state);
@@ -164,7 +182,8 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     let width = (lparam.0 as u32) & 0xFFFF;
                     let height = ((lparam.0 as u32) >> 16) & 0xFFFF;
                     ws.renderer.resize(width, height);
-                    let new_viewport = Viewport::new(ws.renderer.line_height(), height as f32);
+                    let line_height = ws.renderer.line_height();
+                    let new_viewport = Viewport::new(line_height, (height as f32 - line_height).max(0.0));
                     ws.state.viewport.visible_lines = new_viewport.visible_lines;
                     let _ = InvalidateRect(Some(hwnd), None, false);
                 }
@@ -190,6 +209,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                                     ws.state.doc.backspace(std::time::Instant::now());
                                 }
                             }
+                            update_title(hwnd, &ws.state);
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                         crate::EditorAction::Paste => {
@@ -198,10 +218,17 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                                     ws.state.doc.insert(&text, std::time::Instant::now());
                                 }
                             }
+                            update_title(hwnd, &ws.state);
+                            let _ = InvalidateRect(Some(hwnd), None, false);
+                        }
+                        crate::EditorAction::Save => {
+                            let _ = ws.state.save();
+                            update_title(hwnd, &ws.state);
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                         other => {
                             ws.state.apply(other, std::time::Instant::now());
+                            update_title(hwnd, &ws.state);
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                     }
@@ -212,6 +239,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 if let Some(ws) = ptr.as_mut() {
                     if let Some(ch) = char::from_u32(wparam.0 as u32) {
                         ws.state.insert_char(ch, std::time::Instant::now());
+                        update_title(hwnd, &ws.state);
                         let _ = InvalidateRect(Some(hwnd), None, false);
                     }
                 }

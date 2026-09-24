@@ -7,7 +7,8 @@ use windows::Win32::Graphics::Direct2D::{
 };
 use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-    DWRITE_FONT_WEIGHT_NORMAL, DWriteCreateFactory, IDWriteFactory, IDWriteTextFormat,
+    DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_TRAILING, DWriteCreateFactory, IDWriteFactory,
+    IDWriteTextFormat,
 };
 use windows::core::Result;
 use windows_numerics::{Matrix3x2, Vector2};
@@ -193,6 +194,29 @@ impl Renderer {
                 }
 
                 y += self.line_height;
+            }
+
+            // Barra de estado: franja inferior con la posición del caret, codificación y EOL,
+            // alineada a la esquina inferior derecha.
+            let status = crate::status_line(&state.doc, state.encoding, state.eol);
+            let size = self.target.GetSize();
+            let status_top = size.height - self.line_height;
+            let status_wide: Vec<u16> = status.encode_utf16().collect();
+            if !status_wide.is_empty() {
+                if let Ok(layout) = self._dwrite.CreateTextLayout(
+                    &status_wide,
+                    &self.text_format,
+                    (size.width - PADDING_X).max(0.0),
+                    self.line_height,
+                ) {
+                    let _ = layout.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
+                    self.target.DrawTextLayout(
+                        Vector2 { X: 0.0, Y: status_top },
+                        &layout,
+                        &self.fg_brush,
+                        D2D1_DRAW_TEXT_OPTIONS_NONE,
+                    );
+                }
             }
 
             let _ = self.target.EndDraw(None, None);

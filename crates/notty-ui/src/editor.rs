@@ -98,6 +98,13 @@ impl EditorState {
         buf.line_start(line) + text.trim_end_matches(['\r', '\n']).chars().count()
     }
 
+    pub fn save(&mut self) -> Result<(), notty_io::CodecError> {
+        let path = self.path.clone().ok_or_else(|| notty_io::CodecError::Io("sin ruta".to_string()))?;
+        crate::save_document(&self.doc, &path, self.encoding)?;
+        self.doc.mark_saved();
+        Ok(())
+    }
+
     pub fn scroll_by(&mut self, delta_lines: i32) {
         let total = self.doc.buffer().len_lines();
         let max_first = total.saturating_sub(1) as i64;
@@ -225,5 +232,27 @@ mod tests {
         assert_eq!(s.viewport.first_line, 0);
         s.scroll_by(100);
         assert_eq!(s.viewport.first_line, s.doc.buffer().len_lines() - 1);
+    }
+
+    #[test]
+    fn save_without_path_is_an_error() {
+        let mut s = state("hola");
+        assert!(s.save().is_err());
+    }
+
+    #[test]
+    fn save_writes_file_and_clears_dirty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("out.txt");
+        let mut s = state("hol");
+        s.path = Some(path.clone());
+        // Un `Document` recién creado no cuenta como "sucio" (no hay edición que
+        // deshacer): lo editamos para que `is_dirty()` sea true antes de guardar.
+        s.apply(MoveDocEnd, Instant::now());
+        s.insert_char('a', Instant::now());
+        assert!(s.doc.is_dirty());
+        s.save().unwrap();
+        assert!(!s.doc.is_dirty());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "hola");
     }
 }
