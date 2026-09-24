@@ -57,7 +57,7 @@ Los tests van en un módulo `#[cfg(test)] mod tests` al final de cada archivo.
 - Consumes: nada.
 - Produces: `notty_core::Buffer` con `Buffer::new(&str)`, `len_chars() -> usize`, `len_lines() -> usize`, `insert(usize, &str)`, `remove(Range<usize>)`, `slice(Range<usize>) -> String`, `line_col(usize) -> (usize, usize)` (0-based), `line_start(usize) -> usize`, `byte_to_char(usize) -> usize`, `Display` (texto completo). Todos los índices son **de char**.
 
-- [ ] **Step 1: Crear el workspace**
+- [x] **Step 1: Crear el workspace**
 
 `Cargo.toml`:
 
@@ -110,7 +110,7 @@ mod buffer;
 pub use buffer::Buffer;
 ```
 
-- [ ] **Step 2: Escribir los tests que fallan**
+- [x] **Step 2: Escribir los tests que fallan**
 
 `crates/notty-core/src/buffer.rs`:
 
@@ -151,12 +151,12 @@ mod tests {
 }
 ```
 
-- [ ] **Step 3: Ejecutar y ver que falla**
+- [x] **Step 3: Ejecutar y ver que falla**
 
 Run: `cargo test -p notty-core`
 Expected: FAIL de compilación, `cannot find type Buffer`.
 
-- [ ] **Step 4: Implementar Buffer**
+- [x] **Step 4: Implementar Buffer**
 
 Añadir **encima** del módulo de tests en `crates/notty-core/src/buffer.rs`:
 
@@ -225,12 +225,12 @@ impl fmt::Display for Buffer {
 }
 ```
 
-- [ ] **Step 5: Ejecutar y ver que pasa**
+- [x] **Step 5: Ejecutar y ver que pasa**
 
 Run: `cargo test -p notty-core`
 Expected: PASS, 4 tests.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add Cargo.toml Cargo.lock crates/notty-core
