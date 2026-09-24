@@ -7,3 +7,6 @@ rust-version.workspace = true
 [dependencies]
 notty-core = { path = "../notty-core" }
 notty-io = { path = "../notty-io" }
+
+[dev-dependencies]
+tempfile.workspace = true

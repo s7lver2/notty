@@ -53,6 +53,8 @@ pub enum CodecError {
     Invalid(&'static str),
     #[error("el texto tiene caracteres que no caben en {0}")]
     Unmappable(&'static str),
+    #[error("error de E/S: {0}")]
+    Io(String),
 }
 
 /// Decide texto o raw a partir de los primeros bytes del archivo (~8 KB).
