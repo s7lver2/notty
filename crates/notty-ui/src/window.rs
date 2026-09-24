@@ -4,13 +4,16 @@ use windows::Win32::Graphics::Dwm::{
 };
 use windows::Win32::Graphics::Gdi::{InvalidateRect, ValidateRect};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_SHIFT};
 use windows::Win32::UI::WindowsAndMessaging::{
     CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DispatchMessageW, GWLP_USERDATA, GetClientRect,
     GetMessageW, GetWindowLongPtrW, MSG, PostQuitMessage, RegisterClassExW, SW_SHOW, SetWindowLongPtrW,
-    ShowWindow, TranslateMessage, WM_DESTROY, WM_PAINT, WM_SIZE, WNDCLASSEXW, WS_EX_APPWINDOW,
-    WS_OVERLAPPEDWINDOW,
+    ShowWindow, TranslateMessage, WM_CHAR, WM_DESTROY, WM_KEYDOWN, WM_PAINT, WM_SIZE, WNDCLASSEXW,
+    WS_EX_APPWINDOW, WS_OVERLAPPEDWINDOW,
 };
 use windows::core::{PCWSTR, Result, w};
+
+use crate::Modifiers;
 
 use crate::{EditorState, Renderer, Viewport};
 
@@ -155,6 +158,31 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     let new_viewport = Viewport::new(ws.renderer.line_height(), height as f32);
                     ws.state.viewport.visible_lines = new_viewport.visible_lines;
                     let _ = InvalidateRect(Some(hwnd), None, false);
+                }
+                LRESULT(0)
+            }
+            WM_KEYDOWN => {
+                if let Some(ws) = ptr.as_mut() {
+                    let vk = wparam.0 as u32;
+                    let mods = Modifiers {
+                        ctrl: (GetKeyState(VK_CONTROL.0 as i32) as u16 & 0x8000) != 0,
+                        shift: (GetKeyState(VK_SHIFT.0 as i32) as u16 & 0x8000) != 0,
+                        alt: false,
+                    };
+                    let action = crate::action_for_vk(vk, mods);
+                    if action != crate::EditorAction::None {
+                        ws.state.apply(action, std::time::Instant::now());
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                    }
+                }
+                LRESULT(0)
+            }
+            WM_CHAR => {
+                if let Some(ws) = ptr.as_mut() {
+                    if let Some(ch) = char::from_u32(wparam.0 as u32) {
+                        ws.state.insert_char(ch, std::time::Instant::now());
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                    }
                 }
                 LRESULT(0)
             }
