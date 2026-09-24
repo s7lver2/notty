@@ -1,0 +1,1123 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>notty · maqueta</title>
+<style>
+:root{
+  --ah:250;
+  --font-ui:"Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;
+  --font-mono:"Cascadia Mono","Cascadia Code",Consolas,monospace;
+  --lh:20px;
+}
+:root[data-theme="light"]{
+  --desk:oklch(0.80 0.03 var(--ah));
+  --chrome:oklch(0.945 0.008 var(--ah));
+  --chrome-hi:oklch(0.975 0.005 var(--ah));
+  --surface:oklch(0.99 0.003 var(--ah));
+  --surface-2:oklch(0.962 0.006 var(--ah));
+  --hover:oklch(0.5 0.01 var(--ah) / .08);
+  --press:oklch(0.5 0.01 var(--ah) / .14);
+  --line:oklch(0.88 0.008 var(--ah));
+  --text:oklch(0.22 0.012 var(--ah));
+  --text-2:oklch(0.44 0.012 var(--ah));
+  --text-3:oklch(0.60 0.01 var(--ah));
+  --accent:oklch(0.52 0.16 var(--ah));
+  --accent-soft:oklch(0.52 0.16 var(--ah) / .12);
+  --on-accent:oklch(0.99 0.003 var(--ah));
+  --danger:oklch(0.54 0.19 27);
+  --warn:oklch(0.58 0.13 70);
+  --ok:oklch(0.52 0.12 150);
+  --mark:oklch(0.88 0.13 95 / .75);
+  --mark-cur:oklch(0.78 0.16 65 / .85);
+  --shadow:0 10px 40px oklch(0.2 0.02 var(--ah) / .28), 0 0 0 1px oklch(0.2 0.02 var(--ah) / .12);
+  --rig:oklch(0.97 0.004 var(--ah));
+}
+:root[data-theme="dark"]{
+  --desk:oklch(0.30 0.03 var(--ah));
+  --chrome:oklch(0.235 0.008 var(--ah));
+  --chrome-hi:oklch(0.27 0.008 var(--ah));
+  --surface:oklch(0.195 0.006 var(--ah));
+  --surface-2:oklch(0.222 0.007 var(--ah));
+  --hover:oklch(0.9 0.01 var(--ah) / .07);
+  --press:oklch(0.9 0.01 var(--ah) / .12);
+  --line:oklch(0.31 0.008 var(--ah));
+  --text:oklch(0.93 0.006 var(--ah));
+  --text-2:oklch(0.74 0.01 var(--ah));
+  --text-3:oklch(0.56 0.01 var(--ah));
+  --accent:oklch(0.76 0.12 var(--ah));
+  --accent-soft:oklch(0.76 0.12 var(--ah) / .16);
+  --on-accent:oklch(0.18 0.01 var(--ah));
+  --danger:oklch(0.70 0.16 27);
+  --warn:oklch(0.78 0.12 75);
+  --ok:oklch(0.75 0.12 150);
+  --mark:oklch(0.55 0.10 95 / .55);
+  --mark-cur:oklch(0.65 0.15 65 / .8);
+  --shadow:0 10px 40px oklch(0.05 0.01 var(--ah) / .6), 0 0 0 1px oklch(0.5 0.01 var(--ah) / .18);
+  --rig:oklch(0.21 0.006 var(--ah));
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{font:13px/1.4 var(--font-ui);color:var(--text);background:var(--rig);display:grid;grid-template-columns:268px 1fr;overflow:hidden}
+button{font:inherit;color:inherit}
+kbd{font:11px var(--font-mono);padding:1px 5px;border-radius:4px;background:var(--hover);color:var(--text-2);white-space:nowrap}
+
+/* ---------- rig (fuera de la app) ---------- */
+.rig{padding:18px 16px 24px;overflow:auto;border-right:1px solid var(--line)}
+.rig h1{font-size:15px;font-weight:600;margin:0 0 2px}
+.rig .sub{color:var(--text-3);font-size:12px;margin:0 0 18px}
+.rig h2{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);margin:20px 0 8px}
+.rig .scn{display:flex;flex-direction:column;gap:2px}
+.rig .scn button{all:unset;cursor:pointer;padding:5px 8px;border-radius:5px;display:flex;justify-content:space-between;gap:8px;color:var(--text)}
+.rig .scn button:hover{background:var(--hover)}
+.rig .scn button:active{background:var(--press)}
+.rig .scn button span{color:var(--text-3);font-size:11px}
+.rig .row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:6px 0}
+.rig .keys{display:grid;grid-template-columns:auto 1fr;gap:5px 10px;font-size:12px;color:var(--text-2);align-items:center}
+.rig .note{font-size:11.5px;color:var(--text-3);margin-top:10px;line-height:1.5}
+.seg{display:inline-flex;background:var(--hover);border-radius:6px;padding:2px}
+.seg button{all:unset;cursor:pointer;padding:3px 9px;border-radius:4px;font-size:12px;color:var(--text-2)}
+.seg button[aria-pressed="true"]{background:var(--surface);color:var(--text);box-shadow:0 0 0 1px var(--line)}
+.sw{display:flex;gap:6px}
+.sw button{all:unset;cursor:pointer;width:18px;height:18px;border-radius:50%;box-shadow:0 0 0 1px var(--line)}
+.sw button[aria-pressed="true"]{box-shadow:0 0 0 2px var(--surface),0 0 0 4px var(--text-2)}
+
+/* ---------- escritorio ---------- */
+.desk{position:relative;background:var(--desk);overflow:hidden;display:flex;flex-direction:column}
+.stage{flex:1;position:relative;display:flex;align-items:center;justify-content:center;padding:28px 36px}
+.taskbar{height:44px;background:var(--chrome);border-top:1px solid var(--line);display:flex;align-items:center;padding:0 10px;position:relative}
+.taskbar .mid{position:absolute;left:50%;transform:translateX(-50%);display:flex;gap:4px}
+.tb-btn{all:unset;cursor:pointer;width:36px;height:36px;border-radius:5px;display:grid;place-items:center;position:relative}
+.tb-btn:hover{background:var(--hover)}
+.tb-btn.on::after{content:"";position:absolute;bottom:2px;left:50%;transform:translateX(-50%);width:14px;height:3px;border-radius:2px;background:var(--accent)}
+.tray{margin-left:auto;display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text-2)}
+.tray .clock{padding:0 8px;text-align:right;line-height:1.25}
+.traymenu{position:absolute;right:70px;bottom:50px;min-width:260px;background:var(--chrome-hi);border-radius:8px;box-shadow:var(--shadow);padding:4px;z-index:30}
+.menu-item{all:unset;cursor:pointer;display:flex;justify-content:space-between;gap:24px;padding:6px 10px;border-radius:4px;width:100%;box-sizing:border-box}
+.menu-item:hover{background:var(--hover)}
+.menu-item kbd{background:none;padding:0;color:var(--text-3)}
+.menu-sep{height:1px;background:var(--line);margin:4px 6px}
+
+/* ---------- ventana notty ---------- */
+.win{width:min(920px,100%);height:min(600px,100%);background:var(--surface);border-radius:8px;box-shadow:var(--shadow);display:flex;flex-direction:column;overflow:hidden;position:relative}
+.titlebar{height:40px;background:var(--chrome);display:flex;align-items:stretch;flex:none;user-select:none}
+.appicon{width:40px;display:grid;place-items:center;flex:none}
+.wtitle{align-self:center;font-size:12px;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tabs{display:flex;align-items:flex-end;gap:1px;min-width:0;overflow:hidden;padding-top:6px}
+.tabs.below{background:var(--chrome);padding:6px 6px 0;flex:none;border-bottom:0}
+.tab{display:flex;align-items:center;gap:8px;height:34px;padding:0 8px 0 12px;border-radius:7px 7px 0 0;font-size:12px;color:var(--text-2);cursor:default;max-width:200px;min-width:0}
+.tab:hover{background:var(--hover)}
+.tab.active{background:var(--surface);color:var(--text)}
+.tab .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tab.temp .nm{font-style:italic}
+.tab .x{all:unset;width:20px;height:20px;border-radius:4px;display:grid;place-items:center;flex:none;color:var(--text-3)}
+.tab .x:hover{background:var(--hover);color:var(--text)}
+.tab .dot{width:20px;height:20px;display:grid;place-items:center;flex:none;color:var(--text-2);font-size:16px;line-height:0}
+.tab:hover .dot{display:none}
+.tab:not(:hover) .dot + .x{display:none}
+.tabs .plus{all:unset;align-self:center;width:30px;height:28px;border-radius:5px;display:grid;place-items:center;color:var(--text-2);margin-left:2px;flex:none}
+.tabs .plus:hover{background:var(--hover)}
+.drag{flex:1}
+.caption{display:flex;flex:none}
+.caption button{all:unset;width:46px;display:grid;place-items:center;color:var(--text-2)}
+.caption button:hover{background:var(--hover)}
+.caption button.close:hover{background:oklch(0.58 0.21 27);color:oklch(0.99 0 0)}
+
+.menubar{display:flex;gap:2px;padding:2px 6px;background:var(--chrome);flex:none;position:relative}
+.menubar > button{all:unset;padding:4px 10px;border-radius:4px;font-size:12.5px;cursor:default}
+.menubar > button:hover,.menubar > button[aria-expanded="true"]{background:var(--hover)}
+.dropdown{position:absolute;top:30px;min-width:250px;background:var(--chrome-hi);border-radius:8px;box-shadow:var(--shadow);padding:4px;z-index:20}
+
+.body{flex:1;display:flex;min-height:0;position:relative;background:var(--surface)}
+.gutter{flex:none;width:52px;overflow:hidden;position:relative;padding-top:10px;font:13px/var(--lh) var(--font-mono);color:var(--text-3);text-align:right;user-select:none}
+.gutter div{padding-right:14px}
+.gutter .cur{color:var(--text)}
+.edwrap{flex:1;position:relative;min-width:0}
+.backdrop,.ta{position:absolute;inset:0;margin:0;padding:10px 16px 10px 4px;font:13px/var(--lh) var(--font-mono);white-space:pre;tab-size:4;border:0;overflow:hidden}
+.backdrop{color:transparent;pointer-events:none}
+.backdrop mark{background:var(--mark);color:transparent;border-radius:2px}
+.backdrop mark.cur{background:var(--mark-cur)}
+.ta{background:transparent;color:var(--text);resize:none;outline:none;overflow:auto;caret-color:var(--text)}
+.ta::selection{background:var(--accent-soft)}
+.win.vim-normal .ta{caret-color:var(--accent)}
+.hex{flex:1;overflow:auto;padding:10px 16px;font:13px/var(--lh) var(--font-mono);white-space:pre;user-select:none}
+.hex .off{color:var(--text-3)}
+.hex .b{padding:0 1px;border-radius:2px;cursor:default}
+.hex.w .b{cursor:pointer}
+.hex.w .b:hover{background:var(--hover)}
+.hex .b.z{color:var(--text-3)}
+.hex .b.mod{color:var(--accent);font-weight:600}
+.hex .b.sel{background:var(--accent);color:var(--on-accent)}
+.hex .asc{color:var(--text-2)}
+.hex .asc .sel{background:var(--accent-soft);color:var(--text)}
+
+.hints{flex:none;display:flex;gap:18px;padding:4px 14px;background:var(--surface-2);font:11.5px var(--font-mono);color:var(--text-3);border-top:1px solid var(--line);white-space:nowrap;overflow:hidden}
+.hints b{color:var(--text-2);font-weight:600}
+.status{flex:none;height:28px;display:flex;align-items:center;gap:14px;padding:0 12px;background:var(--surface-2);border-top:1px solid var(--line);font-size:12px;color:var(--text-2);white-space:nowrap;position:relative}
+.hints + .status{border-top:0}
+.status .l{display:flex;align-items:center;gap:10px;min-width:0;overflow:hidden}
+.status .r{margin-left:auto;display:flex;align-items:center;gap:2px}
+.status .fld{all:unset;padding:3px 7px;border-radius:4px;cursor:default}
+.status .fld.btn:hover{background:var(--hover)}
+.status .path{color:var(--text-3);overflow:hidden;text-overflow:ellipsis}
+.clickme{all:unset;cursor:pointer;font:12px var(--font-mono);color:var(--accent);padding:1px 6px;border-radius:4px;letter-spacing:.04em}
+.clickme:hover{background:var(--accent-soft)}
+.vmode{font:11.5px var(--font-mono);font-weight:600;color:var(--accent)}
+.vmode.ins{color:var(--ok)}
+.flash{font-size:12px}
+.flash.err{color:var(--danger)}
+.flash.ok{color:var(--text-2)}
+.flash.warn{color:var(--warn)}
+.pencil{all:unset;display:inline-grid;place-items:center;width:24px;height:22px;border-radius:4px;color:var(--text-2)}
+.pencil:hover:not(:disabled){background:var(--hover);color:var(--text)}
+.pencil:disabled{color:var(--text-3);opacity:.5}
+.pencil[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent)}
+.ro{color:var(--text-3)}
+.pop{position:absolute;bottom:32px;right:60px;background:var(--chrome-hi);border-radius:8px;box-shadow:var(--shadow);padding:4px;z-index:20;min-width:170px}
+
+/* prompt en la barra de estado */
+.prompt{display:flex;align-items:center;gap:10px;width:100%;min-width:0}
+.plabel{color:var(--text-3);font-size:11.5px;flex:none}
+.pfield{position:relative;flex:1;min-width:60px;font:12.5px var(--font-mono)}
+.pfield input{all:unset;width:100%;position:relative;z-index:1;color:var(--text);caret-color:var(--text);font:inherit}
+.pfield input.bad{color:var(--danger)}
+.pmirror{position:absolute;left:0;top:0;white-space:pre;pointer-events:none;font:inherit;color:transparent}
+.pmirror .g{color:var(--text-3)}
+.pword{color:var(--text-3);font-size:11.5px;flex:none}
+.pword.bad{color:var(--danger)}
+.opt{all:unset;font:11px var(--font-mono);padding:1px 5px;border-radius:3px;color:var(--text-3);cursor:pointer}
+.opt[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent)}
+.count{font:11.5px var(--font-mono);color:var(--text-3);flex:none;min-width:44px;text-align:right}
+.count.bad{color:var(--danger)}
+.choice{display:flex;align-items:center;gap:14px;width:100%}
+.choice .q{color:var(--text)}
+.choice .q.warn{color:var(--warn)}
+.choice kbd{margin-right:4px}
+
+/* ---------- ventana de ajustes ---------- */
+.settings{position:absolute;inset:40px 60px;max-width:820px;max-height:620px;margin:auto;background:var(--surface);border-radius:8px;box-shadow:var(--shadow);display:flex;flex-direction:column;overflow:hidden;z-index:25}
+.settings .titlebar{height:36px}
+.settings .cols{flex:1;display:grid;grid-template-columns:200px 1fr;min-height:0}
+.snav{background:var(--chrome);padding:8px 6px;display:flex;flex-direction:column;gap:1px}
+.snav button{all:unset;cursor:pointer;padding:7px 12px;border-radius:5px;position:relative;color:var(--text-2)}
+.snav button:hover{background:var(--hover)}
+.snav button[aria-current="true"]{background:var(--hover);color:var(--text)}
+.snav button[aria-current="true"]::before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:3px;border-radius:2px;background:var(--accent)}
+.snav .foot{margin-top:auto;padding:10px 12px;font-size:11.5px;color:var(--text-3);line-height:1.5}
+.snav .foot a{color:var(--accent);cursor:pointer;text-decoration:none}
+.snav .foot a:hover{text-decoration:underline}
+.spane{overflow:auto;padding:22px 28px 28px}
+.spane h3{font-size:20px;font-weight:600;margin:0 0 16px}
+.srow{display:flex;align-items:center;justify-content:space-between;gap:24px;padding:12px 14px;background:var(--surface-2);border-radius:6px;margin-bottom:3px}
+.srow .t{font-size:13px}
+.srow .d{font-size:11.5px;color:var(--text-3);margin-top:1px;max-width:52ch}
+.srow .c{flex:none;display:flex;gap:8px;align-items:center}
+.sgroup{font-size:12px;font-weight:600;color:var(--text-2);margin:18px 0 6px}
+.toggle{all:unset;cursor:pointer;width:40px;height:20px;border-radius:10px;box-shadow:inset 0 0 0 1px var(--text-2);position:relative;transition:background .15s cubic-bezier(.22,1,.36,1)}
+.toggle::after{content:"";position:absolute;top:5px;left:5px;width:10px;height:10px;border-radius:50%;background:var(--text-2);transition:transform .15s cubic-bezier(.22,1,.36,1)}
+.toggle[aria-checked="true"]{background:var(--accent);box-shadow:none}
+.toggle[aria-checked="true"]::after{background:var(--on-accent);transform:translateX(20px)}
+.toggle:focus-visible,.seg button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+select.sel,input.txt{font:12.5px var(--font-ui);color:var(--text);background:var(--surface);border:1px solid var(--line);border-radius:5px;padding:4px 8px;outline:none}
+select.sel:focus,input.txt:focus{border-color:var(--accent)}
+input.txt{width:72px}
+
+@media (prefers-reduced-motion: reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<aside class="rig" aria-label="Controles de la maqueta">
+  <h1>notty</h1>
+  <p class="sub">Maqueta interactiva. Todo lo de este panel es de la maqueta, no de la app.</p>
+
+  <h2>Escenarios</h2>
+  <div class="scn">
+    <button data-scn="perm">Nuevo permanente <span>CLICKME</span></button>
+    <button data-scn="temp">Nuevo temporal <span id="scnTempMode">borrador</span></button>
+    <button data-scn="open">Abrir con la línea de ruta <span>Ctrl+O</span></button>
+    <button data-scn="bin">Abrir binario <span>raw</span></button>
+    <button data-scn="binro">Abrir binario sin permiso <span>raw</span></button>
+    <button data-scn="conflict">Conflicto al guardar</button>
+    <button data-scn="reload">Cambio externo sin cambios tuyos</button>
+    <button data-scn="diskfull">Error: disco lleno</button>
+    <button data-scn="recover">Arranque tras una caída</button>
+    <button data-scn="settings">Ajustes <span>Ctrl+,</span></button>
+  </div>
+
+  <h2>Vista rápida</h2>
+  <div class="row"><span>Preset</span><div class="seg" id="rPreset"></div></div>
+  <div class="row"><span>Tema</span><div class="seg" id="rTheme"></div></div>
+  <div class="row"><span>Archivos</span><div class="seg" id="rMulti"></div></div>
+  <div class="row"><span>Acento</span><div class="sw" id="rAccent"></div></div>
+
+  <h2>Atajos</h2>
+  <div class="keys">
+    <kbd>Ctrl+S</kbd><span>Guardar</span>
+    <kbd>Ctrl+O</kbd><span>Abrir (línea de ruta)</span>
+    <kbd>Ctrl+F</kbd><span>Buscar</span>
+    <kbd>Ctrl+H</kbd><span>Reemplazar</span>
+    <kbd>F3</kbd><span>Siguiente coincidencia</span>
+    <kbd>Ctrl+G</kbd><span>Ir a línea</span>
+    <kbd>Ctrl+Alt+V</kbd><span>Modo vim</span>
+    <kbd>Ctrl+Shift+H</kbd><span>Texto ↔ raw</span>
+    <kbd>Ctrl+,</kbd><span>Ajustes</span>
+    <kbd>Alt+N</kbd><span>Nuevo temporal *</span>
+    <kbd>Alt+Shift+N</kbd><span>Nuevo permanente *</span>
+    <kbd>Ctrl+Alt+→</kbd><span>Siguiente archivo *</span>
+  </div>
+  <p class="note">* En la app real: <kbd>Ctrl+Shift+N</kbd>, <kbd>Ctrl+N</kbd> y <kbd>Ctrl+Tab</kbd>. El navegador no deja capturarlos. En modo vim prueba <kbd>i</kbd> <kbd>Esc</kbd> <kbd>hjkl</kbd> <kbd>dd</kbd> <kbd>/</kbd> <kbd>:w</kbd> <kbd>:%s/a/b/g</kbd>.</p>
+</aside>
+
+<main class="desk">
+  <div class="stage" id="stage">
+    <section class="win" id="win" aria-label="notty">
+      <div class="titlebar" id="titlebar"></div>
+      <div class="menubar" id="menubar" hidden></div>
+      <div class="tabs below" id="tabsBelow" hidden></div>
+      <div class="body" id="body">
+        <div class="gutter" id="gutter"><div id="gutterIn"></div></div>
+        <div class="edwrap" id="edwrap">
+          <pre class="backdrop" id="backdrop" aria-hidden="true"></pre>
+          <textarea class="ta" id="ta" spellcheck="false" aria-label="Texto"></textarea>
+        </div>
+        <div class="hex" id="hex" hidden tabindex="0"></div>
+      </div>
+      <div class="hints" id="hints"></div>
+      <div class="status" id="status"></div>
+    </section>
+  </div>
+  <div class="taskbar">
+    <div class="mid">
+      <button class="tb-btn" title="Inicio" aria-label="Inicio"><svg width="18" height="18" viewBox="0 0 18 18"><rect x="1" y="1" width="7.5" height="7.5" rx="1" fill="var(--accent)"/><rect x="9.5" y="1" width="7.5" height="7.5" rx="1" fill="var(--accent)"/><rect x="1" y="9.5" width="7.5" height="7.5" rx="1" fill="var(--accent)"/><rect x="9.5" y="9.5" width="7.5" height="7.5" rx="1" fill="var(--accent)"/></svg></button>
+      <button class="tb-btn on" title="notty" aria-label="notty" id="tbNotty"></button>
+    </div>
+    <div class="tray">
+      <button class="tb-btn" id="trayBtn" title="notty (en segundo plano)" aria-label="notty en la bandeja"></button>
+      <div class="clock">14:32<br>24/09/2026</div>
+    </div>
+  </div>
+</main>
+
+<script>
+/* ================= datos ================= */
+const $ = (s, r = document) => r.querySelector(s);
+const esc = s => s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+const ICON = (sz = 16) => `<svg width="${sz}" height="${sz}" viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="1.5" width="11" height="13" rx="2" fill="none" stroke="var(--accent)" stroke-width="1.4"/><path d="M5 5.5h6M5 8h6M5 10.5h3.5" stroke="var(--text-2)" stroke-width="1.3" stroke-linecap="round"/></svg>`;
+const PENCIL = `<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M11 2.5l2.5 2.5L6 12.5 2.8 13.2 3.5 10z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>`;
+const LOCK = `<svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5.5 7V5a2.5 2.5 0 015 0v2" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>`;
+
+function fakeBin(n, seed, head) {
+  const out = [...head]; let x = seed;
+  while (out.length < n) { x = (x * 1103515245 + 12345) & 0x7fffffff; const r = x % 100; out.push(r < 25 ? 0 : r < 45 ? 32 + (x >> 8) % 90 : (x >> 4) & 255); }
+  return new Uint8Array(out);
+}
+const enc = s => new TextEncoder().encode(s);
+const PNG = fakeBin(448, 7, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, ...enc('IHDR'), 0, 0, 1, 0, 0, 0, 1, 0, 8, 6, 0, 0, 0, 0x5c, 0x72, 0xa8, 0x66, 0, 0, 0, 25, ...enc('tEXtSoftware'), 0, ...enc('notty mockup')]);
+const DLL = fakeBin(384, 3, [0x4d, 0x5a, 0x90, 0, 3, 0, 0, 0, 4, 0, 0, 0, 0xff, 0xff, 0, 0, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0x40, ...Array(35).fill(0), ...enc('This program cannot be run in DOS mode.')]);
+
+const NOTAS = `Lista de la compra
+- leche
+- pan de centeno
+- café
+
+Llamar a Juan antes de las 6.
+Preguntarle a Juan por la furgoneta del sábado.
+
+Ideas para notty
+- abrir cualquier archivo: texto o raw
+- temporales con un atajo global
+- buscar con Ctrl+F, reemplazar con Ctrl+H
+`;
+const FS = {
+  '~': {
+    Documentos: {
+      proyectos: { notty: { 'README.md': '# notty\n\nUn bloc de notas que se toma en serio lo básico.\n' }, web: {} },
+      'notas.txt': NOTAS,
+      'presupuesto.txt': 'Presupuesto septiembre\n\nAlquiler      650\nLuz            48\nInternet       30\nCompra        210\n',
+      facturas: {},
+    },
+    Escritorio: { 'lista.txt': 'Cosas para el viernes\n- devolver el taladro\n- imprimir entradas\n' },
+    Descargas: { 'logo.png': { bin: PNG }, 'setup.log': '[14:02:11] Instalando...\n[14:02:13] OK\n' },
+  },
+  'C:': { Windows: { System32: { 'sistema.dll': { bin: DLL, ro: true } } } },
+};
+
+/* ================= estado ================= */
+const PRESETS = {
+  moderna: { menubar: 'hidden', tabsPos: 'title', showHints: true, statusShow: true, cmdMerged: false, showNums: true },
+  clasica: { menubar: 'visible', tabsPos: 'below', showHints: false, statusShow: true, cmdMerged: false, showNums: true },
+  zen: { menubar: 'hidden', tabsPos: 'auto', showHints: false, statusShow: true, cmdMerged: true, showNums: false },
+};
+const S = {
+  preset: 'moderna', theme: 'light', accentH: 250, multi: 'tabs',
+  vimGlobal: false, vim: false, vmode: 'NORMAL',
+  ...PRESETS.moderna,
+  fields: { pos: true, enc: true, eol: true },
+  tempMode: 'borrador', autosave: false, hotkeyMech: 'daemon', startup: true, defExt: '.txt', bigMB: 50,
+  docs: [], active: 0, prompt: null, flash: null, find: { q: '', rep: '', case: false, word: false, re: false, idx: 0 },
+  menu: null, altMenu: false, settings: null, tray: false, pop: null,
+};
+let uid = 0, tempN = 0;
+const doc = () => S.docs[S.active];
+const mkDoc = o => ({ id: ++uid, kind: 'text', text: '', enc: 'UTF-8', eol: 'CRLF', dirty: false, temp: false, path: null, ro: false, rawWrite: false, mod: new Set(), ...o });
+const docName = d => d.temp ? `temporal ${d.tn}` : d.path === 'CLICKME' ? 'sin ruta' : d.path.split('\\').pop();
+
+S.docs.push(mkDoc({ path: '~\\Documentos\\notas.txt', text: NOTAS }));
+S.docs.push(mkDoc({ path: '~\\Documentos\\presupuesto.txt', text: FS['~'].Documentos['presupuesto.txt'] }));
+
+/* ================= fs falso ================= */
+function nodeAt(parts) {
+  let n = FS;
+  for (const p of parts) {
+    if (!n || typeof n !== 'object' || n.bin) return undefined;
+    const k = Object.keys(n).find(k => k.toLowerCase() === p.toLowerCase());
+    if (k === undefined) return undefined;
+    n = n[k];
+  }
+  return n;
+}
+const isDir = n => n && typeof n === 'object' && !n.bin;
+function realCase(parts) {
+  let n = FS; const out = [];
+  for (const p of parts) {
+    const k = isDir(n) ? Object.keys(n).find(k => k.toLowerCase() === p.toLowerCase()) : undefined;
+    if (k === undefined) { out.push(p); n = undefined; } else { out.push(k); n = n[k]; }
+  }
+  return out;
+}
+function mkdirp(parts) {
+  let n = FS, made = false;
+  for (const p of parts) {
+    let k = Object.keys(n).find(k => k.toLowerCase() === p.toLowerCase());
+    if (k === undefined) { n[p] = {}; k = p; made = true; }
+    n = n[k];
+  }
+  return made;
+}
+
+/* ================= línea de ruta ================= */
+const BAD = /[*?"<>|]|(?<!^[A-Za-z]):/;
+function normPath(s) {
+  s = s.replace(/%USERPROFILE%/ig, '~').replace(/%APPDATA%/ig, '~\\AppData\\Roaming');
+  s = s.replace(/\//g, '\\').replace(/\\{2,}/g, '\\').replace(/^\s+/, '');
+  if (s.startsWith('.\\') || s === '.') { const d = doc(); const base = d.path && d.path !== 'CLICKME' ? d.path.split('\\').slice(0, -1).join('\\') : '~'; s = base + s.slice(1); }
+  const parts = s.split('\\'); const last = parts.pop();
+  const fixed = realCase(parts.map(p => p.trim()));
+  return [...fixed, last].join('\\');
+}
+function pathInfo(v) {
+  const res = { ghost: '', word: '', bad: false, cands: [], fuzzy: null };
+  if (!v) return res;
+  if (!v.includes('\\') && v.trim().includes(' ')) {
+    let n = FS['~'], parts = ['~'];
+    for (const t of v.trim().split(/\s+/)) {
+      if (!isDir(n)) { parts = null; break; }
+      const ks = Object.keys(n); const tl = t.toLowerCase();
+      const k = ks.find(k => k.toLowerCase().startsWith(tl)) || ks.find(k => k.toLowerCase().includes(tl));
+      if (!k) { parts = null; break; }
+      parts.push(k); n = n[k];
+    }
+    if (parts) { res.fuzzy = parts.join('\\') + (isDir(n) ? '\\' : ''); res.word = '→ ' + res.fuzzy; }
+    return res;
+  }
+  const parts = v.split('\\'); const last = parts.pop(); const parent = nodeAt(parts);
+  if (BAD.test(last)) { res.bad = true; res.word = 'no válido'; return res; }
+  if (isDir(parent)) {
+    const ks = Object.keys(parent).sort((a, b) => (isDir(parent[b]) - isDir(parent[a])) || a.localeCompare(b));
+    res.cands = ks.filter(k => k.toLowerCase().startsWith(last.toLowerCase()) && last.length > 0);
+    if (res.cands[0] && res.cands[0].length > last.length) res.ghost = res.cands[0].slice(last.length) + (isDir(parent[res.cands[0]]) ? '\\' : '');
+    const here = nodeAt([...parts, last]);
+    if (last === '') res.word = 'carpeta';
+    else if (here && isDir(here)) res.word = 'carpeta';
+    else if (here) res.word = 'existe';
+    else {
+      if (!res.ghost && !/\.[^.\\]+$/.test(last)) res.ghost = S.defExt;
+      res.word = 'nuevo';
+    }
+  } else {
+    if (last && !/\.[^.\\]+$/.test(last)) res.ghost = S.defExt;
+    res.word = parts.length ? 'carpeta nueva' : '';
+  }
+  return res;
+}
+
+/* ================= render ================= */
+const win = $('#win'), ta = $('#ta'), hex = $('#hex');
+function tabsVisible() {
+  if (S.multi === 'buffers') return null;
+  if (S.tabsPos === 'hidden') return null;
+  if (S.tabsPos === 'auto') return S.docs.length > 1 ? 'title' : null;
+  return S.tabsPos;
+}
+function tabsHTML() {
+  return S.docs.map((d, i) => `<div class="tab ${i === S.active ? 'active' : ''} ${d.temp ? 'temp' : ''}" data-tab="${i}" title="${esc(d.path && d.path !== 'CLICKME' ? d.path : docName(d))}">
+    <span class="nm">${esc(docName(d))}</span>${d.dirty ? '<span class="dot">•</span>' : ''}<button class="x" data-close="${i}" aria-label="Cerrar">${xIcon(10)}</button></div>`).join('')
+    + `<button class="plus" data-act="perm" title="Nuevo (Ctrl+N)" aria-label="Nuevo">${plusIcon()}</button>`;
+}
+const xIcon = s => `<svg width="${s}" height="${s}" viewBox="0 0 10 10"><path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" stroke-width="1.1"/></svg>`;
+const plusIcon = () => `<svg width="12" height="12" viewBox="0 0 12 12"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="1.1"/></svg>`;
+const captionHTML = () => `<div class="caption"><button aria-label="Minimizar"><svg width="10" height="10"><path d="M0 5h10" stroke="currentColor"/></svg></button><button aria-label="Maximizar"><svg width="10" height="10"><rect x=".5" y=".5" width="9" height="9" fill="none" stroke="currentColor"/></svg></button><button class="close" aria-label="Cerrar" data-act="winclose">${xIcon(10)}</button></div>`;
+
+function renderChrome() {
+  const tv = tabsVisible(); const d = doc();
+  const titleText = S.preset === 'zen' ? esc(docName(d)) + (d.dirty ? ' •' : '') : esc(docName(d)) + (d.dirty ? ' •' : '') + ' · notty';
+  $('#titlebar').innerHTML = `<div class="appicon">${ICON()}</div>`
+    + (tv === 'title' ? `<div class="tabs">${tabsHTML()}</div>` : `<div class="wtitle">${titleText}</div>`)
+    + `<div class="drag"></div>` + captionHTML();
+  const mb = $('#menubar'); mb.hidden = !(S.menubar === 'visible' || (S.menubar === 'alt' && S.altMenu));
+  if (!mb.hidden) renderMenubar();
+  const tb = $('#tabsBelow'); tb.hidden = tv !== 'below'; if (!tb.hidden) tb.innerHTML = tabsHTML();
+  $('#hints').hidden = !(S.showHints && !S.cmdMerged);
+  $('#status').hidden = !S.statusShow && !S.prompt && !S.flash;
+  $('#gutter').hidden = !S.showNums || d.kind !== 'text';
+  $('#tbNotty').innerHTML = ICON(20);
+  $('#trayBtn').innerHTML = S.hotkeyMech === 'daemon' ? ICON(16) : '';
+  $('#trayBtn').hidden = S.hotkeyMech !== 'daemon';
+  win.classList.toggle('vim-normal', S.vim && S.vmode === 'NORMAL');
+}
+
+const MENUS = {
+  Archivo: [['Nuevo', 'Ctrl+N', 'perm'], ['Nuevo temporal', 'Ctrl+Shift+N', 'temp'], ['Abrir…', 'Ctrl+O', 'open'], '-', ['Guardar', 'Ctrl+S', 'save'], ['Guardar como…', 'Ctrl+Shift+S', 'saveas'], '-', ['Ajustes', 'Ctrl+,', 'settings'], ['Cerrar pestaña', 'Ctrl+W', 'closetab']],
+  Editar: [['Deshacer', 'Ctrl+Z', 'undo'], ['Rehacer', 'Ctrl+Y', 'redo'], '-', ['Ir a línea…', 'Ctrl+G', 'goto']],
+  Buscar: [['Buscar…', 'Ctrl+F', 'find'], ['Reemplazar…', 'Ctrl+H', 'replace'], ['Siguiente', 'F3', 'next'], ['Anterior', 'Shift+F3', 'prev']],
+  Ver: [['Modo vim', 'Ctrl+Alt+V', 'vim'], ['Ver como raw', 'Ctrl+Shift+H', 'raw'], ['Números de línea', '', 'nums'], ['Barra de atajos', '', 'hintsbar']],
+  Ayuda: [['Atajos de teclado', 'F1', 'noop'], ['Acerca de notty', '', 'noop']],
+};
+function renderMenubar() {
+  const mb = $('#menubar');
+  mb.innerHTML = Object.keys(MENUS).map(m => `<button data-menu="${m}" aria-expanded="${S.menu === m}">${m}</button>`).join('');
+  if (S.menu) {
+    const btn = mb.querySelector(`[data-menu="${S.menu}"]`);
+    const dd = document.createElement('div'); dd.className = 'dropdown'; dd.style.left = btn.offsetLeft + 'px';
+    dd.innerHTML = MENUS[S.menu].map(it => it === '-' ? '<div class="menu-sep"></div>' : `<button class="menu-item" data-act="${it[2]}"><span>${it[0]}</span><kbd>${it[1]}</kbd></button>`).join('');
+    mb.appendChild(dd);
+  }
+}
+
+function renderHints() {
+  const h = $('#hints'); let items;
+  const p = S.prompt;
+  if (p && p.type === 'path') items = [['Tab', 'Completar'], ['Enter', p.purpose === 'open' ? 'Abrir' : 'Crear'], ['Esc', 'Cancelar'], ['^O', 'Diálogo de Windows']];
+  else if (p && (p.type === 'find' || p.type === 'replace')) items = [['Enter', p.type === 'replace' ? 'Reemplazar' : 'Siguiente'], [p.type === 'replace' ? '^Alt+Enter' : '⇧Enter', p.type === 'replace' ? 'Todas' : 'Anterior'], ['Alt+C', 'Aa'], ['Alt+W', 'Palabra'], ['Alt+R', 'Regex'], ['Esc', 'Cerrar']];
+  else if (doc().kind === 'raw') items = [['^S', 'Guardar'], ['^Shift+H', 'Ver como texto'], ['←→↑↓', 'Moverse'], ['0-F', 'Escribir byte'], ['^G', 'Ir a offset']];
+  else if (S.vim) items = S.vmode === 'NORMAL' ? [['i', 'Insertar'], ['hjkl', 'Moverse'], ['dd', 'Borrar línea'], ['/', 'Buscar'], [':w', 'Guardar'], ['^Alt+V', 'Salir de vim']] : [['Esc', 'Modo normal'], ['^S', 'Guardar']];
+  else items = [['^S', 'Guardar'], ['^O', 'Abrir'], ['^F', 'Buscar'], ['^H', 'Reemplazar'], ['^G', 'Ir a línea'], ['^Alt+V', 'Vim']];
+  h.innerHTML = items.map(([k, v]) => `<span><b>${k}</b> ${v}</span>`).join('');
+}
+
+function cursorPos() {
+  const t = ta.value.slice(0, ta.selectionStart); const ls = t.split('\n');
+  return { ln: ls.length, col: ls[ls.length - 1].length + 1 };
+}
+function renderStatus() {
+  const st = $('#status'); const d = doc(); const p = S.prompt;
+  if (p) { renderPrompt(st); return; }
+  let left = '';
+  if (S.multi === 'buffers' && S.docs.length > 1) left += `<span class="fld" style="padding-left:0">${S.active + 1}/${S.docs.length}</span>`;
+  if (S.vim && d.kind === 'text') left += `<span class="vmode ${S.vmode === 'INSERT' ? 'ins' : ''}">-- ${S.vmode} --</span>`;
+  if (S.flash) left += `<span class="flash ${S.flash.tone}">${esc(S.flash.msg)}</span>`;
+  else if (d.kind === 'raw') {
+    left += `<span>Raw · ${d.bytes.length} B</span>`;
+    if (d.ro) left += `<span class="ro" title="Sin permiso de escritura">${LOCK} solo lectura</span><button class="pencil" disabled title="Sin permiso de escritura" aria-label="Editar bytes">${PENCIL}</button>`;
+    else left += `<span class="ro">${d.rawWrite ? 'escritura' : 'solo lectura'}</span><button class="pencil" data-act="pencil" aria-pressed="${d.rawWrite}" title="${d.rawWrite ? 'Volver a solo lectura' : 'Editar bytes'}" aria-label="Editar bytes">${PENCIL}</button>`;
+  } else if (d.path === 'CLICKME') left += `<button class="clickme" data-act="saveprompt" title="Escribe la ruta">CLICKME</button>`;
+  else if (d.temp) left += `<span class="path">Temporal · ${d.temp === 'borrador' ? 'se borra al cerrar si no le das ruta' : 'solo en memoria'}</span>`;
+  else if (S.preset !== 'zen') left += `<span class="path">${esc(d.path)}</span>`;
+  let right = '';
+  if (d.kind === 'text') {
+    const c = cursorPos();
+    if (S.fields.pos) right += `<span class="fld">Ln ${c.ln}, Col ${c.col}</span>`;
+    if (S.fields.enc) right += `<button class="fld btn" data-act="encpop">${d.enc}</button>`;
+    if (S.fields.eol) right += `<button class="fld btn" data-act="eol" title="Cambiar fin de línea">${d.eol}</button>`;
+  } else if (hexSel !== null) right += `<span class="fld">0x${hexSel.toString(16).padStart(8, '0')}</span>`;
+  st.innerHTML = `<div class="l">${left}</div><div class="r">${right}</div>` + (S.pop === 'enc' ? encPop() : '');
+}
+const ENCS = ['UTF-8', 'UTF-8 con BOM', 'UTF-16 LE', 'UTF-16 BE', 'ANSI (1252)'];
+const encPop = () => `<div class="pop">${ENCS.map(e => `<button class="menu-item" data-enc="${e}"><span>${e}</span><kbd>${e === doc().enc ? '✓' : ''}</kbd></button>`).join('')}</div>`;
+
+function flash(msg, tone = 'ok', ms = 2600) {
+  S.flash = { msg, tone }; clearTimeout(flash.t);
+  flash.t = setTimeout(() => { S.flash = null; render(); }, ms); render();
+}
+
+/* ================= editor ================= */
+function loadEditor() {
+  const d = doc();
+  const isText = d.kind === 'text';
+  $('#edwrap').hidden = !isText; hex.hidden = isText;
+  if (isText) { if (ta.value !== d.text) ta.value = d.text; }
+  else renderHex();
+  syncEditor();
+}
+function syncEditor() {
+  const d = doc(); if (d.kind !== 'text') return;
+  const n = ta.value.split('\n').length; const cur = cursorPos().ln;
+  let g = ''; for (let i = 1; i <= n; i++) g += `<div class="${i === cur ? 'cur' : ''}">${i}</div>`;
+  $('#gutterIn').innerHTML = g;
+  $('#gutterIn').style.transform = `translateY(${-ta.scrollTop}px)`;
+  renderBackdrop();
+}
+function renderBackdrop() {
+  const bd = $('#backdrop'); const p = S.prompt;
+  const F = S.find;
+  if (!p || (p.type !== 'find' && p.type !== 'replace') || !F.q) { bd.innerHTML = ''; return; }
+  const m = findMatches(); if (!m) { bd.innerHTML = ''; return; }
+  let html = '', last = 0; const t = ta.value;
+  m.forEach((mm, i) => { html += esc(t.slice(last, mm.i)) + `<mark class="${i === F.idx ? 'cur' : ''}">${esc(t.slice(mm.i, mm.i + mm.len))}</mark>`; last = mm.i + mm.len; });
+  bd.innerHTML = html + esc(t.slice(last)) + '\n ';
+  bd.scrollTop = ta.scrollTop; bd.scrollLeft = ta.scrollLeft;
+}
+function buildRe() {
+  const F = S.find; let src = F.re ? F.q : F.q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (F.word) src = `\\b${src}\\b`;
+  try { return new RegExp(src, F.case ? 'g' : 'gi'); } catch { return null; }
+}
+function findMatches() {
+  const re = buildRe(); if (!re) return null; const out = [];
+  for (const m of ta.value.matchAll(re)) { if (m[0].length === 0) break; out.push({ i: m.index, len: m[0].length }); }
+  return out;
+}
+function gotoMatch(dir) {
+  const m = findMatches(); if (!m || !m.length) return;
+  S.find.idx = ((S.find.idx + dir) % m.length + m.length) % m.length;
+  scrollToIndex(m[S.find.idx].i);
+}
+function scrollToIndex(i) {
+  const ln = ta.value.slice(0, i).split('\n').length - 1; const y = ln * 20;
+  if (y < ta.scrollTop || y > ta.scrollTop + ta.clientHeight - 40) ta.scrollTop = Math.max(0, y - ta.clientHeight / 3);
+  ta.setSelectionRange(i, i);
+}
+function setText(t, keepCaret) {
+  const c = ta.selectionStart; ta.value = t; if (keepCaret != null) ta.setSelectionRange(keepCaret, keepCaret); else ta.setSelectionRange(c, c);
+  onEdit();
+}
+let autosaveT;
+function onEdit() {
+  const d = doc(); d.text = ta.value; d.dirty = true;
+  if (d.external) d.conflict = true;
+  clearTimeout(autosaveT);
+  if (S.autosave && d.path && d.path !== 'CLICKME' && !d.temp && !d.conflict) autosaveT = setTimeout(() => { writeFile(d); render(); }, 1000);
+  render();
+}
+ta.addEventListener('input', onEdit);
+ta.addEventListener('scroll', syncEditor);
+['click', 'keyup'].forEach(e => ta.addEventListener(e, () => { syncEditor(); renderStatus(); }));
+
+/* ================= raw / hex ================= */
+let hexSel = null, nib = null;
+function renderHex() {
+  const d = doc(); const b = d.bytes; let html = '';
+  hex.classList.toggle('w', d.rawWrite);
+  for (let o = 0; o < b.length; o += 16) {
+    let hx = '', as = '';
+    for (let j = 0; j < 16; j++) {
+      const i = o + j; if (i >= b.length) { hx += '   '; continue; }
+      const v = b[i]; const cls = `b${v === 0 ? ' z' : ''}${d.mod.has(i) ? ' mod' : ''}${i === hexSel ? ' sel' : ''}`;
+      hx += `<span class="${cls}" data-b="${i}">${(i === hexSel && nib !== null ? nib : v.toString(16).padStart(2, '0')).toString().toUpperCase().padStart(2, '0')}</span>` + (j === 7 ? '  ' : ' ');
+      const ch = v >= 32 && v < 127 ? esc(String.fromCharCode(v)) : '.';
+      as += i === hexSel ? `<span class="sel">${ch}</span>` : ch;
+    }
+    html += `<span class="off">${o.toString(16).padStart(8, '0')}</span>   ${hx}  <span class="asc">${as}</span>\n`;
+  }
+  hex.innerHTML = html;
+}
+hex.addEventListener('click', e => {
+  const t = e.target.closest('[data-b]'); if (!t) return;
+  hexSel = +t.dataset.b; nib = null; renderHex(); renderStatus(); hex.focus();
+});
+hex.addEventListener('keydown', e => {
+  const d = doc(); if (hexSel === null) return;
+  const mv = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -16, ArrowDown: 16 }[e.key];
+  if (mv) { hexSel = Math.min(d.bytes.length - 1, Math.max(0, hexSel + mv)); nib = null; e.preventDefault(); }
+  else if (/^[0-9a-f]$/i.test(e.key) && !e.ctrlKey) {
+    if (!d.rawWrite) { flash(d.ro ? 'Sin permiso de escritura' : 'Solo lectura · pulsa el lápiz para editar', d.ro ? 'err' : 'warn'); return; }
+    if (nib === null) nib = e.key;
+    else { d.bytes[hexSel] = parseInt(nib + e.key, 16); d.mod.add(hexSel); d.dirty = true; nib = null; hexSel = Math.min(d.bytes.length - 1, hexSel + 1); }
+  } else return;
+  render();
+});
+
+/* ================= prompt (barra de estado) ================= */
+function openPrompt(type, extra = {}) {
+  S.prompt = { type, ...extra }; S.pop = null;
+  if (type === 'find' || type === 'replace') {
+    const sel = ta.value.slice(ta.selectionStart, ta.selectionEnd);
+    if (sel && !sel.includes('\n')) S.find.q = sel;
+  }
+  render();
+  const inp = $('#status input'); if (inp) { inp.focus(); inp.select(); }
+}
+function closePrompt(refocus = true) {
+  S.prompt = null; render();
+  if (refocus) (doc().kind === 'text' ? ta : hex).focus();
+}
+function renderPrompt(st) {
+  const p = S.prompt; const F = S.find;
+  if (p.type === 'path') {
+    const v = p.value || ''; const info = pathInfo(v); p.info = info;
+    st.innerHTML = `<div class="prompt">
+      <div class="pfield"><div class="pmirror"><span>${esc(v)}</span><span class="g">${esc(info.ghost)}</span></div>
+      <input id="pin" value="${esc(v)}" placeholder="${p.purpose === 'open' ? 'ruta del archivo' : 'ruta donde guardar'}" class="${info.bad ? 'bad' : ''}" autocomplete="off" aria-label="Ruta"></div>
+      <span class="pword ${info.bad ? 'bad' : ''}">${esc(info.word)}</span></div>`;
+  } else if (p.type === 'find' || p.type === 'replace') {
+    const m = F.q ? findMatches() : [];
+    const cnt = m === null ? '<span class="count bad">regex ✕</span>' : `<span class="count">${F.q ? (m.length ? `${Math.min(F.idx + 1, m.length)}/${m.length}` : '0/0') : ''}</span>`;
+    st.innerHTML = `<div class="prompt">
+      <span class="plabel">buscar</span><div class="pfield"><input id="pin" value="${esc(F.q)}" autocomplete="off" aria-label="Buscar"></div>
+      ${p.type === 'replace' ? `<span class="plabel">por</span><div class="pfield"><input id="prep" value="${esc(F.rep)}" autocomplete="off" aria-label="Reemplazar por"></div>` : ''}
+      ${cnt}
+      <button class="opt" data-opt="case" aria-pressed="${F.case}" title="Mayúsculas (Alt+C)">Aa</button>
+      <button class="opt" data-opt="word" aria-pressed="${F.word}" title="Palabra completa (Alt+W)">ab</button>
+      <button class="opt" data-opt="re" aria-pressed="${F.re}" title="Regex (Alt+R)">.*</button></div>`;
+  } else if (p.type === 'goto' || p.type === 'cmd') {
+    st.innerHTML = `<div class="prompt"><span class="plabel">${p.type === 'cmd' ? ':' : 'línea'}</span><div class="pfield"><input id="pin" value="${esc(p.value || '')}" autocomplete="off"></div></div>`;
+  } else if (p.type === 'choice') {
+    st.innerHTML = `<div class="choice"><span class="q ${p.tone || ''}">${esc(p.q)}</span>${p.opts.map(([k, l]) => `<span><kbd>${k}</kbd>${l}</span>`).join('')}<span><kbd>Esc</kbd>Cancelar</span></div>`;
+  }
+  const pin = $('#pin'); if (pin) wirePromptInput(pin);
+  const prep = $('#prep'); if (prep) { prep.addEventListener('input', () => { F.rep = prep.value; }); prep.addEventListener('keydown', findKeys); }
+}
+function wirePromptInput(inp) {
+  const p = S.prompt;
+  if (p.type === 'path') {
+    inp.addEventListener('input', () => {
+      const n = normPath(inp.value); p.value = n; p.cycle = null;
+      rerenderPromptKeepFocus(n.length);
+    });
+    inp.addEventListener('keydown', e => {
+      const info = p.info;
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        if (info.fuzzy) p.value = info.fuzzy;
+        else if (p.cycle && p.cycle.list.length > 1) {
+          p.cycle.i = (p.cycle.i + 1) % p.cycle.list.length;
+          const k = p.cycle.list[p.cycle.i]; const par = nodeAt(p.cycle.base.split('\\').slice(0, -1).filter(Boolean));
+          p.value = p.cycle.base + k + (isDir(par && par[k]) ? '\\' : '');
+        } else if (info.ghost) {
+          const parts = (p.value || '').split('\\'); const base = parts.slice(0, -1).join('\\') + (parts.length > 1 ? '\\' : '');
+          p.cycle = info.cands.length ? { base, list: info.cands, i: 0 } : null;
+          if (info.cands.length) { const par = nodeAt(parts.slice(0, -1)); const k = info.cands[0]; p.value = base + k + (isDir(par && par[k]) ? '\\' : ''); }
+          else p.value = (p.value || '') + info.ghost;
+        }
+        rerenderPromptKeepFocus();
+      } else if (e.key === 'Enter') { e.preventDefault(); commitPath(); }
+      else if (e.key === 'Escape') { e.preventDefault(); closePrompt(); }
+      else if (e.key.toLowerCase() === 'o' && e.ctrlKey) { e.preventDefault(); flash('Aquí se abriría el diálogo de Windows', 'ok'); }
+    });
+  } else if (p.type === 'find' || p.type === 'replace') {
+    inp.addEventListener('input', () => { S.find.q = inp.value; S.find.idx = 0; const m = findMatches(); if (m && m.length) { const c = ta.selectionStart; const k = m.findIndex(x => x.i >= c); S.find.idx = k < 0 ? 0 : k; scrollToIndex(m[S.find.idx].i); } rerenderPromptKeepFocus(); syncEditor(); });
+    inp.addEventListener('keydown', findKeys);
+  } else {
+    inp.addEventListener('input', () => { p.value = inp.value; });
+    inp.addEventListener('keydown', e => {
+      if (e.key === 'Escape') { e.preventDefault(); closePrompt(); }
+      if (e.key === 'Enter') { e.preventDefault(); p.type === 'goto' ? doGoto(inp.value) : runCmd(inp.value); }
+    });
+  }
+}
+function findKeys(e) {
+  const F = S.find;
+  if (e.key === 'Escape') { e.preventDefault(); closePrompt(); return; }
+  if (e.altKey && ['c', 'w', 'r'].includes(e.key.toLowerCase())) { e.preventDefault(); const k = { c: 'case', w: 'word', r: 're' }[e.key.toLowerCase()]; F[k] = !F[k]; F.idx = 0; rerenderPromptKeepFocus(); syncEditor(); return; }
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    if (S.prompt.type === 'replace') {
+      const re = buildRe(); if (!re) return;
+      if (e.ctrlKey && e.altKey) { const m = findMatches(); const n = m.length; setText(ta.value.replace(re, F.rep)); flash(`${n} reemplazadas`); S.prompt = { type: 'replace' }; render(); $('#pin')?.focus(); return; }
+      const m = findMatches(); if (!m.length) return; const mm = m[F.idx % m.length];
+      setText(ta.value.slice(0, mm.i) + F.rep + ta.value.slice(mm.i + mm.len), mm.i + F.rep.length);
+      const m2 = findMatches(); F.idx = Math.max(0, m2.findIndex(x => x.i >= mm.i + F.rep.length)); if (m2[F.idx]) scrollToIndex(m2[F.idx].i);
+    } else gotoMatch(e.shiftKey ? -1 : 1);
+    const active = document.activeElement?.id; rerenderPromptKeepFocus(null, active); syncEditor();
+  }
+}
+function rerenderPromptKeepFocus(caret, id = 'pin') {
+  renderStatus(); renderHints();
+  const inp = document.getElementById(id || 'pin'); if (!inp) return;
+  inp.focus(); const n = caret ?? inp.value.length; inp.setSelectionRange(n, n);
+}
+function commitPath() {
+  const p = S.prompt; const info = p.info || {};
+  if (info.bad) { flash('La ruta tiene caracteres no válidos', 'err'); return; }
+  let v = info.fuzzy || p.value || ''; if (!v.trim()) return;
+  if (v.endsWith('\\')) return;
+  const parts = v.split('\\'); let last = parts.pop();
+  const here = nodeAt([...parts, last]);
+  if (isDir(here)) { p.value = v + '\\'; rerenderPromptKeepFocus(); return; }
+  if (here) { openFile([...realCase(parts), realCase([...parts, last]).pop()].join('\\'), here); return; }
+  if (!/\.[^.\\]+$/.test(last)) last += S.defExt;
+  const made = mkdirp(parts); const full = [...realCase(parts), last].join('\\');
+  if (p.purpose === 'open') { openDoc(mkDoc({ path: full })); flash(made ? 'Nuevo · carpetas creadas' : 'Nuevo'); return; }
+  const d = doc(); d.path = full; d.temp = false; writeFile(d);
+  S.prompt = null; flash(made ? 'Guardado · carpetas creadas' : 'Guardado'); ta.focus();
+}
+function writeFile(d) {
+  const parts = d.path.split('\\'); const last = parts.pop(); mkdirp(parts);
+  nodeAt(parts)[last] = d.kind === 'raw' ? { bin: d.bytes } : d.text;
+  d.dirty = false; d.mod.clear(); d.external = false; d.conflict = false;
+}
+function openFile(path, node) {
+  const ex = S.docs.findIndex(d => d.path && d.path.toLowerCase() === path.toLowerCase());
+  if (ex >= 0) { S.active = ex; S.prompt = null; render(); return; }
+  const d = node.bin ? mkDoc({ path, kind: 'raw', bytes: new Uint8Array(node.bin), ro: !!node.ro }) : mkDoc({ path, text: node });
+  openDoc(d);
+}
+function openDoc(d, replaceBlank = true) {
+  const cur = doc();
+  S.prompt = null; hexSel = null;
+  if (replaceBlank && cur && cur.path === 'CLICKME' && !cur.text && !cur.dirty) S.docs[S.active] = d;
+  else { S.docs.push(d); S.active = S.docs.length - 1; }
+  render(); loadEditor(); (d.kind === 'text' ? ta : hex).focus();
+}
+function doGoto(v) {
+  const n = parseInt(v, 10); if (!n) return;
+  const ls = ta.value.split('\n'); const ln = Math.min(n, ls.length);
+  const i = ls.slice(0, ln - 1).reduce((a, l) => a + l.length + 1, 0);
+  closePrompt(); scrollToIndex(i); ta.focus(); syncEditor(); renderStatus();
+}
+
+/* ================= acciones ================= */
+function save(asNew) {
+  const d = doc();
+  if (d.path === 'CLICKME' || d.temp || asNew) { openPrompt('path', { purpose: 'save', value: asNew && d.path !== 'CLICKME' && d.path ? d.path : '' }); return; }
+  if (d.conflict || (d.external && d.dirty)) {
+    S.prompt = { type: 'choice', tone: 'warn', q: 'El archivo cambió en disco. ¿Cuál conservo?', opts: [['M', 'El mío'], ['D', 'El del disco']], on: { m: () => { writeFile(d); S.prompt = null; flash('Guardado · se conservó tu versión'); }, d: () => { d.text = d.diskText; ta.value = d.text; d.dirty = false; d.external = d.conflict = false; S.prompt = null; loadEditor(); flash('Recargado desde el disco'); } } };
+    render(); return;
+  }
+  writeFile(d); flash('Guardado');
+}
+function closeTab(i) {
+  const d = S.docs[i];
+  const finish = () => {
+    S.docs.splice(i, 1);
+    if (!S.docs.length) S.docs.push(mkDoc({ path: 'CLICKME' }));
+    S.active = Math.min(S.active, S.docs.length - 1); S.prompt = null; hexSel = null; render(); loadEditor();
+  };
+  if (d.temp || !d.dirty) { finish(); if (d.temp && d.text) flash(d.temp === 'borrador' ? 'Borrador descartado' : 'Temporal cerrado'); return; }
+  S.active = i; loadEditor();
+  S.prompt = { type: 'choice', q: `¿Guardar cambios en ${docName(d)}?`, opts: [['S', 'Guardar'], ['N', 'Descartar']], on: { s: () => { S.prompt = null; save(); if (!S.prompt) finish(); }, n: finish } };
+  render();
+}
+function newTemp() { openDoc(mkDoc({ temp: S.tempMode, tn: ++tempN }), false); }
+function newPerm() { openDoc(mkDoc({ path: 'CLICKME' }), false); }
+function toggleRaw() {
+  const d = doc();
+  if (d.kind === 'text') { d._text = d.text; d.kind = 'raw'; d.bytes = new TextEncoder().encode(d.text); }
+  else if (d._text !== undefined) { d.kind = 'text'; d.text = new TextDecoder().decode(d.bytes); delete d._text; }
+  else { flash('No es texto válido: se queda en raw', 'warn'); return; }
+  hexSel = null; S.prompt = null; render(); loadEditor();
+}
+function toggleVim() { S.vim = !S.vim; S.vmode = 'NORMAL'; flash(S.vim ? 'Modo vim' : 'Modo normal'); ta.focus(); }
+function switchDoc(dir) { S.active = (S.active + dir + S.docs.length) % S.docs.length; S.prompt = null; hexSel = null; render(); loadEditor(); }
+
+function act(a) {
+  S.menu = null; S.altMenu = false; S.pop = null; S.tray = false; renderTray();
+  ({
+    perm: newPerm, temp: newTemp, open: () => openPrompt('path', { purpose: 'open', value: '' }),
+    save: () => save(), saveas: () => save(true), saveprompt: () => openPrompt('path', { purpose: 'save', value: '' }),
+    find: () => openPrompt('find'), replace: () => openPrompt('replace'), goto: () => openPrompt('goto'),
+    next: () => { gotoMatch(1); syncEditor(); }, prev: () => { gotoMatch(-1); syncEditor(); },
+    vim: toggleVim, raw: toggleRaw, nums: () => { S.showNums = !S.showNums; S.preset = 'custom'; },
+    hintsbar: () => { S.showHints = !S.showHints; S.preset = 'custom'; },
+    settings: () => openSettings(), closetab: () => closeTab(S.active),
+    undo: () => { ta.focus(); document.execCommand('undo'); }, redo: () => { ta.focus(); document.execCommand('redo'); },
+    pencil: () => { const d = doc(); d.rawWrite = !d.rawWrite; },
+    eol: () => { const d = doc(); d.eol = d.eol === 'CRLF' ? 'LF' : 'CRLF'; d.dirty = true; },
+    encpop: () => { S.pop = 'enc'; },
+    winclose: () => flash('En la app real: cierra la ventana (pregunta solo por archivos permanentes sin guardar)', 'ok', 3500),
+    noop: () => {},
+  }[a] || (() => {}))();
+  render();
+}
+
+/* ================= vim ================= */
+let vimPending = '';
+ta.addEventListener('keydown', e => {
+  if (!S.vim || S.prompt) return;
+  if (S.vmode === 'INSERT') { if (e.key === 'Escape') { e.preventDefault(); S.vmode = 'NORMAL'; render(); } return; }
+  if (e.ctrlKey || e.altKey || e.metaKey || ['Shift', 'Control', 'Alt', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(e.key)) return;
+  e.preventDefault();
+  const t = ta.value, c = ta.selectionStart;
+  const ls = t.lastIndexOf('\n', c - 1) + 1, le = (t.indexOf('\n', c) + 1 || t.length + 1) - 1;
+  const col = c - ls, k = vimPending + e.key; vimPending = '';
+  const setC = i => { ta.setSelectionRange(i, i); };
+  const lineStart = i => t.lastIndexOf('\n', i - 1) + 1;
+  switch (k) {
+    case 'i': S.vmode = 'INSERT'; break;
+    case 'a': setC(Math.min(c + 1, le)); S.vmode = 'INSERT'; break;
+    case 'A': setC(le); S.vmode = 'INSERT'; break;
+    case 'o': setText(t.slice(0, le) + '\n' + t.slice(le), le + 1); S.vmode = 'INSERT'; break;
+    case 'h': setC(Math.max(ls, c - 1)); break;
+    case 'l': setC(Math.min(le, c + 1)); break;
+    case 'j': { if (le < t.length) { const ns = le + 1, ne = (t.indexOf('\n', ns) + 1 || t.length + 1) - 1; setC(Math.min(ns + col, ne)); } break; }
+    case 'k': { if (ls > 0) { const ps = lineStart(ls - 1); setC(Math.min(ps + col, ls - 1)); } break; }
+    case '0': setC(ls); break;
+    case '$': setC(Math.max(ls, le)); break;
+    case 'x': if (c < le) setText(t.slice(0, c) + t.slice(c + 1), c); break;
+    case 'd': vimPending = 'd'; break;
+    case 'dd': setText(t.slice(0, ls) + t.slice(Math.min(le + 1, t.length)), ls); break;
+    case 'g': vimPending = 'g'; break;
+    case 'gg': setC(0); ta.scrollTop = 0; break;
+    case 'G': setC(t.length); break;
+    case 'u': document.execCommand('undo'); break;
+    case '/': openPrompt('find'); return;
+    case ':': openPrompt('cmd', { value: '' }); return;
+    case 'n': gotoMatch(1); break;
+    case 'N': gotoMatch(-1); break;
+  }
+  syncEditor(); render();
+});
+function runCmd(v) {
+  v = v.trim(); const d = doc(); closePrompt(false); ta.focus();
+  if (v === 'w') save();
+  else if (v === 'q') closeTab(S.active);
+  else if (v === 'wq') { save(); if (!S.prompt) closeTab(S.active); }
+  else if (v.startsWith('e ')) { S.prompt = { type: 'path', purpose: 'open', value: normPath(v.slice(2)) }; render(); const inp = $('#pin'); inp.focus(); commitPath(); }
+  else if (v === 'e') openPrompt('path', { purpose: 'open', value: '' });
+  else if (v === 'set nu') { S.showNums = true; render(); }
+  else if (v === 'set nonu') { S.showNums = false; render(); }
+  else if (v === 'raw') toggleRaw();
+  else if (/^\d+$/.test(v)) doGoto(v);
+  else if (/^%s\//.test(v)) {
+    const m = v.match(/^%s\/((?:\\\/|[^/])*)\/((?:\\\/|[^/])*)\/?([gi]*)$/);
+    if (!m) { flash('Sintaxis: :%s/buscar/reemplazo/g', 'err'); return; }
+    try { const re = new RegExp(m[1], m[3].includes('g') ? (m[3].includes('i') ? 'gi' : 'g') : (m[3].includes('i') ? 'i' : '')); const n = (ta.value.match(new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g')) || []).length; setText(ta.value.replace(re, m[2])); flash(`${n} reemplazadas`); } catch { flash('Regex no válida', 'err'); }
+  } else if (v) flash(`Comando desconocido: ${v}`, 'err');
+}
+
+/* ================= teclado global ================= */
+document.addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if (S.prompt && S.prompt.type === 'choice') {
+    e.preventDefault();
+    if (e.key === 'Escape') { S.prompt = null; render(); ta.focus(); return; }
+    const f = S.prompt.on[k]; if (f) { f(); render(); }
+    return;
+  }
+  if (e.key === 'Escape') {
+    if (S.settings) { closeSettings(); return; }
+    if (S.menu || S.pop || S.tray || S.altMenu) { S.menu = null; S.pop = null; S.tray = false; S.altMenu = false; renderTray(); render(); return; }
+  }
+  if (e.ctrlKey && e.altKey && k === 'v') { e.preventDefault(); toggleVim(); return; }
+  if (e.ctrlKey && e.altKey && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) { e.preventDefault(); switchDoc(e.key === 'ArrowRight' ? 1 : -1); return; }
+  if (e.ctrlKey && !e.altKey) {
+    if (k === 's') { e.preventDefault(); act(e.shiftKey ? 'saveas' : 'save'); return; }
+    if (k === 'o' && !S.prompt) { e.preventDefault(); act('open'); return; }
+    if (k === 'f') { e.preventDefault(); act('find'); return; }
+    if (k === 'h' && e.shiftKey) { e.preventDefault(); act('raw'); return; }
+    if (k === 'h') { e.preventDefault(); act('replace'); return; }
+    if (k === 'g' && !S.prompt) { e.preventDefault(); act('goto'); return; }
+    if (e.key === ',') { e.preventDefault(); act('settings'); return; }
+  }
+  if (e.altKey && !e.ctrlKey && k === 'n') { e.preventDefault(); act(e.shiftKey ? 'perm' : 'temp'); return; }
+  if (e.key === 'F3') { e.preventDefault(); act(e.shiftKey ? 'prev' : 'next'); return; }
+  if (e.key === 'Alt' && S.menubar === 'alt') { e.preventDefault(); S.altMenu = !S.altMenu; render(); }
+});
+
+/* ================= clics ================= */
+document.addEventListener('click', e => {
+  const t = e.target;
+  const close = t.closest('[data-close]'); if (close) { e.stopPropagation(); closeTab(+close.dataset.close); return; }
+  const tab = t.closest('[data-tab]'); if (tab) { S.active = +tab.dataset.tab; S.prompt = null; hexSel = null; render(); loadEditor(); return; }
+  const m = t.closest('[data-menu]'); if (m) { S.menu = S.menu === m.dataset.menu ? null : m.dataset.menu; render(); return; }
+  const encb = t.closest('[data-enc]'); if (encb) { doc().enc = encb.dataset.enc; doc().dirty = true; S.pop = null; render(); return; }
+  const o = t.closest('[data-opt]'); if (o) { S.find[o.dataset.opt] = !S.find[o.dataset.opt]; S.find.idx = 0; rerenderPromptKeepFocus(); syncEditor(); return; }
+  const a = t.closest('[data-act]'); if (a) { act(a.dataset.act); return; }
+  const sc = t.closest('[data-scn]'); if (sc) { scenario(sc.dataset.scn); return; }
+  if (S.menu || S.pop) { S.menu = null; S.pop = null; render(); }
+});
+
+/* ================= escenarios ================= */
+function scenario(s) {
+  S.prompt = null; closeSettings(true);
+  const toText = () => { const i = S.docs.findIndex(d => d.kind === 'text' && d.path && d.path !== 'CLICKME' && !d.temp); S.active = i >= 0 ? i : 0; loadEditor(); return doc(); };
+  ({
+    perm: newPerm, temp: newTemp,
+    open: () => act('open'),
+    bin: () => openFile('~\\Descargas\\logo.png', FS['~'].Descargas['logo.png']),
+    binro: () => openFile('C:\\Windows\\System32\\sistema.dll', FS['C:'].Windows.System32['sistema.dll']),
+    conflict: () => { const d = toText(); d.diskText = d.text.replace('Lista de la compra', 'Lista de la compra (editada por otro programa)'); d.external = true; if (!d.dirty) { ta.setSelectionRange(ta.value.length, ta.value.length); ta.value += '- huevos\n'; onEdit(); } d.conflict = true; flash('Otro programa ha cambiado el archivo. Pulsa Ctrl+S', 'ok', 4000); ta.focus(); },
+    reload: () => { const d = toText(); if (d.dirty) { writeFile(d); } d.text = d.text + '\n(línea añadida por otro programa)\n'; ta.value = d.text; syncEditor(); flash('Recargado'); },
+    diskfull: () => { toText(); flash('Disco lleno · no se guardó · tu texto sigue aquí', 'err', 4500); },
+    recover: () => { S.prompt = { type: 'choice', q: 'notty se cerró de forma inesperada. Hay 2 archivos sin guardar.', opts: [['Enter', 'Recuperar'], ['D', 'Descartar']], on: { enter: () => { S.prompt = null; S.docs.push(mkDoc({ path: 'CLICKME', text: 'Esto lo estabas escribiendo antes de la caída.\n', dirty: true }), mkDoc({ temp: 'volatil', tn: ++tempN, text: 'Texto temporal recuperado (se borra al recuperarlo del volcado).\n', dirty: true })); S.active = S.docs.length - 2; loadEditor(); flash('2 archivos recuperados'); }, d: () => { S.prompt = null; flash('Descartados'); } } }; },
+    settings: () => openSettings(),
+  }[s])();
+  render();
+}
+
+/* ================= bandeja ================= */
+function renderTray() {
+  $('.traymenu')?.remove(); if (!S.tray) return;
+  const lnk = S.hotkeyMech === 'lnk';
+  const m = document.createElement('div'); m.className = 'traymenu';
+  m.innerHTML = `<button class="menu-item" data-act="temp"><span>Nuevo temporal</span><kbd>${lnk ? 'Ctrl+Alt+N' : 'Win+Alt+N'}</kbd></button>
+    <button class="menu-item" data-act="perm"><span>Nuevo permanente</span><kbd>${lnk ? 'Ctrl+Alt+M' : 'Win+Alt+Shift+N'}</kbd></button>
+    <div class="menu-sep"></div><button class="menu-item" data-act="settings"><span>Ajustes</span><kbd></kbd></button>
+    <button class="menu-item" data-act="noop"><span>Salir de segundo plano</span><kbd></kbd></button>`;
+  $('.desk').appendChild(m);
+}
+$('#trayBtn').addEventListener('click', e => { e.stopPropagation(); S.tray = !S.tray; renderTray(); });
+
+/* ================= ajustes ================= */
+const SECTIONS = [
+  { id: 'apariencia', name: 'Apariencia', rows: [
+    { k: 'preset', t: 'Preset', d: 'Punto de partida. Cambiar cualquier pieza lo convierte en Personalizado.', seg: [['moderna', 'Moderna'], ['clasica', 'Clásica'], ['zen', 'Zen']] },
+    { k: 'theme', t: 'Tema', d: 'Por defecto sigue al de Windows.', seg: [['system', 'Sistema'], ['light', 'Claro'], ['dark', 'Oscuro']] },
+    { k: 'showNums', t: 'Números de línea', tog: 1 },
+  ] },
+  { id: 'ventana', name: 'Ventana', rows: [
+    { k: 'multi', t: 'Varios archivos', d: 'Pestañas visibles o buffers estilo vim (Ctrl+Tab, :b).', seg: [['tabs', 'Pestañas'], ['buffers', 'Buffers']] },
+    { k: 'tabsPos', t: 'Posición de las pestañas', sel: [['title', 'En la barra de título'], ['below', 'Bajo el menú'], ['auto', 'Solo si hay más de 1'], ['hidden', 'Ocultas']] },
+    { k: 'menubar', t: 'Barra de menús', sel: [['hidden', 'Oculta'], ['visible', 'Visible'], ['alt', 'Aparece con Alt']] },
+    { k: 'showHints', t: 'Barra de atajos', d: 'Estilo nano. Cambia según lo que estés haciendo.', tog: 1 },
+    { k: 'statusShow', t: 'Barra de estado', d: 'Si la ocultas, reaparece para rutas, búsquedas y avisos.', tog: 1 },
+    { k: 'cmdMerged', t: 'Línea de comandos fusionada', d: 'Una sola línea abajo para estado y comandos, como en Zen.', tog: 1 },
+    { group: 'Campos de la barra de estado' },
+    { f: 'pos', t: 'Línea y columna', tog: 1 }, { f: 'enc', t: 'Codificación', tog: 1 }, { f: 'eol', t: 'Fin de línea', tog: 1 },
+  ] },
+  { id: 'teclado', name: 'Teclado', rows: [
+    { k: 'vimGlobal', t: 'Modo vim siempre', d: 'Cada ventana arranca en modo vim.', tog: 1 },
+    { t: 'Alternar vim en esta ventana', kbd: 'Ctrl+Alt+V' },
+    { t: 'Ver como raw', kbd: 'Ctrl+Shift+H' },
+    { t: 'Todos los atajos', d: 'Cada acción es un comando con nombre. Reasigna cualquiera en config.toml, sección [keys].', link: 'Abrir [keys]' },
+  ] },
+  { id: 'archivos', name: 'Archivos', rows: [
+    { k: 'tempMode', t: 'Archivos temporales', d: 'Borrador: se guarda solo y se borra al cerrar si no le das ruta. Volátil: nunca toca el disco.', seg: [['borrador', 'Borrador'], ['volatil', 'Volátil']] },
+    { k: 'autosave', t: 'Autoguardado', d: 'Guarda 1 s después de dejar de escribir. Solo si el archivo ya tiene ruta.', tog: 1 },
+    { k: 'defExt', t: 'Extensión por defecto', d: 'Si escribes una ruta sin extensión.', txt: 1 },
+    { k: 'bigMB', t: 'Archivo grande a partir de (MB)', d: 'Por encima se desactiva el resaltado en vivo de la búsqueda.', txt: 1 },
+  ] },
+  { id: 'atajo', name: 'Atajo global', rows: [
+    { k: 'hotkeyMech', t: 'Cómo se escucha el atajo', d: 'Segundo plano: ~1 MB de RAM, cualquier combinación, instantáneo. Acceso directo: nada residente, solo Ctrl+Alt+letra.', seg: [['daemon', 'Segundo plano'], ['lnk', 'Acceso directo']] },
+    { t: 'Nuevo temporal', kbdf: () => S.hotkeyMech === 'lnk' ? 'Ctrl+Alt+N' : 'Win+Alt+N' },
+    { t: 'Nuevo permanente', kbdf: () => S.hotkeyMech === 'lnk' ? 'Ctrl+Alt+M' : 'Win+Alt+Shift+N' },
+    { k: 'startup', t: 'Iniciar con Windows', tog: 1, when: () => S.hotkeyMech === 'daemon' },
+  ] },
+];
+function openSettings() { S.settings = S.settings || 'apariencia'; renderSettings(); }
+function closeSettings(silent) { S.settings = null; $('.settings')?.remove(); if (!silent) ta.focus(); }
+function renderSettings() {
+  $('.settings')?.remove(); if (!S.settings) return;
+  const sec = SECTIONS.find(s => s.id === S.settings);
+  const w = document.createElement('section'); w.className = 'settings'; w.setAttribute('aria-label', 'Ajustes de notty');
+  const ctl = r => {
+    if (r.seg) return `<div class="seg">${r.seg.map(([v, l]) => `<button data-set="${r.k}" data-v="${v}" aria-pressed="${S[r.k] === v}">${l}</button>`).join('')}</div>`;
+    if (r.sel) return `<select class="sel" data-set="${r.k}">${r.sel.map(([v, l]) => `<option value="${v}" ${S[r.k] === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
+    if (r.tog && r.f) return `<button class="toggle" role="switch" data-field="${r.f}" aria-checked="${S.fields[r.f]}" aria-label="${r.t}"></button>`;
+    if (r.tog) return `<button class="toggle" role="switch" data-set="${r.k}" aria-checked="${!!S[r.k]}" aria-label="${r.t}"></button>`;
+    if (r.txt) return `<input class="txt" data-set="${r.k}" value="${esc(String(S[r.k]))}">`;
+    if (r.kbd || r.kbdf) return `<kbd>${r.kbd || r.kbdf()}</kbd>`;
+    if (r.link) return `<a data-toml="1" style="color:var(--accent);cursor:pointer">${r.link}</a>`;
+    return '';
+  };
+  const presetLabel = S.preset === 'custom' ? ' <span style="font-size:12px;font-weight:400;color:var(--text-3)">· Personalizado</span>' : '';
+  w.innerHTML = `<div class="titlebar"><div class="appicon">${ICON(14)}</div><div class="wtitle">Ajustes · notty</div><div class="drag"></div><div class="caption"><button class="close" data-sclose="1" aria-label="Cerrar">${xIcon(10)}</button></div></div>
+    <div class="cols"><nav class="snav">${SECTIONS.map(s => `<button data-sec="${s.id}" aria-current="${s.id === S.settings}">${s.name}</button>`).join('')}
+      <div class="foot">Todo se guarda en <b>config.toml</b>.<br><a data-toml="1">Editar el archivo</a></div></nav>
+    <div class="spane"><h3>${sec.name}${sec.id === 'apariencia' ? presetLabel : ''}</h3>
+      ${sec.rows.filter(r => !r.when || r.when()).map(r => r.group ? `<div class="sgroup">${r.group}</div>` : `<div class="srow"><div><div class="t">${r.t}</div>${r.d ? `<div class="d">${r.d}</div>` : ''}</div><div class="c">${ctl(r)}</div></div>`).join('')}
+    </div></div>`;
+  $('#stage').appendChild(w);
+}
+const PIECES = ['menubar', 'tabsPos', 'showHints', 'statusShow', 'cmdMerged', 'showNums'];
+function setSetting(k, v) {
+  if (k === 'preset') Object.assign(S, PRESETS[v]);
+  if (PIECES.includes(k)) S.preset = 'custom';
+  if (k === 'bigMB') v = parseInt(v, 10) || S.bigMB;
+  S[k] = v;
+  if (k === 'preset') S.preset = v;
+  if (k === 'theme') applyTheme();
+  if (k === 'vimGlobal') { S.vim = v; S.vmode = 'NORMAL'; }
+  if (k === 'hotkeyMech') renderTray();
+  render(); renderSettings(); renderRig();
+}
+document.addEventListener('click', e => {
+  const t = e.target;
+  if (t.closest('[data-sclose]')) { closeSettings(); return; }
+  const sec = t.closest('[data-sec]'); if (sec) { S.settings = sec.dataset.sec; renderSettings(); return; }
+  if (t.closest('[data-toml]')) { openToml(); return; }
+  const f = t.closest('[data-field]'); if (f) { S.fields[f.dataset.field] = !S.fields[f.dataset.field]; render(); renderSettings(); return; }
+  const s = t.closest('.settings [data-set]');
+  if (s && s.tagName === 'BUTTON') setSetting(s.dataset.set, s.classList.contains('toggle') ? !S[s.dataset.set] : s.dataset.v);
+});
+document.addEventListener('change', e => { const s = e.target.closest('.settings [data-set]'); if (s) setSetting(s.dataset.set, s.value); });
+function openToml() {
+  closeSettings(true);
+  const b = x => x ? 'true' : 'false';
+  const text = `# notty · config.toml
+# La ventana de Ajustes lee y escribe este mismo archivo.
+# Guarda (Ctrl+S) y los cambios se aplican al instante.
+
+[ui]
+preset = "${S.preset}"
+theme = "${S.theme}"
+line_numbers = ${b(S.showNums)}
+files = "${S.multi}"          # "tabs" | "buffers"
+tabs_position = "${S.tabsPos}"  # "title" | "below" | "auto" | "hidden"
+menubar = "${S.menubar}"        # "hidden" | "visible" | "alt"
+hints_bar = ${b(S.showHints)}
+status_bar = ${b(S.statusShow)}
+merged_command_line = ${b(S.cmdMerged)}
+status_fields = [${Object.keys(S.fields).filter(k => S.fields[k]).map(k => `"${k}"`).join(', ')}]
+
+[files]
+temp_mode = "${S.tempMode}"     # "borrador" | "volatil"
+autosave = ${b(S.autosave)}
+default_extension = "${S.defExt}"
+large_file_mb = ${S.bigMB}
+
+[global_hotkey]
+mechanism = "${S.hotkeyMech}"   # "daemon" | "lnk"
+start_with_windows = ${b(S.startup)}
+new_temp = "${S.hotkeyMech === 'lnk' ? 'Ctrl+Alt+N' : 'Win+Alt+N'}"
+new_permanent = "${S.hotkeyMech === 'lnk' ? 'Ctrl+Alt+M' : 'Win+Alt+Shift+N'}"
+
+[vim]
+always = ${b(S.vimGlobal)}
+toggle = "Ctrl+Alt+V"
+
+[keys]
+save = "Ctrl+S"
+save_as = "Ctrl+Shift+S"
+open_path_prompt = "Ctrl+O"
+find = "Ctrl+F"
+replace = "Ctrl+H"
+find_next = "F3"
+goto_line = "Ctrl+G"
+toggle_raw = "Ctrl+Shift+H"
+new_temp = "Ctrl+Shift+N"
+new_permanent = "Ctrl+N"
+settings = "Ctrl+,"
+`;
+  const ex = S.docs.findIndex(d => d.path === '%APPDATA%\\notty\\config.toml');
+  if (ex >= 0) { S.docs[ex].text = text; S.active = ex; render(); loadEditor(); return; }
+  openDoc(mkDoc({ path: '%APPDATA%\\notty\\config.toml', text, eol: 'LF' }), false);
+}
+
+/* ================= panel de la maqueta ================= */
+function renderRig() {
+  const seg = (id, key, opts, fn) => { $(id).innerHTML = opts.map(([v, l]) => `<button data-r="${key}" data-v="${v}" aria-pressed="${S[key] === v}">${l}</button>`).join(''); };
+  seg('#rPreset', 'preset', [['moderna', 'Moderna'], ['clasica', 'Clásica'], ['zen', 'Zen']]);
+  seg('#rTheme', 'theme', [['system', 'Sist.'], ['light', 'Claro'], ['dark', 'Oscuro']]);
+  seg('#rMulti', 'multi', [['tabs', 'Pestañas'], ['buffers', 'Buffers']]);
+  $('#rAccent').innerHTML = [250, 150, 330, 45].map(h => `<button data-accent="${h}" aria-pressed="${S.accentH === h}" style="background:oklch(0.6 0.15 ${h})" aria-label="Acento ${h}"></button>`).join('');
+  $('#scnTempMode').textContent = S.tempMode === 'borrador' ? 'borrador' : 'volátil';
+}
+document.addEventListener('click', e => {
+  const r = e.target.closest('[data-r]'); if (r) { setSetting(r.dataset.r, r.dataset.v); return; }
+  const a = e.target.closest('[data-accent]'); if (a) { S.accentH = +a.dataset.accent; document.documentElement.style.setProperty('--ah', S.accentH); renderRig(); }
+});
+function applyTheme() {
+  const t = S.theme === 'system' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : S.theme;
+  document.documentElement.dataset.theme = t;
+}
+
+/* ================= arranque ================= */
+function render() { renderChrome(); renderHints(); renderStatus(); if (doc().kind === 'raw') renderHex(); renderBackdrop(); }
+applyTheme(); renderRig(); render(); loadEditor();
+ta.focus(); ta.setSelectionRange(0, 0);
+</script>
+</body>
+</html>
