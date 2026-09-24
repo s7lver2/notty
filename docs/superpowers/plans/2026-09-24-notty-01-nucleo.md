@@ -1430,7 +1430,7 @@ git commit -m "feat(io): detección y conversión de fin de línea"
 - Consumes: nada.
 - Produces: `atomic_write(&Path, &[u8]) -> io::Result<()>` (escribe `<nombre>.tmp~` al lado, `sync_all`, renombra encima; si falla borra el temporal), `create_parent_dirs(&Path) -> io::Result<bool>` (true si creó alguna carpeta), `can_write(&Path) -> bool`.
 
-- [ ] **Step 1: Escribir los tests que fallan**
+- [x] **Step 1: Escribir los tests que fallan**
 
 `crates/notty-io/src/fsutil.rs`:
 
@@ -1501,12 +1501,12 @@ pub use eol::{LineEnding, convert, detect_eol};
 pub use fsutil::{atomic_write, can_write, create_parent_dirs};
 ```
 
-- [ ] **Step 2: Ejecutar y ver que falla**
+- [x] **Step 2: Ejecutar y ver que falla**
 
 Run: `cargo test -p notty-io fsutil`
 Expected: FAIL de compilación, `cannot find function atomic_write`.
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 Añadir **encima** del módulo de tests en `crates/notty-io/src/fsutil.rs`:
 
@@ -1556,12 +1556,12 @@ pub fn can_write(path: &Path) -> bool {
 }
 ```
 
-- [ ] **Step 4: Ejecutar y ver que pasa**
+- [x] **Step 4: Ejecutar y ver que pasa**
 
 Run: `cargo test -p notty-io`
 Expected: PASS, 19 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/notty-io
