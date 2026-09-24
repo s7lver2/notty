@@ -88,6 +88,39 @@ impl Renderer {
         }
     }
 
+    /// Traduce un punto del cliente (en píxeles, origen arriba-izquierda) al índice de
+    /// char del documento más cercano, usando `state.viewport` para saber qué línea es cada fila.
+    pub fn char_index_at(&self, state: &EditorState, x: f32, y: f32) -> usize {
+        let buf = state.doc.buffer();
+        let total = buf.len_lines();
+        let range = state.viewport.range(total);
+        let row = ((y - PADDING_TOP) / self.line_height).floor().max(0.0) as usize;
+        let line = (state.viewport.first_line + row).min(total.saturating_sub(1)).max(range.start);
+
+        let start = buf.line_start(line);
+        let end = if line + 1 < total { buf.line_start(line + 1) } else { buf.len_chars() };
+        let text: String = buf.slice(start..end).trim_end_matches(['\r', '\n']).to_string();
+        if text.is_empty() {
+            return start;
+        }
+        let wide: Vec<u16> = text.encode_utf16().collect();
+        let Ok(layout) =
+            (unsafe { self._dwrite.CreateTextLayout(&wide, &self.text_format, f32::MAX, self.line_height) })
+        else {
+            return start;
+        };
+        let mut trailing = windows::core::BOOL(0);
+        let mut inside = windows::core::BOOL(0);
+        let mut metrics = Default::default();
+        if unsafe { layout.HitTestPoint(x - PADDING_X, 0.0, &mut trailing, &mut inside, &mut metrics) }.is_ok() {
+            let utf16_offset = metrics.textPosition as usize + if trailing.as_bool() { 1 } else { 0 };
+            let prefix = String::from_utf16_lossy(&wide[..utf16_offset.min(wide.len())]);
+            start + prefix.chars().count()
+        } else {
+            start
+        }
+    }
+
     /// Dibuja fondo + las líneas visibles de `state`, con selección y caret.
     pub fn paint(&mut self, state: &EditorState) {
         let buf = state.doc.buffer();

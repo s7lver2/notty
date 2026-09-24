@@ -98,6 +98,13 @@ impl EditorState {
         buf.line_start(line) + text.trim_end_matches(['\r', '\n']).chars().count()
     }
 
+    pub fn scroll_by(&mut self, delta_lines: i32) {
+        let total = self.doc.buffer().len_lines();
+        let max_first = total.saturating_sub(1) as i64;
+        let new_first = (self.viewport.first_line as i64 + delta_lines as i64).clamp(0, max_first);
+        self.viewport.first_line = new_first as usize;
+    }
+
     fn vertical(&mut self, delta: i32, extend: bool) {
         let buf = self.doc.buffer();
         let (line, col) = buf.line_col(self.doc.selection().head);
@@ -206,5 +213,17 @@ mod tests {
         assert_eq!(s.doc.text(), "");
         s.apply(Redo, Instant::now());
         assert_eq!(s.doc.text(), "a");
+    }
+
+    #[test]
+    fn scroll_by_moves_first_line_within_bounds() {
+        let mut s = state("a\nb\nc\nd\ne\nf\n");
+        s.viewport = Viewport { first_line: 0, visible_lines: 2 };
+        s.scroll_by(3);
+        assert_eq!(s.viewport.first_line, 3);
+        s.scroll_by(-10);
+        assert_eq!(s.viewport.first_line, 0);
+        s.scroll_by(100);
+        assert_eq!(s.viewport.first_line, s.doc.buffer().len_lines() - 1);
     }
 }

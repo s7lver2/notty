@@ -4,23 +4,32 @@ use windows::Win32::Graphics::Dwm::{
 };
 use windows::Win32::Graphics::Gdi::{InvalidateRect, ValidateRect};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_SHIFT};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    GetKeyState, ReleaseCapture, SetCapture, VK_CONTROL, VK_SHIFT,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
     CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DispatchMessageW, GWLP_USERDATA, GetClientRect,
     GetMessageW, GetWindowLongPtrW, MSG, PostQuitMessage, RegisterClassExW, SW_SHOW, SetWindowLongPtrW,
-    ShowWindow, TranslateMessage, WM_CHAR, WM_DESTROY, WM_KEYDOWN, WM_PAINT, WM_SIZE, WNDCLASSEXW,
-    WS_EX_APPWINDOW, WS_OVERLAPPEDWINDOW,
+    ShowWindow, TranslateMessage, WHEEL_DELTA, WM_CHAR, WM_DESTROY, WM_KEYDOWN, WM_LBUTTONDOWN,
+    WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_PAINT, WM_SIZE, WNDCLASSEXW, WS_EX_APPWINDOW,
+    WS_OVERLAPPEDWINDOW,
 };
 use windows::core::{PCWSTR, Result, w};
 
-use crate::Modifiers;
-
-use crate::{EditorState, Renderer, Viewport};
+use crate::{EditorState, Modifiers, Renderer, Viewport};
 
 /// Estado ligado a una ventana concreta: se guarda en `GWLP_USERDATA` mientras vive.
 struct WindowState {
     state: EditorState,
     renderer: Renderer,
+    mouse_down: bool,
+    selection_anchor: usize,
+}
+
+fn point_from_lparam(lparam: LPARAM) -> (f32, f32) {
+    let x = (lparam.0 as i16) as f32;
+    let y = ((lparam.0 >> 16) as i16) as f32;
+    (x, y)
 }
 
 fn to_wide(s: &str) -> Vec<u16> {
@@ -79,7 +88,7 @@ pub fn run(path: Option<&str>) -> Result<()> {
         let height = (client.bottom - client.top).max(0) as f32;
         state.viewport = Viewport::new(renderer.line_height(), height);
 
-        let window_state = Box::new(WindowState { state, renderer });
+        let window_state = Box::new(WindowState { state, renderer, mouse_down: false, selection_anchor: 0 });
         let ptr = Box::into_raw(window_state);
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, ptr as isize);
 
@@ -183,6 +192,44 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         ws.state.insert_char(ch, std::time::Instant::now());
                         let _ = InvalidateRect(Some(hwnd), None, false);
                     }
+                }
+                LRESULT(0)
+            }
+            WM_LBUTTONDOWN => {
+                if let Some(ws) = ptr.as_mut() {
+                    let (x, y) = point_from_lparam(lparam);
+                    let idx = ws.renderer.char_index_at(&ws.state, x, y);
+                    ws.state.doc.set_cursor(idx);
+                    ws.selection_anchor = idx;
+                    ws.mouse_down = true;
+                    SetCapture(hwnd);
+                    let _ = InvalidateRect(Some(hwnd), None, false);
+                }
+                LRESULT(0)
+            }
+            WM_MOUSEMOVE => {
+                if let Some(ws) = ptr.as_mut() {
+                    if ws.mouse_down {
+                        let (x, y) = point_from_lparam(lparam);
+                        let idx = ws.renderer.char_index_at(&ws.state, x, y);
+                        ws.state.doc.set_selection(ws.selection_anchor, idx);
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                    }
+                }
+                LRESULT(0)
+            }
+            WM_LBUTTONUP => {
+                if let Some(ws) = ptr.as_mut() {
+                    ws.mouse_down = false;
+                }
+                let _ = ReleaseCapture();
+                LRESULT(0)
+            }
+            WM_MOUSEWHEEL => {
+                if let Some(ws) = ptr.as_mut() {
+                    let delta = ((wparam.0 >> 16) as i16) as i32;
+                    ws.state.scroll_by(-(delta / WHEEL_DELTA as i32) * 3);
+                    let _ = InvalidateRect(Some(hwnd), None, false);
                 }
                 LRESULT(0)
             }
