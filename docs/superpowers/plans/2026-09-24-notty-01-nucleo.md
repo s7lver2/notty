@@ -531,7 +531,7 @@ git commit -m "feat(core): Edit reversible e historial con grupos"
   - `Document::new(text: &str, newline: &'static str)` y métodos: `text() -> String`, `buffer() -> &Buffer`, `selection() -> Selection`, `set_selection(anchor, head)`, `set_cursor(usize)`, `line_col() -> (usize, usize)`, `newline() -> &'static str`, `set_newline(&'static str)`, `is_dirty() -> bool`, `mark_saved()`, `insert(&str, Instant)`, `insert_newline(Instant)`, `replace_range(Range<usize>, &str, Instant)`, `backspace(Instant)`, `delete_forward(Instant)`, `undo() -> bool`, `redo() -> bool`.
   - `newline` es `"\r\n"` o `"\n"`; la UI lo sacará de `notty_io::LineEnding::as_str()`.
 
-- [ ] **Step 1: Escribir los tests que fallan**
+- [x] **Step 1: Escribir los tests que fallan**
 
 `crates/notty-core/src/document.rs`:
 
@@ -625,12 +625,12 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Ejecutar y ver que falla**
+- [x] **Step 2: Ejecutar y ver que falla**
 
 Run: `cargo test -p notty-core document`
 Expected: FAIL de compilación, `cannot find type Document`.
 
-- [ ] **Step 3: Implementar Document**
+- [x] **Step 3: Implementar Document**
 
 Añadir **encima** del módulo de tests en `crates/notty-core/src/document.rs`:
 
@@ -803,12 +803,12 @@ pub use edit::Edit;
 pub use history::History;
 ```
 
-- [ ] **Step 4: Ejecutar y ver que pasa**
+- [x] **Step 4: Ejecutar y ver que pasa**
 
 Run: `cargo test -p notty-core`
 Expected: PASS, 20 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/notty-core
