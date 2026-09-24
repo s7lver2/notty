@@ -1,5 +1,6 @@
 //! notty-ui: ventana Win32, render Direct2D/DirectWrite y lógica de edición en pantalla.
 
+pub mod clipboard;
 mod doc_io;
 pub mod editor;
 mod keymap;

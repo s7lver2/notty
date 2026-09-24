@@ -179,9 +179,31 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         alt: false,
                     };
                     let action = crate::action_for_vk(vk, mods);
-                    if action != crate::EditorAction::None {
-                        ws.state.apply(action, std::time::Instant::now());
-                        let _ = InvalidateRect(Some(hwnd), None, false);
+                    match action {
+                        crate::EditorAction::None => {}
+                        crate::EditorAction::Copy | crate::EditorAction::Cut => {
+                            let sel = ws.state.doc.selection();
+                            if !sel.is_empty() {
+                                let text = ws.state.doc.buffer().slice(sel.range());
+                                let _ = crate::clipboard::set_clipboard_text(hwnd, &text);
+                                if matches!(action, crate::EditorAction::Cut) {
+                                    ws.state.doc.backspace(std::time::Instant::now());
+                                }
+                            }
+                            let _ = InvalidateRect(Some(hwnd), None, false);
+                        }
+                        crate::EditorAction::Paste => {
+                            if let Ok(text) = crate::clipboard::get_clipboard_text(hwnd) {
+                                if !text.is_empty() {
+                                    ws.state.doc.insert(&text, std::time::Instant::now());
+                                }
+                            }
+                            let _ = InvalidateRect(Some(hwnd), None, false);
+                        }
+                        other => {
+                            ws.state.apply(other, std::time::Instant::now());
+                            let _ = InvalidateRect(Some(hwnd), None, false);
+                        }
                     }
                 }
                 LRESULT(0)
