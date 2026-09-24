@@ -149,6 +149,30 @@ impl Document {
     }
 }
 
+impl Document {
+    /// Coincidencias como rangos de **chars**, listos para seleccionar o resaltar.
+    pub fn find_all(&self, query: &str, opts: crate::SearchOptions) -> Result<Vec<Range<usize>>, crate::SearchError> {
+        let text = self.text();
+        Ok(crate::find_all(&text, query, opts)?
+            .into_iter()
+            .map(|r| self.buffer.byte_to_char(r.start)..self.buffer.byte_to_char(r.end))
+            .collect())
+    }
+
+    /// Reemplaza todas las coincidencias como un único paso de deshacer.
+    pub fn replace_all(&mut self, query: &str, replacement: &str, opts: crate::SearchOptions, now: Instant) -> Result<usize, crate::SearchError> {
+        let text = self.text();
+        let (new_text, count) = crate::replace_all(&text, query, replacement, opts)?;
+        if count > 0 {
+            self.history.seal();
+            let len = self.buffer.len_chars();
+            self.replace_range(0..len, &new_text, now);
+            self.history.seal();
+        }
+        Ok(count)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -234,5 +258,21 @@ mod tests {
         d.set_cursor(99);
         assert_eq!(d.selection(), Selection::caret(2));
         assert_eq!(d.line_col(), (0, 2));
+    }
+
+    #[test]
+    fn find_all_returns_char_ranges() {
+        let d = Document::new("ñandú ñ", "\n");
+        assert_eq!(d.find_all("ñ", crate::SearchOptions::default()).unwrap(), vec![0..1, 6..7]);
+    }
+
+    #[test]
+    fn replace_all_is_one_undo_step() {
+        let mut d = Document::new("a b a", "\n");
+        let n = d.replace_all("a", "x", crate::SearchOptions::default(), Instant::now()).unwrap();
+        assert_eq!(n, 2);
+        assert_eq!(d.text(), "x b x");
+        d.undo();
+        assert_eq!(d.text(), "a b a");
     }
 }

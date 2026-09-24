@@ -834,7 +834,7 @@ git commit -m "feat(core): Document con selección, CRLF y estado sucio"
   - `Document::find_all(&self, query, opts) -> Result<Vec<Range<usize>>, SearchError>` en **chars**.
   - `Document::replace_all(&mut self, query, replacement, opts, Instant) -> Result<usize, SearchError>`: un único paso de deshacer.
 
-- [ ] **Step 1: Escribir los tests que fallan**
+- [x] **Step 1: Escribir los tests que fallan**
 
 `crates/notty-core/src/search.rs`:
 
@@ -919,12 +919,12 @@ Añadir al final del módulo de tests de `crates/notty-core/src/document.rs` (de
     }
 ```
 
-- [ ] **Step 2: Ejecutar y ver que falla**
+- [x] **Step 2: Ejecutar y ver que falla**
 
 Run: `cargo test -p notty-core`
 Expected: FAIL de compilación, `cannot find function find_all` / `no method named find_all`.
 
-- [ ] **Step 3: Implementar la búsqueda**
+- [x] **Step 3: Implementar la búsqueda**
 
 Añadir **encima** del módulo de tests en `crates/notty-core/src/search.rs`:
 
@@ -1027,12 +1027,12 @@ pub use history::History;
 pub use search::{SearchError, SearchOptions, find_all, replace_all};
 ```
 
-- [ ] **Step 4: Ejecutar y ver que pasa**
+- [x] **Step 4: Ejecutar y ver que pasa**
 
 Run: `cargo test -p notty-core`
 Expected: PASS, 31 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/notty-core
