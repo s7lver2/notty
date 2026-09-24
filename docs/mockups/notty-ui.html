@@ -196,6 +196,11 @@ kbd{font:11px var(--font-mono);padding:1px 5px;border-radius:4px;background:var(
 .pmirror .g{color:var(--text-3)}
 .pword{color:var(--text-3);font-size:11.5px;flex:none}
 .pword.bad{color:var(--danger)}
+.psuggest{position:absolute;left:12px;bottom:26px;background:var(--chrome-hi);border-radius:8px;box-shadow:var(--shadow);padding:4px;min-width:220px;max-width:360px;z-index:20}
+.prow{padding:4px 8px;border-radius:5px;font:12px var(--font-mono);color:var(--text);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.prow.file{color:var(--text-2)}
+.prow:hover{background:var(--hover)}
+.prow.sel{background:var(--accent-soft);color:var(--accent)}
 .opt{all:unset;font:11px var(--font-mono);padding:1px 5px;border-radius:3px;color:var(--text-3);cursor:pointer}
 .opt[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent)}
 .count{font:11.5px var(--font-mono);color:var(--text-3);flex:none;min-width:44px;text-align:right}
@@ -269,8 +274,6 @@ input.txt{width:72px}
     <kbd>Ctrl+F</kbd><span>Buscar</span>
     <kbd>Ctrl+H</kbd><span>Reemplazar</span>
     <kbd>F3</kbd><span>Siguiente coincidencia</span>
-    <kbd>Ctrl+G</kbd><span>Ir a línea</span>
-    <kbd>Ctrl+D</kbd><span>Duplicar línea</span>
     <kbd>Ctrl+Alt+V</kbd><span>Modo vim</span>
     <kbd>Ctrl+Shift+H</kbd><span>Texto ↔ raw</span>
     <kbd>Ctrl+,</kbd><span>Ajustes</span>
@@ -492,7 +495,7 @@ function renderChrome() {
 
 const MENUS = {
   Archivo: [['Nuevo', 'Ctrl+N', 'perm'], ['Nuevo temporal', 'Ctrl+Shift+N', 'temp'], ['Abrir…', 'Ctrl+O', 'open'], '-', ['Guardar', 'Ctrl+S', 'save'], ['Guardar como…', 'Ctrl+Shift+S', 'saveas'], '-', ['Ajustes', 'Ctrl+,', 'settings'], ['Cerrar pestaña', 'Ctrl+W', 'closetab']],
-  Editar: [['Deshacer', 'Ctrl+Z', 'undo'], ['Rehacer', 'Ctrl+Y', 'redo'], '-', ['Duplicar línea', 'Ctrl+D', 'dup'], ['Ir a línea…', 'Ctrl+G', 'goto']],
+  Editar: [['Deshacer', 'Ctrl+Z', 'undo'], ['Rehacer', 'Ctrl+Y', 'redo']],
   Buscar: [['Buscar…', 'Ctrl+F', 'find'], ['Reemplazar…', 'Ctrl+H', 'replace'], ['Siguiente', 'F3', 'next'], ['Anterior', 'Shift+F3', 'prev']],
   Ver: [['Modo vim', 'Ctrl+Alt+V', 'vim'], ['Ver como raw', 'Ctrl+Shift+H', 'raw'], ['Números de línea', '', 'nums'], ['Barra de atajos', '', 'hintsbar']],
   Ayuda: [['Atajos de teclado', 'F1', 'noop'], ['Acerca de notty', '', 'noop']],
@@ -513,9 +516,9 @@ function renderHints() {
   const p = S.prompt;
   if (p && p.type === 'path') items = [['Tab', 'Completar'], ['Enter', p.purpose === 'open' ? 'Abrir' : 'Crear'], ['Esc', 'Cancelar'], ['^O', 'Diálogo de Windows']];
   else if (p && (p.type === 'find' || p.type === 'replace')) items = [['Enter', p.type === 'replace' ? 'Reemplazar' : 'Siguiente'], [p.type === 'replace' ? '^Alt+Enter' : '⇧Enter', p.type === 'replace' ? 'Todas' : 'Anterior'], ['Alt+C', 'Aa'], ['Alt+W', 'Palabra'], ['Alt+R', 'Regex'], ['Esc', 'Cerrar']];
-  else if (doc().kind === 'raw') items = [['^S', 'Guardar'], ['^Shift+H', 'Ver como texto'], ['←→↑↓', 'Moverse'], ['0-F', 'Escribir byte'], ['^G', 'Ir a offset']];
+  else if (doc().kind === 'raw') items = [['^S', 'Guardar'], ['^Shift+H', 'Ver como texto'], ['←→↑↓', 'Moverse'], ['0-F', 'Escribir byte']];
   else if (S.vim) items = S.vmode === 'NORMAL' ? [['i', 'Insertar'], ['hjkl', 'Moverse'], ['dd', 'Borrar línea'], ['/', 'Buscar'], [':w', 'Guardar'], ['^Alt+V', 'Salir de vim']] : [['Esc', 'Modo normal'], ['^S', 'Guardar']];
-  else items = [['^S', 'Guardar'], ['^F', 'Buscar'], ['^G', 'Ir a línea'], ['^D', 'Duplicar'], ['^O', 'Abrir'], ['^Alt+V', 'Vim']];
+  else items = [['^S', 'Guardar'], ['^F', 'Buscar'], ['^H', 'Reemplazar'], ['^O', 'Abrir'], ['^Alt+V', 'Vim']];
   h.innerHTML = items.map(([k, v]) => `<span><b>${k}</b> ${v}</span>`).join('');
 }
 
@@ -669,10 +672,22 @@ function renderPrompt(st) {
   const p = S.prompt; const F = S.find;
   if (p.type === 'path') {
     const v = p.value || ''; const info = pathInfo(v); p.info = info;
+    const last = v.split('\\').pop();
+    const parent = nodeAt(v.split('\\').slice(0, -1));
+    let ghost = info.ghost;
+    if (info.cands.length) {
+      p.selIdx = Math.min(p.selIdx || 0, info.cands.length - 1);
+      const chosen = info.cands[p.selIdx];
+      ghost = chosen.slice(last.length) + (isDir(parent && parent[chosen]) ? '\\' : '');
+    } else {
+      p.selIdx = 0;
+    }
+    const shown = info.cands.slice(0, 5);
     st.innerHTML = `<div class="prompt">
-      <div class="pfield"><div class="pmirror"><span>${esc(v)}</span><span class="g">${esc(info.ghost)}</span></div>
+      <div class="pfield"><div class="pmirror"><span>${esc(v)}</span><span class="g">${esc(ghost)}</span></div>
       <input id="pin" value="${esc(v)}" placeholder="${p.purpose === 'open' ? 'ruta del archivo' : 'ruta donde guardar'}" class="${info.bad ? 'bad' : ''}" autocomplete="off" aria-label="Ruta"></div>
-      <span class="pword ${info.bad ? 'bad' : ''}">${esc(info.word)}</span>${info.cands.length && info.ghost ? '<span class="pword">Tab ↹</span>' : ''}</div>`;
+      <span class="pword ${info.bad ? 'bad' : ''}">${esc(info.word)}</span>${shown.length ? '<span class="pword">Tab ↹</span>' : ''}
+      ${shown.length ? `<div class="psuggest">${shown.map((k, i) => { const dir = isDir(parent && parent[k]); return `<div class="prow ${i === p.selIdx ? 'sel' : ''} ${dir ? '' : 'file'}" data-suggest="${i}">${esc(k)}${dir ? '\\' : ''}</div>`; }).join('')}</div>` : ''}</div>`;
   } else if (p.type === 'find' || p.type === 'replace') {
     const m = F.q ? findMatches() : [];
     const cnt = m === null ? '<span class="count bad">regex ✕</span>' : `<span class="count">${F.q ? (m.length ? `${Math.min(F.idx + 1, m.length)}/${m.length}` : '0/0') : ''}</span>`;
@@ -683,8 +698,8 @@ function renderPrompt(st) {
       <button class="opt" data-opt="case" aria-pressed="${F.case}" title="Mayúsculas (Alt+C)">Aa</button>
       <button class="opt" data-opt="word" aria-pressed="${F.word}" title="Palabra completa (Alt+W)">ab</button>
       <button class="opt" data-opt="re" aria-pressed="${F.re}" title="Regex (Alt+R)">.*</button></div>`;
-  } else if (p.type === 'goto' || p.type === 'cmd') {
-    st.innerHTML = `<div class="prompt"><span class="plabel">${p.type === 'cmd' ? ':' : 'línea'}</span><div class="pfield"><input id="pin" value="${esc(p.value || '')}" autocomplete="off"></div></div>`;
+  } else if (p.type === 'cmd') {
+    st.innerHTML = `<div class="prompt"><span class="plabel">:</span><div class="pfield"><input id="pin" value="${esc(p.value || '')}" autocomplete="off"></div></div>`;
   } else if (p.type === 'choice') {
     st.innerHTML = `<div class="choice"><span class="q ${p.tone || ''}">${esc(p.q)}</span>${p.opts.map(([k, l]) => `<span><kbd>${k}</kbd>${l}</span>`).join('')}<span><kbd>Esc</kbd>Cancelar</span></div>`;
   }
@@ -695,25 +710,23 @@ function wirePromptInput(inp) {
   const p = S.prompt;
   if (p.type === 'path') {
     inp.addEventListener('input', () => {
-      const n = normPath(inp.value); p.value = n; p.cycle = null;
+      const n = normPath(inp.value); p.value = n; p.selIdx = 0;
       rerenderPromptKeepFocus(n.length);
     });
     inp.addEventListener('keydown', e => {
       const info = p.info;
       if (e.key === 'Tab') {
         e.preventDefault();
-        if (info.fuzzy) p.value = info.fuzzy;
-        else if (p.cycle && p.cycle.list.length > 1) {
-          p.cycle.i = (p.cycle.i + 1) % p.cycle.list.length;
-          const k = p.cycle.list[p.cycle.i]; const par = nodeAt(p.cycle.base.split('\\').slice(0, -1).filter(Boolean));
-          p.value = p.cycle.base + k + (isDir(par && par[k]) ? '\\' : '');
-        } else if (info.ghost) {
-          const parts = (p.value || '').split('\\'); const base = parts.slice(0, -1).join('\\') + (parts.length > 1 ? '\\' : '');
-          p.cycle = info.cands.length ? { base, list: info.cands, i: 0 } : null;
-          if (info.cands.length) { const par = nodeAt(parts.slice(0, -1)); const k = info.cands[0]; p.value = base + k + (isDir(par && par[k]) ? '\\' : ''); }
-          else p.value = (p.value || '') + info.ghost;
-        }
-        rerenderPromptKeepFocus();
+        if (info.fuzzy) { p.value = info.fuzzy; rerenderPromptKeepFocus(); }
+        else if (info.cands.length) { acceptSuggestion(p.selIdx); }
+      } else if (e.key === 'ArrowDown' && info.cands.length) {
+        e.preventDefault();
+        p.selIdx = (p.selIdx + 1) % info.cands.length;
+        rerenderPromptKeepFocus(inp.selectionStart);
+      } else if (e.key === 'ArrowUp' && info.cands.length) {
+        e.preventDefault();
+        p.selIdx = (p.selIdx - 1 + info.cands.length) % info.cands.length;
+        rerenderPromptKeepFocus(inp.selectionStart);
       } else if (e.key === 'Enter') { e.preventDefault(); commitPath(); }
       else if (e.key === 'Escape') { e.preventDefault(); closePrompt(); }
       else if (e.key.toLowerCase() === 'o' && e.ctrlKey) { e.preventDefault(); flash('Aquí se abriría el diálogo de Windows', 'ok'); }
@@ -725,9 +738,21 @@ function wirePromptInput(inp) {
     inp.addEventListener('input', () => { p.value = inp.value; });
     inp.addEventListener('keydown', e => {
       if (e.key === 'Escape') { e.preventDefault(); closePrompt(); }
-      if (e.key === 'Enter') { e.preventDefault(); p.type === 'goto' ? doGoto(inp.value) : runCmd(inp.value); }
+      if (e.key === 'Enter') { e.preventDefault(); runCmd(inp.value); }
     });
   }
+}
+/** Acepta una de las 3-5 sugerencias de la línea de ruta (Tab, flechas + Tab, o clic). */
+function acceptSuggestion(idx) {
+  const p = S.prompt; const info = p && p.info; if (!info || !info.cands.length) return;
+  const parts = (p.value || '').split('\\'); const lastSeg = parts.pop();
+  const base = parts.join('\\') + (parts.length ? '\\' : '');
+  const parent = nodeAt(parts);
+  if (lastSeg === info.cands[idx] && info.cands.length > 1) idx = (idx + 1) % info.cands.length;
+  p.selIdx = idx;
+  const chosen = info.cands[idx];
+  p.value = base + chosen + (isDir(parent && parent[chosen]) ? '\\' : '');
+  rerenderPromptKeepFocus();
 }
 function findKeys(e) {
   const F = S.find;
@@ -783,13 +808,6 @@ function openDoc(d, replaceBlank = true) {
   else { S.docs.push(d); S.active = S.docs.length - 1; }
   render(); loadEditor(); (d.kind === 'text' ? ta : hex).focus();
 }
-function doGoto(v) {
-  const n = parseInt(v, 10); if (!n) return;
-  const ls = ta.value.split('\n'); const ln = Math.min(n, ls.length);
-  const i = ls.slice(0, ln - 1).reduce((a, l) => a + l.length + 1, 0);
-  closePrompt(); scrollToIndex(i); ta.focus(); syncEditor(); renderStatus();
-}
-
 /* ================= acciones ================= */
 function save(asNew) {
   const d = doc();
@@ -829,9 +847,8 @@ function act(a) {
   ({
     perm: newPerm, temp: newTemp, open: () => openPrompt('path', { purpose: 'open', value: '' }),
     save: () => save(), saveas: () => save(true), saveprompt: () => openPrompt('path', { purpose: 'save', value: '' }),
-    find: () => openPrompt('find'), replace: () => openPrompt('replace'), goto: () => openPrompt('goto'),
+    find: () => openPrompt('find'), replace: () => openPrompt('replace'),
     next: () => { gotoMatch(1); syncEditor(); }, prev: () => { gotoMatch(-1); syncEditor(); },
-    dup: () => { const t = ta.value, c = ta.selectionStart; const ls = t.lastIndexOf('\n', c - 1) + 1; let le = t.indexOf('\n', c); if (le < 0) le = t.length; const line = t.slice(ls, le); setText(t.slice(0, le) + '\n' + line + t.slice(le), c + line.length + 1); ta.focus(); },
     vim: toggleVim, raw: toggleRaw, nums: () => { S.showNums = !S.showNums; S.preset = 'custom'; },
     hintsbar: () => { S.showHints = !S.showHints; S.preset = 'custom'; },
     settings: () => openSettings(), closetab: () => closeTab(S.active),
@@ -892,7 +909,6 @@ function runCmd(v) {
   else if (v === 'set nu') { S.showNums = true; render(); }
   else if (v === 'set nonu') { S.showNums = false; render(); }
   else if (v === 'raw') toggleRaw();
-  else if (/^\d+$/.test(v)) doGoto(v);
   else if (/^%s\//.test(v)) {
     const m = v.match(/^%s\/((?:\\\/|[^/])*)\/((?:\\\/|[^/])*)\/?([gi]*)$/);
     if (!m) { flash('Sintaxis: :%s/buscar/reemplazo/g', 'err'); return; }
@@ -921,8 +937,6 @@ document.addEventListener('keydown', e => {
     if (k === 'f') { e.preventDefault(); act('find'); return; }
     if (k === 'h' && e.shiftKey) { e.preventDefault(); act('raw'); return; }
     if (k === 'h') { e.preventDefault(); act('replace'); return; }
-    if (k === 'g' && !S.prompt) { e.preventDefault(); act('goto'); return; }
-    if (k === 'd' && !S.prompt && doc().kind === 'text') { e.preventDefault(); act('dup'); return; }
     if (e.key === ',') { e.preventDefault(); act('settings'); return; }
   }
   if (e.altKey && !e.ctrlKey && k === 'n') { e.preventDefault(); act(e.shiftKey ? 'perm' : 'temp'); return; }
@@ -934,6 +948,7 @@ document.addEventListener('keydown', e => {
 document.addEventListener('click', e => {
   const t = e.target;
   const close = t.closest('[data-close]'); if (close) { e.stopPropagation(); closeTab(+close.dataset.close); return; }
+  const sug = t.closest('[data-suggest]'); if (sug) { acceptSuggestion(+sug.dataset.suggest); $('#pin')?.focus(); return; }
   const tab = t.closest('[data-tab]'); if (tab) { S.active = +tab.dataset.tab; S.prompt = null; hexSel = null; render(); loadEditor(); return; }
   const m = t.closest('[data-menu]'); if (m) { S.menu = S.menu === m.dataset.menu ? null : m.dataset.menu; render(); return; }
   const encb = t.closest('[data-enc]'); if (encb) { doc().enc = encb.dataset.enc; doc().dirty = true; S.pop = null; render(); return; }
@@ -1099,7 +1114,6 @@ open_path_prompt = "Ctrl+O"
 find = "Ctrl+F"
 replace = "Ctrl+H"
 find_next = "F3"
-goto_line = "Ctrl+G"
 toggle_raw = "Ctrl+Shift+H"
 new_temp = "Ctrl+Shift+N"
 new_permanent = "Ctrl+N"
