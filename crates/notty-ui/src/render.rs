@@ -170,7 +170,7 @@ impl Renderer {
                     }
                     x1 = x1.max(x0 + 2.0);
                     let rect = D2D_RECT_F { left: x0, top: y, right: x1, bottom: y + self.line_height };
-                    let _ = self.target.FillRectangle(&rect, &self.sel_brush);
+                    self.target.FillRectangle(&rect, &self.sel_brush);
                 }
 
                 if let Some(layout) = &layout {
@@ -190,7 +190,7 @@ impl Renderer {
                         PADDING_X
                     };
                     let rect = D2D_RECT_F { left: x, top: y, right: x + CARET_WIDTH, bottom: y + self.line_height };
-                    let _ = self.target.FillRectangle(&rect, &self.caret_brush);
+                    self.target.FillRectangle(&rect, &self.caret_brush);
                 }
 
                 y += self.line_height;
