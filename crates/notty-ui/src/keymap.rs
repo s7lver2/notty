@@ -11,6 +11,7 @@ pub enum EditorAction {
     ExtendLeft, ExtendRight, ExtendUp, ExtendDown, ExtendHome, ExtendEnd,
     Backspace, DeleteForward, InsertNewline,
     Undo, Redo, SelectAll, Copy, Cut, Paste, Save, Find, Replace, FindNext, FindPrev, OpenPathPrompt,
+    ToggleVim, ToggleRaw,
     None,
 }
 
@@ -18,37 +19,39 @@ pub enum EditorAction {
 /// Los códigos son los estándar de `windows::Win32::UI::Input::KeyboardAndMouse` (VK_*).
 pub fn action_for_vk(vk: u32, m: Modifiers) -> EditorAction {
     use EditorAction::*;
-    match (vk, m.ctrl, m.shift) {
-        (0x25, false, false) => MoveLeft,
-        (0x25, false, true) => ExtendLeft,
-        (0x27, false, false) => MoveRight,
-        (0x27, false, true) => ExtendRight,
-        (0x26, false, false) => MoveUp,
-        (0x26, false, true) => ExtendUp,
-        (0x28, false, false) => MoveDown,
-        (0x28, false, true) => ExtendDown,
-        (0x24, false, false) => MoveHome,
-        (0x24, false, true) => ExtendHome,
-        (0x24, true, _) => MoveDocStart,
-        (0x23, false, false) => MoveEnd,
-        (0x23, false, true) => ExtendEnd,
-        (0x23, true, _) => MoveDocEnd,
-        (0x08, _, _) => Backspace,
-        (0x2E, _, _) => DeleteForward,
-        (0x0D, _, _) => InsertNewline,
-        (0x5A, true, false) => Undo,
-        (0x5A, true, true) => Redo,
-        (0x59, true, _) => Redo,
-        (0x41, true, _) => SelectAll,
-        (0x43, true, _) => Copy,
-        (0x58, true, _) => Cut,
-        (0x56, true, _) => Paste,
-        (0x53, true, _) => Save,
-        (0x46, true, _) => Find,
-        (0x48, true, _) => Replace,
-        (0x72, false, false) => FindNext,
-        (0x72, false, true) => FindPrev,
-        (0x4F, true, _) => OpenPathPrompt,
+    match (vk, m.ctrl, m.shift, m.alt) {
+        (0x56, true, false, true) => ToggleVim,
+        (0x48, true, true, false) => ToggleRaw,
+        (0x25, false, false, false) => MoveLeft,
+        (0x25, false, true, false) => ExtendLeft,
+        (0x27, false, false, false) => MoveRight,
+        (0x27, false, true, false) => ExtendRight,
+        (0x26, false, false, false) => MoveUp,
+        (0x26, false, true, false) => ExtendUp,
+        (0x28, false, false, false) => MoveDown,
+        (0x28, false, true, false) => ExtendDown,
+        (0x24, false, false, false) => MoveHome,
+        (0x24, false, true, false) => ExtendHome,
+        (0x24, true, _, false) => MoveDocStart,
+        (0x23, false, false, false) => MoveEnd,
+        (0x23, false, true, false) => ExtendEnd,
+        (0x23, true, _, false) => MoveDocEnd,
+        (0x08, _, _, false) => Backspace,
+        (0x2E, _, _, false) => DeleteForward,
+        (0x0D, _, _, false) => InsertNewline,
+        (0x5A, true, false, false) => Undo,
+        (0x5A, true, true, false) => Redo,
+        (0x59, true, _, false) => Redo,
+        (0x41, true, _, false) => SelectAll,
+        (0x43, true, _, false) => Copy,
+        (0x58, true, _, false) => Cut,
+        (0x56, true, _, false) => Paste,
+        (0x53, true, _, false) => Save,
+        (0x46, true, _, false) => Find,
+        (0x48, true, false, false) => Replace,
+        (0x72, false, false, false) => FindNext,
+        (0x72, false, true, false) => FindPrev,
+        (0x4F, true, _, false) => OpenPathPrompt,
         _ => None,
     }
 }
@@ -132,5 +135,22 @@ mod tests {
     #[test]
     fn ctrl_o_opens_path_prompt() {
         assert_eq!(action_for_vk(0x4F, m(true, false)), EditorAction::OpenPathPrompt);
+    }
+
+    #[test]
+    fn ctrl_alt_v_is_toggle_vim_not_paste() {
+        assert_eq!(action_for_vk(0x56, Modifiers { ctrl: true, shift: false, alt: true }), EditorAction::ToggleVim);
+        assert_eq!(action_for_vk(0x56, Modifiers { ctrl: true, shift: false, alt: false }), EditorAction::Paste);
+    }
+
+    #[test]
+    fn ctrl_shift_h_is_toggle_raw_not_replace() {
+        assert_eq!(action_for_vk(0x48, Modifiers { ctrl: true, shift: true, alt: false }), EditorAction::ToggleRaw);
+        assert_eq!(action_for_vk(0x48, Modifiers { ctrl: true, shift: false, alt: false }), EditorAction::Replace);
+    }
+
+    #[test]
+    fn plain_letter_with_stray_alt_is_still_none() {
+        assert_eq!(action_for_vk(0x41, Modifiers { ctrl: false, shift: false, alt: true }), EditorAction::None);
     }
 }

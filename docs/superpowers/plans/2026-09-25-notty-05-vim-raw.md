@@ -46,7 +46,7 @@ crates/notty-ui/src/settings_window.rs  (modificado) "Modo vim siempre"
 - Consumes: nada nuevo.
 - Produces: `EditorAction` gana `ToggleVim, ToggleRaw`. `action_for_vk` pasa a considerar los tres modificadores; `Ctrl+Alt+V` (`0x56`) → `ToggleVim`, `Ctrl+Shift+H` (`0x48`) → `ToggleRaw`, `Ctrl+H` sin `Shift` sigue siendo `Replace` (Plan 4).
 
-- [ ] **Step 1: Escribir los tests que fallan**
+- [x] **Step 1: Escribir los tests que fallan**
 
 Añadir a `mod tests` en `crates/notty-ui/src/keymap.rs` (además de todos los que ya había):
 
@@ -69,12 +69,12 @@ Añadir a `mod tests` en `crates/notty-ui/src/keymap.rs` (además de todos los q
     }
 ```
 
-- [ ] **Step 2: Ejecutar y ver que falla**
+- [x] **Step 2: Ejecutar y ver que falla**
 
 Run: `cargo test -p notty-ui keymap`
 Expected: FAIL: `ctrl_alt_v_is_toggle_vim_not_paste` y `ctrl_shift_h_is_toggle_raw_not_replace` fallan (dan `Paste`/`Replace` en vez de `ToggleVim`/`ToggleRaw`, o no compila si `ToggleVim`/`ToggleRaw` todavía no existen como variantes).
 
-- [ ] **Step 3: Reescribir `action_for_vk` por completo**
+- [x] **Step 3: Reescribir `action_for_vk` por completo**
 
 Añadir las dos variantes nuevas al `enum EditorAction` (junto a las que ya había de los Planes 2 y 4):
 
@@ -133,12 +133,12 @@ pub fn action_for_vk(vk: u32, m: Modifiers) -> EditorAction {
 }
 ```
 
-- [ ] **Step 4: Ejecutar y ver que pasa**
+- [x] **Step 4: Ejecutar y ver que pasa**
 
 Run: `cargo test --workspace`
 Expected: PASS. Todos los tests anteriores de `action_for_vk` (Planes 2 y 4) siguen pasando sin tocarlos, más los 3 nuevos.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/notty-ui
