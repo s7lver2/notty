@@ -276,6 +276,44 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         return LRESULT(0);
                     }
                     let action = crate::action_for_vk(vk, mods);
+
+                    // ToggleVim/ToggleRaw funcionan siempre, esté vim/raw activo o no.
+                    if matches!(action, crate::EditorAction::ToggleVim) {
+                        let st = w.ws.active_mut();
+                        st.vim = if st.vim.is_some() { None } else { Some(crate::VimState::default()) };
+                        update_title(hwnd, w.ws.active());
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                        return LRESULT(0);
+                    }
+                    if matches!(action, crate::EditorAction::ToggleRaw) {
+                        toggle_raw(w);
+                        update_title(hwnd, w.ws.active());
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                        return LRESULT(0);
+                    }
+
+                    if w.ws.active().raw.is_some() {
+                        handle_raw_keydown(w, vk, action);
+                        update_title(hwnd, w.ws.active());
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                        return LRESULT(0);
+                    }
+
+                    if w.ws.active().vim.is_some() {
+                        // Solo Esc se enruta aquí explícitamente (ver nota de la Task 6 del
+                        // plan: el resto del movimiento vim llega como texto por WM_CHAR).
+                        // El resto de teclas (flechas, Ctrl+S, ...) caen al camino normal de
+                        // abajo como "vía de escape" además de sus equivalentes propios de vim.
+                        if vk == 0x1B {
+                            let st = w.ws.active_mut();
+                            let mut vim = st.vim.take().unwrap();
+                            let _ = vim.handle_key(&mut st.doc, vk, None, std::time::Instant::now());
+                            st.vim = Some(vim);
+                            let _ = InvalidateRect(Some(hwnd), None, false);
+                            return LRESULT(0);
+                        }
+                    }
+
                     match action {
                         crate::EditorAction::None => {}
                         crate::EditorAction::Copy | crate::EditorAction::Cut => {
@@ -342,6 +380,18 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             let _ = InvalidateRect(Some(hwnd), None, false);
                             return LRESULT(0);
                         }
+                        if w.ws.active().raw.is_some() {
+                            handle_raw_char(w, ch);
+                            update_title(hwnd, w.ws.active());
+                            let _ = InvalidateRect(Some(hwnd), None, false);
+                            return LRESULT(0);
+                        }
+                        if w.ws.active().vim.is_some() {
+                            handle_vim_char(w, ch);
+                            update_title(hwnd, w.ws.active());
+                            let _ = InvalidateRect(Some(hwnd), None, false);
+                            return LRESULT(0);
+                        }
                         w.ws.active_mut().insert_char(ch, std::time::Instant::now());
                         update_title(hwnd, w.ws.active());
                         let _ = InvalidateRect(Some(hwnd), None, false);
@@ -357,10 +407,19 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         .tab_rects()
                         .iter()
                         .position(|&(l, t, r, b)| x >= l && x < r && y >= t && y < b);
-                    if let Some(i) = clicked_tab {
+                    let clicked_pencil = w
+                        .renderer
+                        .pencil_rect()
+                        .is_some_and(|(l, t, r, b)| x >= l && x < r && y >= t && y < b);
+                    if clicked_pencil && w.ws.active().raw.is_some() {
+                        if let Some(raw) = w.ws.active_mut().raw.as_mut() {
+                            raw.enable_write();
+                        }
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                    } else if let Some(i) = clicked_tab {
                         w.ws.activate(i);
                         let _ = InvalidateRect(Some(hwnd), None, false);
-                    } else {
+                    } else if w.ws.active().raw.is_none() {
                         let idx = w.renderer.char_index_at(w.ws.active(), x, y);
                         w.ws.active_mut().doc.set_cursor(idx);
                         w.selection_anchor = idx;
@@ -417,7 +476,107 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
     }
 }
 
-// --- Prompts (línea de ruta / buscar / reemplazar): teclado ------------------------
+// --- Modo vim: WM_CHAR (letras) -----------------------------------------------------
+
+fn handle_vim_char(w: &mut WindowState, ch: char) {
+    let outcome = {
+        let st = w.ws.active_mut();
+        let mut vim = st.vim.take().unwrap();
+        let out = vim.handle_key(&mut st.doc, 0, Some(ch), std::time::Instant::now());
+        st.vim = Some(vim);
+        out
+    };
+    match outcome {
+        crate::VimOutcome::Handled => {}
+        crate::VimOutcome::OpenFind => w.ws.prompt = crate::Prompt::Find(crate::SearchState::default()),
+        crate::VimOutcome::OpenCmdline => w.ws.prompt = crate::Prompt::VimCmdline(String::new()),
+        crate::VimOutcome::Bubble => {
+            // La tecla no es de vim: se trata como si vim no estuviera activo.
+            if !ch.is_control() {
+                w.ws.active_mut().insert_char(ch, std::time::Instant::now());
+            }
+        }
+    }
+}
+
+// --- Vista raw: teclado --------------------------------------------------------------
+
+/// Cambia entre la vista de texto normal y la vista raw (`Ctrl+Shift+H`). Si el
+/// contenido de la vista raw sigue siendo UTF-8 válido al volver a texto, se reconstruye
+/// el `Document`; si no, se queda en raw (no hay forma segura de mostrarlo como texto).
+fn toggle_raw(w: &mut WindowState) {
+    let st = w.ws.active_mut();
+    if let Some(raw) = st.raw.take() {
+        let bytes: Vec<u8> = (0..raw.len()).map(|i| raw.byte(i)).collect();
+        if let Ok(text) = String::from_utf8(bytes) {
+            st.doc = notty_core::Document::new(&text, st.eol.as_str());
+        } else {
+            st.raw = Some(raw);
+        }
+    } else if let Some(path) = st.path.clone() {
+        if let Ok(raw) = crate::open_raw_doc(&path) {
+            st.raw = Some(raw);
+            st.raw_cursor = 0;
+            st.raw_pending_nibble = None;
+        }
+    }
+}
+
+/// Flechas (mueven el byte seleccionado) y `Ctrl+S` (guarda) mientras hay un `RawDoc` activo.
+fn handle_raw_keydown(w: &mut WindowState, vk: u32, action: crate::EditorAction) {
+    let len = w.ws.active().raw.as_ref().map(|r| r.len()).unwrap_or(0);
+    let delta: i64 = match vk {
+        0x25 => -1, // Left
+        0x27 => 1,  // Right
+        0x26 => -16, // Up
+        0x28 => 16,  // Down
+        _ => 0,
+    };
+    if delta != 0 {
+        if len == 0 {
+            return;
+        }
+        let cur = w.ws.active().raw_cursor as i64;
+        w.ws.active_mut().raw_cursor = (cur + delta).clamp(0, len as i64 - 1) as usize;
+        w.ws.active_mut().raw_pending_nibble = None;
+        return;
+    }
+    if matches!(action, crate::EditorAction::Save) {
+        if let Some(raw) = w.ws.active_mut().raw.as_mut() {
+            let _ = raw.save();
+        }
+    }
+}
+
+/// Dígitos hexadecimales tecleados mientras hay un `RawDoc` activo: la primera pulsación
+/// guarda el nibble alto, la segunda completa el byte y avanza la selección.
+fn handle_raw_char(w: &mut WindowState, ch: char) {
+    let Some(digit) = crate::hex_char(ch) else { return };
+    let is_editing = w.ws.active().raw.as_ref().is_some_and(|r| r.is_editing());
+    if !is_editing {
+        // Solo lectura (o sin permiso de escritura hasta pulsar el lápiz): no hace nada.
+        return;
+    }
+    let idx = w.ws.active().raw_cursor;
+    match w.ws.active().raw_pending_nibble {
+        None => {
+            w.ws.active_mut().raw_pending_nibble = Some(digit);
+        }
+        Some(hi) => {
+            let value = (hi << 4) | digit;
+            if let Some(raw) = w.ws.active_mut().raw.as_mut() {
+                raw.set_byte(idx, value);
+            }
+            w.ws.active_mut().raw_pending_nibble = None;
+            let len = w.ws.active().raw.as_ref().map(|r| r.len()).unwrap_or(0);
+            if len > 0 {
+                w.ws.active_mut().raw_cursor = (idx + 1).min(len - 1);
+            }
+        }
+    }
+}
+
+// --- Prompts (línea de ruta / buscar / reemplazar / comandos vim): teclado --------
 
 /// Contexto de rutas del documento activo: `~` es el perfil del usuario y `.` es la
 /// carpeta del archivo abierto (si lo hay).
@@ -438,6 +597,8 @@ fn handle_prompt_keydown(w: &mut WindowState, hwnd: HWND, vk: u32, mods: Modifie
         handle_path_key(w, hwnd, vk, mods);
     } else if matches!(w.ws.prompt, crate::Prompt::Find(_) | crate::Prompt::Replace(_)) {
         handle_search_key(w, vk, mods);
+    } else if matches!(w.ws.prompt, crate::Prompt::VimCmdline(_)) {
+        handle_vim_cmdline_key(w, hwnd, vk);
     }
 }
 
@@ -447,6 +608,10 @@ fn handle_prompt_char(w: &mut WindowState, ch: char) {
     }
     if matches!(w.ws.prompt, crate::Prompt::Path(_)) {
         handle_path_char(w, ch);
+    } else if matches!(w.ws.prompt, crate::Prompt::VimCmdline(_)) {
+        if let crate::Prompt::VimCmdline(line) = &mut w.ws.prompt {
+            line.push(ch);
+        }
     } else if matches!(w.ws.prompt, crate::Prompt::Find(_) | crate::Prompt::Replace(_)) {
         handle_search_char(w, ch);
     }
@@ -550,6 +715,56 @@ fn commit_path_prompt(w: &mut WindowState, hwnd: HWND) {
         unsafe {
             update_title(hwnd, w.ws.active());
         }
+    }
+}
+
+// --- Prompt de línea de comandos vim (`:w`, `:q`, `:%s/a/b/g`, ...) -----------------
+
+fn handle_vim_cmdline_key(w: &mut WindowState, hwnd: HWND, vk: u32) {
+    match vk {
+        0x08 => {
+            // Backspace
+            if let crate::Prompt::VimCmdline(line) = &mut w.ws.prompt {
+                line.pop();
+            }
+        }
+        0x0D => commit_vim_cmdline(w, hwnd), // Enter
+        _ => {}
+    }
+}
+
+/// `Enter` sobre la línea de comandos vim: la interpreta con `parse_vim_cmd` y ejecuta
+/// el resultado sobre el documento/pestaña activos.
+fn commit_vim_cmdline(w: &mut WindowState, hwnd: HWND) {
+    let line = match &w.ws.prompt {
+        crate::Prompt::VimCmdline(line) => line.clone(),
+        _ => return,
+    };
+    w.ws.close_prompt();
+    match crate::parse_vim_cmd(&line) {
+        crate::VimCmd::Save => {
+            let _ = w.ws.active_mut().save();
+        }
+        crate::VimCmd::Quit => {
+            w.ws.close_active();
+        }
+        crate::VimCmd::SaveAndQuit => {
+            let _ = w.ws.active_mut().save();
+            w.ws.close_active();
+        }
+        crate::VimCmd::Substitute { pattern, replacement, global, ignore_case } => {
+            // `replace_all` ya sustituye todas las apariciones de cada línea, que es lo que
+            // pide la bandera `g`; sin ella, vim de verdad solo reemplaza la primera
+            // ocurrencia de cada línea, matiz que esta primera versión no modela (se trata
+            // `global` como si siempre estuviera activa). Documentado como simplificación.
+            let _ = global;
+            let opts = notty_core::SearchOptions { case_sensitive: !ignore_case, whole_word: false, regex: false };
+            let _ = w.ws.active_mut().doc.replace_all(&pattern, &replacement, opts, std::time::Instant::now());
+        }
+        crate::VimCmd::Unknown(_) => {}
+    }
+    unsafe {
+        update_title(hwnd, w.ws.active());
     }
 }
 

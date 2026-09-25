@@ -12,6 +12,15 @@ pub struct EditorState {
     pub encoding: TextEncoding,
     pub eol: LineEnding,
     pub path: Option<PathBuf>,
+    pub vim: Option<crate::VimState>,
+    pub raw: Option<crate::RawDoc>,
+    /// Desviación respecto al plan: `RawDoc` no lleva su propia posición de edición
+    /// (el plan solo especifica `len`/`byte`/`set_byte`), así que el byte seleccionado
+    /// y el nibble alto pendiente de completar viven aquí, junto al resto del estado
+    /// por-pestaña, para que sobrevivan al cambiar de pestaña y se muevan con Ctrl+Alt+V
+    /// / Ctrl+Shift+H como el resto de `EditorState`.
+    pub raw_cursor: usize,
+    pub raw_pending_nibble: Option<u8>,
 }
 
 impl EditorState {
@@ -22,6 +31,10 @@ impl EditorState {
             encoding: TextEncoding::Utf8,
             eol: LineEnding::Crlf,
             path: None,
+            vim: None,
+            raw: None,
+            raw_cursor: 0,
+            raw_pending_nibble: None,
         }
     }
 
@@ -32,6 +45,10 @@ impl EditorState {
             encoding: opened.encoding,
             eol: opened.eol,
             path: Some(opened.path),
+            vim: None,
+            raw: None,
+            raw_cursor: 0,
+            raw_pending_nibble: None,
         }
     }
 }
@@ -71,7 +88,7 @@ impl EditorState {
             Redo => {
                 self.doc.redo();
             }
-            Copy | Cut | Paste | Save | Find | Replace | FindNext | FindPrev | OpenPathPrompt | ToggleVim | ToggleRaw | None => {} // se resuelven en window.rs
+            Copy | Cut | Paste | Save | Find | Replace | FindNext | FindPrev | OpenPathPrompt | ToggleVim | ToggleRaw | None => {} // se resuelven en window.rs (ToggleVim/ToggleRaw, Tasks 6-7)
         }
 
         let (line, _) = self.doc.buffer().line_col(self.doc.selection().head);

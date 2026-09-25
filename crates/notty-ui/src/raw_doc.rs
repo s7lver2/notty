@@ -25,6 +25,10 @@ impl RawDoc {
         self.edit_buf.as_ref().map_or_else(|| self.view.len(), |v| v.len())
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn byte(&self, i: usize) -> u8 {
         self.edit_buf.as_ref().map_or_else(|| self.view[i], |v| v[i])
     }

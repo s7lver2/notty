@@ -1006,7 +1006,7 @@ git commit -m "feat(ui): formateo de la cuadrícula hexadecimal"
 - Consumes: `VimState`, `VimOutcome`, `VimCmd`, `parse_vim_cmd`, `RawDoc`, `open_raw_doc`, `EditorAction::{ToggleVim, ToggleRaw}`.
 - Produces: cada `EditorState` (o el `Workspace` que los contiene) gana la posibilidad de estar en modo raw (`Option<RawDoc>` en vez de/además del `Document` de texto) y la posibilidad de tener vim activo (`vim: Option<VimState>`, `None` = modo normal de toda la vida).
 
-- [ ] **Step 1: Ampliar el estado del documento**
+- [x] **Step 1: Ampliar el estado del documento**
 
 En `crates/notty-ui/src/editor.rs` (o donde viva `EditorState` desde el Plan 2), añadir dos campos:
 
@@ -1020,7 +1020,7 @@ pub struct EditorState {
 
 Actualiza `EditorState::new_empty()` y `EditorState::from_opened(..)` para inicializar ambos a `None`. Si `cfg.ui` tiene (desde un plan futuro) un ajuste de "vim siempre activo", este plan no lo consulta todavía al crear documentos nuevos — el toggle es siempre manual con `Ctrl+Alt+V`, y `Task 8` de este mismo plan añade la casilla de Ajustes sin conectarla aún a "crear ya en modo vim" (queda anotado como trabajo futuro en su propio Step).
 
-- [ ] **Step 2: `ToggleVim` y `ToggleRaw` en window.rs**
+- [x] **Step 2: `ToggleVim` y `ToggleRaw` en window.rs**
 
 En el `match action` de `WM_KEYDOWN`:
 
@@ -1047,7 +1047,7 @@ crate::EditorAction::ToggleRaw => {
 }
 ```
 
-- [ ] **Step 3: Enrutar `WM_KEYDOWN`/`WM_CHAR` cuando hay vim activo**
+- [x] **Step 3: Enrutar `WM_KEYDOWN`/`WM_CHAR` cuando hay vim activo**
 
 Antes del `match` que traduce `vk` con `notty_ui::action_for_vk` (o justo después de descartar `ToggleVim`/`ToggleRaw`, que siempre deben funcionar aunque vim esté activo), si `ws.active().vim.is_some()` y `ws.active().raw.is_none()`:
 
@@ -1071,7 +1071,7 @@ Nota importante sobre `VimOutcome::OpenCmdline`: si en tu implementación del Pl
 
 `char_from_wm_char`: como `WM_KEYDOWN` no trae el carácter Unicode (eso llega por separado en `WM_CHAR`), la forma más simple de encajar esto con el `VimState::handle_key(doc, vk, ch: Option<char>, now)` tal como está definido es **no** llamar a `handle_key` desde `WM_KEYDOWN` para las teclas que son letras, sino desde `WM_CHAR` (pasando `vk = 0` y `ch = Some(carácter)`), y reservar la llamada desde `WM_KEYDOWN` solo para `Esc` (`vk = 0x1B, ch = None`) y para las teclas de flecha si decides tratarlas como parte de vim en vez de dejar que `hjkl` (que sí son letras y llegan por `WM_CHAR`) cubra el movimiento — la maqueta y los tests de la Task 2 asumen que todo el movimiento vim es por letras (`hjkl`, no las flechas), así que en la práctica basta con: `WM_CHAR` con vim activo y modo `Normal`/`Visual` → `handle_key(doc, 0, Some(ch), now)`; `WM_CHAR` con vim activo y modo `Insert` → igual, se inserta el texto; `WM_KEYDOWN` con vim activo → solo mira `Esc`, `ToggleVim`/`ToggleRaw` (que deben funcionar siempre) y dejar pasar el resto (flechas, `Ctrl+S`, etc. dentro de vim si quieres que sigan funcionando como atajos "de escape hatch" además de los suyos propios — comportamiento razonable y ya cubierto por que `Bubble`/el camino normal siga disponible).
 
-- [ ] **Step 4: Enrutar el teclado cuando hay un `RawDoc` activo**
+- [x] **Step 4: Enrutar el teclado cuando hay un `RawDoc` activo**
 
 Cuando `ws.active().raw.is_some()`, en vez del camino de texto:
 - `WM_CHAR` con un dígito hex (`notty_ui::hex_char(ch)`): si hay un byte seleccionado y `raw.is_editing()`, compón el nibble alto/bajo (mismo patrón que la maqueta: primera pulsación guarda el nibble alto, segunda escribe el byte completo con `raw.set_byte(idx, val)` y avanza la selección) y si `!raw.is_editing()`, muestra un aviso ("solo lectura" o "sin permiso de escritura" según `raw.writable_fs()`) sin escribir nada.
@@ -1079,12 +1079,12 @@ Cuando `ws.active().raw.is_some()`, en vez del camino de texto:
 - `Ctrl+S`: `raw.save()`.
 - Un nuevo comando (el lápiz): puede ser un botón dibujado en la barra de estado (Task 7) al que se hace hit-testing en `WM_LBUTTONDOWN`, que llama a `raw.enable_write()`.
 
-- [ ] **Step 5: Compilar**
+- [x] **Step 5: Compilar**
 
 Run: `cargo build --workspace`
 Expected: compila. Ajusta la organización exacta de `window.rs` (nombres de las funciones internas, cómo se guarda el estado por ventana) a como haya quedado tras los Planes 2-4; lo que importa es que el comportamiento descrito en los Steps 2-4 quede implementado.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/notty-ui

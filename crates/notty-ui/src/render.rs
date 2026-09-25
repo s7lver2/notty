@@ -57,6 +57,10 @@ pub struct Renderer {
     toggle_brush: ID2D1SolidColorBrush,
     line_height: f32,
     tab_rects: Vec<(f32, f32, f32, f32)>,
+    /// Rectángulo del icono de lápiz de la vista raw, calculado la última vez que se
+    /// dibujó la barra de estado con `state.raw.is_some()`; `None` si no se dibujó
+    /// (no había vista raw activa). Usado para el hit-testing de `WM_LBUTTONDOWN`.
+    pencil_rect: Option<(f32, f32, f32, f32)>,
 }
 
 impl Renderer {
@@ -129,6 +133,7 @@ impl Renderer {
                 toggle_brush,
                 line_height,
                 tab_rects: Vec::new(),
+                pencil_rect: None,
             })
         }
     }
@@ -156,6 +161,11 @@ impl Renderer {
     /// Rectángulos de las pestañas dibujadas la última vez, para hit-testing de clic.
     pub fn tab_rects(&self) -> &[(f32, f32, f32, f32)] {
         &self.tab_rects
+    }
+
+    /// Rectángulo del lápiz de la vista raw dibujado la última vez, si lo hubo.
+    pub fn pencil_rect(&self) -> Option<(f32, f32, f32, f32)> {
+        self.pencil_rect
     }
 
     fn draw_text_line(&self, text: &str, x: f32, y: f32, max_width: f32) {
@@ -239,6 +249,7 @@ impl Renderer {
     /// y caret, además de las franjas de pestañas/menú/atajos/gutter según `ui`.
     pub fn paint(&mut self, ws: &Workspace, ui: &UiConfig) {
         self.tab_rects.clear();
+        self.pencil_rect = None;
         let state = ws.active();
         let buf = state.doc.buffer();
         let total_lines = buf.len_lines();
@@ -456,6 +467,7 @@ impl Renderer {
             crate::Prompt::Path(p) => self.draw_path_prompt(p, width, top),
             crate::Prompt::Find(s) => self.draw_search_prompt(s, doc, width, top, "buscar"),
             crate::Prompt::Replace(s) => self.draw_search_prompt(s, doc, width, top, "reemplazar"),
+            crate::Prompt::VimCmdline(line) => self.draw_text_line(&format!(":{line}"), PADDING_X, top, width - PADDING_X),
             crate::Prompt::None => {}
         }
     }
