@@ -10,7 +10,7 @@ pub enum EditorAction {
     MoveLeft, MoveRight, MoveUp, MoveDown, MoveHome, MoveEnd, MoveDocStart, MoveDocEnd,
     ExtendLeft, ExtendRight, ExtendUp, ExtendDown, ExtendHome, ExtendEnd,
     Backspace, DeleteForward, InsertNewline,
-    Undo, Redo, SelectAll, Copy, Cut, Paste, Save, Find,
+    Undo, Redo, SelectAll, Copy, Cut, Paste, Save, Find, Replace, FindNext, FindPrev, OpenPathPrompt,
     None,
 }
 
@@ -45,6 +45,10 @@ pub fn action_for_vk(vk: u32, m: Modifiers) -> EditorAction {
         (0x56, true, _) => Paste,
         (0x53, true, _) => Save,
         (0x46, true, _) => Find,
+        (0x48, true, _) => Replace,
+        (0x72, false, false) => FindNext,
+        (0x72, false, true) => FindPrev,
+        (0x4F, true, _) => OpenPathPrompt,
         _ => None,
     }
 }
@@ -112,5 +116,21 @@ mod tests {
     #[test]
     fn unknown_key_is_none() {
         assert_eq!(action_for_vk(0x90, m(false, false)), EditorAction::None);
+    }
+
+    #[test]
+    fn ctrl_h_is_replace() {
+        assert_eq!(action_for_vk(0x48, m(true, false)), EditorAction::Replace);
+    }
+
+    #[test]
+    fn f3_navigates_matches() {
+        assert_eq!(action_for_vk(0x72, m(false, false)), EditorAction::FindNext);
+        assert_eq!(action_for_vk(0x72, m(false, true)), EditorAction::FindPrev);
+    }
+
+    #[test]
+    fn ctrl_o_opens_path_prompt() {
+        assert_eq!(action_for_vk(0x4F, m(true, false)), EditorAction::OpenPathPrompt);
     }
 }

@@ -71,7 +71,7 @@ impl EditorState {
             Redo => {
                 self.doc.redo();
             }
-            Copy | Cut | Paste | Save | Find | None => {} // se resuelven en window.rs (Tasks 7-8) o en planes posteriores
+            Copy | Cut | Paste | Save | Find | Replace | FindNext | FindPrev | OpenPathPrompt | None => {} // se resuelven en window.rs (Tasks 7-8) o en planes posteriores
         }
 
         let (line, _) = self.doc.buffer().line_col(self.doc.selection().head);
