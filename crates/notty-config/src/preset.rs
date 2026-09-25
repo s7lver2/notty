@@ -5,9 +5,13 @@ use crate::{MenuBar, Preset, TabsPosition, UiConfig};
 /// Moderna y Clásica con números de línea y sin línea de comandos fusionada;
 /// Zen sin números de línea y con la línea de comandos fusionada (estado y
 /// prompts en una sola franja).
+/// `Custom` no es un preset "aplicable": no lo pasa nadie a propósito (lo pone
+/// `settings_model::apply` cuando se toca una pieza suelta que ya no coincide con
+/// ninguno de los tres de abajo), así que aquí no hace nada más que marcarlo.
 pub fn apply_preset(ui: &mut UiConfig, preset: Preset) {
     ui.preset = preset;
     match preset {
+        Preset::Custom => {}
         Preset::Moderna => {
             ui.tabs_position = TabsPosition::Title;
             ui.menubar = MenuBar::Hidden;

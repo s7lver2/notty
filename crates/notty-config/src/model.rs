@@ -7,6 +7,12 @@ pub enum Preset {
     Moderna,
     Clasica,
     Zen,
+    /// Se llega aquí tocando una pieza suelta (p.ej. la posición de las pestañas)
+    /// sin que coincida con ninguno de los tres presets fijos; como `setSetting`
+    /// en la maqueta (línea 1054). No se elige nunca a mano: `apply_preset` no lo
+    /// contempla como entrada.
+    #[serde(rename = "custom")]
+    Custom,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -99,6 +105,16 @@ mod tests {
         assert!(ui.hints_bar);
         assert!(ui.status_bar);
         let _ = ui.line_numbers; // solo comprueba que existe el campo
+    }
+
+    #[test]
+    fn custom_preset_round_trips_as_the_string_custom() {
+        let mut ui = UiConfig { preset: Preset::Custom, ..UiConfig::default() };
+        ui.tabs_position = TabsPosition::Below;
+        let text = toml::to_string(&ui).unwrap();
+        assert!(text.contains("preset = \"custom\""));
+        let back: UiConfig = toml::from_str(&text).unwrap();
+        assert_eq!(back.preset, Preset::Custom);
     }
 
     #[test]

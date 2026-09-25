@@ -120,6 +120,27 @@ unsafe fn update_title(hwnd: HWND, state: &EditorState) {
     }
 }
 
+/// `on_open_path` de Ajustes («Editar el archivo», «Abrir [keys]»): abre `path` como
+/// documento en la ventana principal `hwnd`. Se recupera el `WindowState` desde
+/// `GWLP_USERDATA`, igual que hace `wndproc`; si `hwnd` ya no es válido (se cerró
+/// mientras Ajustes estaba abierto), no hace nada.
+fn open_config_as_document(hwnd: HWND, path: std::path::PathBuf) {
+    unsafe {
+        let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState;
+        if let Some(w) = ptr.as_mut() {
+            if let Ok(opened) = crate::open_as_document(&path) {
+                w.ws.open(EditorState::from_opened(opened));
+            } else {
+                let mut state = EditorState::new_empty();
+                state.path = Some(path);
+                w.ws.open(state);
+            }
+            update_title(hwnd, w.ws.active());
+            let _ = InvalidateRect(Some(hwnd), None, false);
+        }
+    }
+}
+
 /// Abre la ventana principal de notty y bloquea hasta que se cierra.
 /// `path` es la ruta pasada por línea de comandos, si la hay; `load` es el resultado
 /// de cargar `config.toml` (que puede traer un aviso si el archivo estaba roto).
@@ -284,7 +305,7 @@ unsafe fn setup_chrome(hwnd: HWND, dark: bool) {
 
 /// `DWMWA_USE_IMMERSIVE_DARK_MODE`: oscurece el marco nativo (los 4 px de borde que
 /// sigue dibujando DWM). Se vuelve a llamar cuando cambia el tema (Task 10).
-unsafe fn apply_dark_mode(hwnd: HWND, dark: bool) {
+pub(crate) unsafe fn apply_dark_mode(hwnd: HWND, dark: bool) {
     unsafe {
         let value: i32 = if dark { 1 } else { 0 };
         let _ = DwmSetWindowAttribute(
@@ -297,7 +318,7 @@ unsafe fn apply_dark_mode(hwnd: HWND, dark: bool) {
 }
 
 /// Lee `HKCU\...\Personalize\AppsUseLightTheme`. Si no se puede leer, asume modo claro.
-fn system_uses_dark_mode() -> bool {
+pub(crate) fn system_uses_dark_mode() -> bool {
     use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
     unsafe {
         let subkey = w!(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
@@ -528,6 +549,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                                 let cfg_for_settings = w.cfg.clone();
                                 let cfg_for_theme = w.cfg.clone();
                                 let hwnd_copy = hwnd;
+                                let hwnd_for_open = hwnd;
                                 let _ = crate::settings_window::open(
                                     hwnd,
                                     cfg_for_settings,
@@ -536,6 +558,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                                         apply_dark_mode(hwnd_copy, dark);
                                         let _ = InvalidateRect(Some(hwnd_copy), None, false);
                                     }),
+                                    Box::new(move |path| open_config_as_document(hwnd_for_open, path)),
                                 );
                             }
                         }
@@ -887,6 +910,7 @@ fn run_menu_item(w: &mut WindowState, hwnd: HWND, menu_idx: usize, item_idx: usi
             let cfg_for_settings = w.cfg.clone();
             let cfg_for_theme = w.cfg.clone();
             let hwnd_copy = hwnd;
+            let hwnd_for_open = hwnd;
             let _ = crate::settings_window::open(
                 hwnd,
                 cfg_for_settings,
@@ -895,6 +919,7 @@ fn run_menu_item(w: &mut WindowState, hwnd: HWND, menu_idx: usize, item_idx: usi
                     apply_dark_mode(hwnd_copy, dark);
                     let _ = InvalidateRect(Some(hwnd_copy), None, false);
                 }),
+                Box::new(move |path| open_config_as_document(hwnd_for_open, path)),
             );
         }
         MenuCmd::CloseTab => {

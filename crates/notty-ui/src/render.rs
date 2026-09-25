@@ -85,26 +85,25 @@ pub struct ViewState {
 }
 
 /// Los formatos de texto fijos que usa la maqueta, creados una vez en `Renderer::new`.
-/// Varios campos y helpers de dibujo (`text`, `stroke_*`) no se usan todavía: entran
-/// en juego a partir de la Task 7, cuando se dibujan pestañas/menú/atajos/estado.
-#[allow(dead_code)]
-struct Fonts {
-    ui_12: IDWriteTextFormat,
-    ui_12_5: IDWriteTextFormat,
-    ui_11: IDWriteTextFormat,
-    ui_11_5: IDWriteTextFormat,
-    ui_13: IDWriteTextFormat,
-    ui_20_semibold: IDWriteTextFormat,
-    ui_11_5_semibold: IDWriteTextFormat,
-    ui_9: IDWriteTextFormat,
-    mono_13: IDWriteTextFormat,
-    mono_13_bold: IDWriteTextFormat,
-    mono_11: IDWriteTextFormat,
-    mono_11_bold: IDWriteTextFormat,
-    mono_11_5: IDWriteTextFormat,
-    mono_11_5_semibold: IDWriteTextFormat,
-    mono_12: IDWriteTextFormat,
-    mono_12_5: IDWriteTextFormat,
+/// `pub(crate)` porque `settings_window` (Task 11) también dibuja con ellos, a través
+/// de `Renderer::fonts()`.
+pub(crate) struct Fonts {
+    pub(crate) ui_12: IDWriteTextFormat,
+    pub(crate) ui_12_5: IDWriteTextFormat,
+    pub(crate) ui_11: IDWriteTextFormat,
+    pub(crate) ui_11_5: IDWriteTextFormat,
+    pub(crate) ui_13: IDWriteTextFormat,
+    pub(crate) ui_20_semibold: IDWriteTextFormat,
+    pub(crate) ui_11_5_semibold: IDWriteTextFormat,
+    pub(crate) ui_9: IDWriteTextFormat,
+    pub(crate) mono_13: IDWriteTextFormat,
+    pub(crate) mono_13_bold: IDWriteTextFormat,
+    pub(crate) mono_11: IDWriteTextFormat,
+    pub(crate) mono_11_bold: IDWriteTextFormat,
+    pub(crate) mono_11_5: IDWriteTextFormat,
+    pub(crate) mono_11_5_semibold: IDWriteTextFormat,
+    pub(crate) mono_12: IDWriteTextFormat,
+    pub(crate) mono_12_5: IDWriteTextFormat,
 }
 
 /// Busca `primary` en la colección de fuentes del sistema; si no existe, usa `fallback`.
@@ -294,9 +293,30 @@ impl Renderer {
         if y_dip < layout::TITLEBAR_H { Hit::Caption } else { Hit::None }
     }
 
+    /// Formatos de texto fijos, para que `settings_window` (Task 11) dibuje con los
+    /// mismos que el resto de la app en vez de crear los suyos.
+    pub(crate) fn fonts(&self) -> &Fonts {
+        &self.fonts
+    }
+
+    /// `BeginDraw` + `Clear`. Junto con `end_paint`, deja que `settings_window`
+    /// reutilice el mismo `ID2D1HwndRenderTarget` sin repetir el `unsafe` de Direct2D.
+    pub(crate) fn begin_paint(&self, bg: Rgba) {
+        unsafe {
+            self.target.BeginDraw();
+            self.target.Clear(Some(&color(bg)));
+        }
+    }
+
+    pub(crate) fn end_paint(&self) {
+        unsafe {
+            let _ = self.target.EndDraw(None, None);
+        }
+    }
+
     // --- Helpers de dibujo con la brocha única --------------------------------------
 
-    fn fill(&self, r: Rect, c: Rgba) {
+    pub(crate) fn fill(&self, r: Rect, c: Rgba) {
         if r.is_empty() {
             return;
         }
@@ -306,7 +326,7 @@ impl Renderer {
         }
     }
 
-    fn fill_round(&self, r: Rect, radius: f32, c: Rgba) {
+    pub(crate) fn fill_round(&self, r: Rect, radius: f32, c: Rgba) {
         if r.is_empty() {
             return;
         }
@@ -320,7 +340,7 @@ impl Renderer {
     }
 
     #[allow(dead_code)]
-    fn stroke_line(&self, x0: f32, y0: f32, x1: f32, y1: f32, width: f32, c: Rgba) {
+    pub(crate) fn stroke_line(&self, x0: f32, y0: f32, x1: f32, y1: f32, width: f32, c: Rgba) {
         unsafe {
             self.brush.SetColor(&color(c));
             self.target.DrawLine(Vector2 { X: x0, Y: y0 }, Vector2 { X: x1, Y: y1 }, &self.brush, width, None);
@@ -328,7 +348,7 @@ impl Renderer {
     }
 
     #[allow(dead_code)]
-    fn stroke_rect(&self, r: Rect, width: f32, c: Rgba) {
+    pub(crate) fn stroke_rect(&self, r: Rect, width: f32, c: Rgba) {
         if r.is_empty() {
             return;
         }
@@ -339,7 +359,7 @@ impl Renderer {
     }
 
     #[allow(dead_code)]
-    fn stroke_round_rect(&self, r: Rect, radius: f32, width: f32, c: Rgba) {
+    pub(crate) fn stroke_round_rect(&self, r: Rect, radius: f32, width: f32, c: Rgba) {
         if r.is_empty() {
             return;
         }
@@ -357,13 +377,13 @@ impl Renderer {
     /// Dibuja `s` con `fmt` en `r`, centrado verticalmente en su alto (recorte con
     /// «…» si el formato lo tiene configurado).
     #[allow(dead_code)]
-    fn text(&self, s: &str, fmt: &IDWriteTextFormat, r: Rect, c: Rgba) {
+    pub(crate) fn text(&self, s: &str, fmt: &IDWriteTextFormat, r: Rect, c: Rgba) {
         self.text_aligned(s, fmt, r, c, false);
     }
 
     /// Igual que `text`, pero alineado a la derecha de `r`.
     #[allow(dead_code)]
-    fn text_right(&self, s: &str, fmt: &IDWriteTextFormat, r: Rect, c: Rgba) {
+    pub(crate) fn text_right(&self, s: &str, fmt: &IDWriteTextFormat, r: Rect, c: Rgba) {
         self.text_aligned(s, fmt, r, c, true);
     }
 
@@ -390,7 +410,7 @@ impl Renderer {
     }
 
     /// Ancho de `s` con `fmt`, sin límite (para medir nombres de pestaña, etc.).
-    fn measure(&self, s: &str, fmt: &IDWriteTextFormat) -> f32 {
+    pub(crate) fn measure(&self, s: &str, fmt: &IDWriteTextFormat) -> f32 {
         let w = wide(s);
         if w.is_empty() {
             return 0.0;

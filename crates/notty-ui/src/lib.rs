@@ -13,6 +13,7 @@ mod prompt;
 mod raw_doc;
 pub mod render;
 mod search_prompt;
+pub mod settings_model;
 pub mod settings_window;
 mod theme;
 mod viewport;
