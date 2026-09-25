@@ -22,6 +22,7 @@ const ID_THEME_DARK: usize = 112;
 const ID_LINE_NUMBERS: usize = 120;
 const ID_FILES_TABS: usize = 130;
 const ID_FILES_BUFFERS: usize = 131;
+const ID_VIM_ALWAYS: usize = 121;
 
 struct State {
     cfg: Rc<RefCell<Config>>,
@@ -62,6 +63,7 @@ pub fn open(parent: HWND, cfg: Rc<RefCell<Config>>, on_change: Box<dyn Fn()>) ->
         let theme = cfg.borrow().ui.theme;
         let line_numbers = cfg.borrow().ui.line_numbers;
         let files = cfg.borrow().ui.files;
+        let vim_always = cfg.borrow().ui.vim_always;
 
         radio(hwnd, instance, "Moderna", 20, 20, ID_PRESET_MODERNA, preset == Preset::Moderna);
         radio(hwnd, instance, "Clásica", 20, 48, ID_PRESET_CLASICA, preset == Preset::Clasica);
@@ -72,9 +74,10 @@ pub fn open(parent: HWND, cfg: Rc<RefCell<Config>>, on_change: Box<dyn Fn()>) ->
         radio(hwnd, instance, "Tema: oscuro", 20, 172, ID_THEME_DARK, theme == Theme::Dark);
 
         checkbox(hwnd, instance, "Números de línea", 20, 212, ID_LINE_NUMBERS, line_numbers);
+        checkbox(hwnd, instance, "Modo vim siempre", 20, 240, ID_VIM_ALWAYS, vim_always);
 
-        radio(hwnd, instance, "Pestañas", 20, 252, ID_FILES_TABS, files == Files::Tabs);
-        radio(hwnd, instance, "Buffers", 160, 252, ID_FILES_BUFFERS, files == Files::Buffers);
+        radio(hwnd, instance, "Pestañas", 20, 280, ID_FILES_TABS, files == Files::Tabs);
+        radio(hwnd, instance, "Buffers", 160, 280, ID_FILES_BUFFERS, files == Files::Buffers);
 
         let state = Box::new(State { cfg, on_change });
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, Box::into_raw(state) as isize);
@@ -181,6 +184,7 @@ fn apply_control(state: &mut State, id: usize) {
         ID_THEME_LIGHT => cfg.ui.theme = Theme::Light,
         ID_THEME_DARK => cfg.ui.theme = Theme::Dark,
         ID_LINE_NUMBERS => cfg.ui.line_numbers = !cfg.ui.line_numbers,
+        ID_VIM_ALWAYS => cfg.ui.vim_always = !cfg.ui.vim_always,
         ID_FILES_TABS => cfg.ui.files = Files::Tabs,
         ID_FILES_BUFFERS => cfg.ui.files = Files::Buffers,
         _ => return,

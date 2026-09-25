@@ -1145,7 +1145,7 @@ git commit -m "feat(ui): dibuja el indicador de modo vim y la cuadrícula hexade
 - Consumes: nada nuevo de otros crates.
 - Produces: `UiConfig` gana `pub vim_always: bool` (`#[serde(default)]`, `false` por defecto). La ventana de Ajustes (Plan 3) gana una casilla más, "Modo vim siempre", en la misma sección donde ya estaban preset/tema/números de línea.
 
-- [ ] **Step 1: Escribir el test que falla**
+- [x] **Step 1: Escribir el test que falla**
 
 Añadir a `mod tests` de `crates/notty-config/src/model.rs`:
 
@@ -1160,12 +1160,12 @@ Añadir a `mod tests` de `crates/notty-config/src/model.rs`:
     }
 ```
 
-- [ ] **Step 2: Ejecutar y ver que falla**
+- [x] **Step 2: Ejecutar y ver que falla**
 
 Run: `cargo test -p notty-config model`
 Expected: FAIL de compilación, `no field vim_always on type UiConfig`.
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 En `crates/notty-config/src/model.rs`, añadir el campo a `UiConfig` (junto a `hints_bar`/`status_bar`) y a su `Default`:
 
@@ -1181,12 +1181,12 @@ En `crates/notty-config/src/model.rs`, añadir el campo a `UiConfig` (junto a `h
             vim_always: false,
 ```
 
-- [ ] **Step 4: Ejecutar y ver que pasa**
+- [x] **Step 4: Ejecutar y ver que pasa**
 
 Run: `cargo test --workspace`
 Expected: PASS, +1 test.
 
-- [ ] **Step 5: Añadir la casilla a la ventana de Ajustes**
+- [x] **Step 5: Añadir la casilla a la ventana de Ajustes**
 
 En `crates/notty-ui/src/settings_window.rs`, añadir un id nuevo y una llamada a `checkbox(...)` junto a la de `ID_LINE_NUMBERS` (mismo patrón que ya existe del Plan 3):
 
@@ -1208,12 +1208,12 @@ Y en `apply_control`:
 
 Nota de alcance: este plan **no** conecta todavía `vim_always` con la creación de documentos nuevos (`EditorState::new_empty()`/`from_opened()` seguirían arrancando siempre con `vim: None`). Dejarlo así, documentado, es intencional: conectar la config con el arranque de cada documento es un cambio de una línea que encaja mejor junto al resto del trabajo de "instancia única y arranque" del Plan 6, para no tocar `window.rs` dos veces por lo mismo.
 
-- [ ] **Step 6: Compilar**
+- [x] **Step 6: Compilar**
 
 Run: `cargo build --workspace`
 Expected: compila.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add crates/notty-config crates/notty-ui

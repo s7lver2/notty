@@ -56,6 +56,7 @@ pub struct UiConfig {
     pub menubar: MenuBar,
     pub hints_bar: bool,
     pub status_bar: bool,
+    pub vim_always: bool,
 }
 
 impl Default for UiConfig {
@@ -69,6 +70,7 @@ impl Default for UiConfig {
             menubar: MenuBar::default(),
             hints_bar: true,
             status_bar: true,
+            vim_always: false,
         };
         let preset = ui.preset;
         crate::apply_preset(&mut ui, preset);
@@ -121,5 +123,14 @@ mod tests {
     #[test]
     fn invalid_preset_value_is_a_parse_error() {
         assert!(toml::from_str::<Config>("[ui]\npreset = \"no-existe\"\n").is_err());
+    }
+
+    #[test]
+    fn vim_always_defaults_to_false_and_round_trips() {
+        assert!(!UiConfig::default().vim_always);
+        let cfg = Config { ui: UiConfig { vim_always: true, ..UiConfig::default() } };
+        let text = toml::to_string(&cfg).unwrap();
+        let back: Config = toml::from_str(&text).unwrap();
+        assert!(back.ui.vim_always);
     }
 }
