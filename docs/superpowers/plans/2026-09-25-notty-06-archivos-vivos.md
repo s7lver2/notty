@@ -904,7 +904,7 @@ git commit -m "feat(ui): autoguardado, conflicto al guardar y recuperación tras
 - Consumes: `notty_ipc::{Message, encode, decode, PIPE_NAME}`.
 - Produces: al arrancar `notty <ruta>` sin `--daemon`, si ya hay un servidor de pipe escuchando (otra instancia de `notty` normal, o el daemon), se envía `Message::OpenPath(ruta)` (o `NewTemp`/`NewPermanent` si así se invocó) y el proceso termina sin abrir ventana; si no hay nadie escuchando, la instancia actual crea el pipe y se convierte en el servidor mientras viva (además de abrir su propia ventana normalmente). `notty --daemon` no abre ninguna ventana de documento: solo sirve el pipe y espera (la bandeja/atajos llegan en la Task 9).
 
-- [ ] **Step 1: Añadir las funcionalidades de *named pipes***
+- [x] **Step 1: Añadir las funcionalidades de *named pipes***
 
 Run:
 
@@ -918,7 +918,7 @@ Y añadir la dependencia al `notty-ipc` recién creado:
 cargo add notty-ipc -p notty --path crates/notty-ipc
 ```
 
-- [ ] **Step 2: Cliente del pipe (intentar reenviar antes de abrir ventana propia)**
+- [x] **Step 2: Cliente del pipe (intentar reenviar antes de abrir ventana propia)**
 
 `crates/notty/src/main.rs`. Arquitectura: intentar `CreateFileW(PIPE_NAME, ...)` como cliente; si tiene éxito, escribir el mensaje codificado y salir con éxito; si falla (no hay servidor), seguir el arranque normal y, además, lanzar un hilo servidor.
 
@@ -951,7 +951,7 @@ if path.is_some() && try_forward_to_existing_instance(&msg) {
 
 (Si `path` es `None`, es decir "notty sin argumentos", no tiene sentido reenviar nada — se abre una ventana nueva con documento vacío como hasta ahora, aunque ya haya otra instancia corriendo; solo se evita duplicar ventana cuando se pide abrir un archivo concreto. Reenviar `NewTemp`/`NewPermanent` es responsabilidad del daemon, no de este camino de arranque normal — ver Task 9.)
 
-- [ ] **Step 3: Servidor del pipe (hilo en segundo plano dentro de la instancia con ventana)**
+- [x] **Step 3: Servidor del pipe (hilo en segundo plano dentro de la instancia con ventana)**
 
 ```rust
 fn spawn_pipe_server(sender: std::sync::mpsc::Sender<notty_ipc::Message>) {
@@ -995,7 +995,7 @@ Este hilo manda cada mensaje recibido por un `std::sync::mpsc::Sender`; el extre
 
 Al recibir `Message::OpenPath(p)` (con `p` no vacío) en la ventana principal: abrir ese archivo igual que hace `Ctrl+O` al confirmar una ruta existente (reutiliza el mismo camino que la Task 8/9 del Plan 4 ya implementó para abrir por ruta), según `cfg.ui.files` como pestaña nueva o buffer nuevo.
 
-- [ ] **Step 4: Modo `--daemon`**
+- [x] **Step 4: Modo `--daemon`**
 
 `crates/notty/src/main.rs`:
 
@@ -1027,7 +1027,7 @@ pub fn run() -> windows::core::Result<()> {
 }
 ```
 
-- [ ] **Step 5: Compilar y comprobar manualmente**
+- [x] **Step 5: Compilar y comprobar manualmente**
 
 Run: `cargo build --workspace`
 Expected: compila.
@@ -1035,7 +1035,7 @@ Expected: compila.
 Run (dos terminales): primero `cargo run --bin notty -- /tmp/notas.txt &` (déjalo corriendo en segundo plano), y en la segunda `timeout 3 cargo run --bin notty -- /tmp/notas.txt` otra vez con la misma ruta.
 Expected (manual): la segunda invocación termina casi al instante (no abre una segunda ventana); la primera instancia recibe el mensaje y, si vuelves a mirarla, no ha crasheado.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/notty

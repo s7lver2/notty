@@ -10,5 +10,6 @@ path = "src/main.rs"
 
 [dependencies]
 notty-config = { path = "../notty-config" }
+notty-ipc = { version = "0.1.0", path = "../notty-ipc" }
 notty-ui = { path = "../notty-ui" }
-windows = { version = "0.62.2", features = ["Win32_Foundation"] }
+windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Pipes"] }

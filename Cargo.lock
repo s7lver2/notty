@@ -113,6 +113,7 @@ name = "notty"
 version = "0.1.0"
 dependencies = [
  "notty-config",
+ "notty-ipc",
  "notty-ui",
  "windows",
 ]
@@ -165,6 +166,7 @@ dependencies = [
  "notty-core",
  "notty-input",
  "notty-io",
+ "notty-ipc",
  "tempfile",
  "windows",
  "windows-numerics",

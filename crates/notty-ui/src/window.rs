@@ -37,6 +37,10 @@ use crate::{EditorState, Hit, Modifiers, Renderer, Viewport};
 /// Id del `SetTimer` de autoguardado (dispara cada segundo; el manejador de `WM_TIMER`
 /// decide si de verdad hay algo que guardar).
 const ID_AUTOSAVE_TIMER: usize = 1;
+/// Id del `SetTimer` de sondeo del pipe de instancia única (Task 8): más corto que el
+/// de autoguardado para que abrir un archivo desde una segunda invocación de `notty`
+/// se note casi al instante.
+const ID_IPC_TIMER: usize = 2;
 
 /// Snapshot de documentos sucios (nombre, texto, sucio) leído por el `panic hook` para
 /// volcar a `notty_io::recovery_dir()`. Vive en memoria estática (`Box::leak`) para que
@@ -62,6 +66,10 @@ struct WindowState {
     open_menu: Option<usize>,
     /// Snapshot para el `panic hook`, ver `RecoverySnapshot`.
     recovery: &'static RecoverySnapshot,
+    /// Extremo receptor del pipe de instancia única (Task 8): `None` si `spawn_pipe_server`
+    /// no llegó a arrancar (no debería pasar en la instancia con ventana, pero se trata
+    /// como "nadie más pide abrir nada" en vez de entrar en pánico).
+    ipc_rx: Option<std::sync::mpsc::Receiver<notty_ipc::Message>>,
 }
 
 impl WindowState {
@@ -194,6 +202,28 @@ fn autosave_tick(w: &mut WindowState) {
     refresh_recovery(w);
 }
 
+/// Sondea `w.ipc_rx` (si lo hay) por mensajes del pipe de instancia única y los
+/// aplica: `OpenPath` abre ese archivo igual que `Ctrl+O` con una ruta existente.
+/// `NewTemp`/`NewPermanent` no llegan por este camino en la instancia normal (los
+/// maneja el daemon lanzando `notty.exe --new-temp`/`--new-permanent`, Task 9); si
+/// alguno llegara igualmente, no se hace nada. Devuelve `true` si hubo que repintar.
+fn ipc_tick(w: &mut WindowState) -> bool {
+    let Some(rx) = w.ipc_rx.as_ref() else { return false };
+    let mut changed = false;
+    while let Ok(msg) = rx.try_recv() {
+        if let notty_ipc::Message::OpenPath(p) = msg {
+            if !p.is_empty() {
+                let path = std::path::PathBuf::from(p);
+                if let Ok(opened) = crate::open_as_document(&path) {
+                    w.ws.open(EditorState::from_opened(opened));
+                    changed = true;
+                }
+            }
+        }
+    }
+    changed
+}
+
 /// Resuelve `Prompt::Conflict`: `M` conserva lo escrito en notty y lo guarda, `D`
 /// descarta los cambios locales y recarga lo que hay en disco. Cualquier otra tecla
 /// no hace nada (Esc ya se maneja antes, en `handle_prompt_keydown`).
@@ -282,6 +312,17 @@ fn install_recovery_hook(snapshot: &'static RecoverySnapshot) {
 /// `path` es la ruta pasada por línea de comandos, si la hay; `load` es el resultado
 /// de cargar `config.toml` (que puede traer un aviso si el archivo estaba roto).
 pub fn run(path: Option<&str>, load: notty_config::LoadResult) -> Result<()> {
+    run_with_ipc(path, load, None)
+}
+
+/// Igual que `run`, pero además recibe el extremo receptor del pipe de instancia
+/// única (Task 8): cada `notty_ipc::Message::OpenPath` que llegue mientras esta
+/// ventana vive se abre como si se hubiera pedido con `Ctrl+O`.
+pub fn run_with_ipc(
+    path: Option<&str>,
+    load: notty_config::LoadResult,
+    ipc_rx: Option<std::sync::mpsc::Receiver<notty_ipc::Message>>,
+) -> Result<()> {
     // Snapshot de recuperación: vive el resto del proceso (`Box::leak`) para que el
     // `panic hook`, instalado una sola vez, tenga una dirección `'static` válida.
     let recovery: &'static RecoverySnapshot = Box::leak(Box::new(Mutex::new(Vec::new())));
@@ -415,6 +456,7 @@ pub fn run(path: Option<&str>, load: notty_config::LoadResult) -> Result<()> {
             active_window: true,
             open_menu: None,
             recovery,
+            ipc_rx,
         });
         let ptr = Box::into_raw(window_state);
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, ptr as isize);
@@ -424,6 +466,7 @@ pub fn run(path: Option<&str>, load: notty_config::LoadResult) -> Result<()> {
 
         let _ = ShowWindow(hwnd, SW_SHOW);
         let _ = SetTimer(Some(hwnd), ID_AUTOSAVE_TIMER, 1000, None);
+        let _ = SetTimer(Some(hwnd), ID_IPC_TIMER, 150, None);
 
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
@@ -1043,10 +1086,20 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     }
                     return LRESULT(0);
                 }
+                if wparam.0 == ID_IPC_TIMER {
+                    if let Some(w) = ptr.as_mut() {
+                        if ipc_tick(w) {
+                            update_title(hwnd, w.ws.active());
+                            let _ = InvalidateRect(Some(hwnd), None, false);
+                        }
+                    }
+                    return LRESULT(0);
+                }
                 DefWindowProcW(hwnd, msg, wparam, lparam)
             }
             WM_DESTROY => {
                 let _ = KillTimer(Some(hwnd), ID_AUTOSAVE_TIMER);
+                let _ = KillTimer(Some(hwnd), ID_IPC_TIMER);
                 PostQuitMessage(0);
                 LRESULT(0)
             }
