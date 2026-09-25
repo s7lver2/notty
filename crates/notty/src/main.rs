@@ -1,6 +1,7 @@
 //! Punto de entrada de notty: interpreta argv, carga la configuración y abre la ventana.
 
 pub(crate) mod daemon;
+pub(crate) mod shortcut;
 
 /// Intenta reenviar `msg` a una instancia de notty ya en marcha (ventana normal o
 /// `--daemon`) a través del *named pipe* de instancia única. Devuelve `true` si había
@@ -69,7 +70,17 @@ fn main() -> windows::core::Result<()> {
         return daemon::run();
     }
 
-    let path = args.get(1).cloned();
+    // `--new-temp`/`--new-permanent`: los lanza el daemon (Task 9) al pulsar un atajo
+    // global. Cada pulsación abre su propia ventana nueva sin pasar por el pipe: no
+    // tiene sentido "reenviar a la instancia existente" cuando lo que se pide es
+    // justo lo contrario, un documento nuevo. "--new-permanent" es, en la práctica,
+    // el mismo camino que "notty sin argumentos" (documento vacío, ruta `None`): el
+    // modo real (borrador/volátil) solo aplica a "--new-temp", que se decide con
+    // `cfg.files.temp_mode`.
+    let new_temp = args.get(1).map(String::as_str) == Some("--new-temp");
+    let is_new_permanent = args.get(1).map(String::as_str) == Some("--new-permanent");
+
+    let path = if new_temp || is_new_permanent { None } else { args.get(1).cloned() };
     if let Some(p) = &path {
         let msg = notty_ipc::Message::OpenPath(p.clone());
         if try_forward_to_existing_instance(&msg) {
@@ -83,5 +94,12 @@ fn main() -> windows::core::Result<()> {
     spawn_pipe_server(tx);
 
     let load = notty_config::load(&notty_config::default_path());
-    notty_ui::window::run_with_ipc(path.as_deref(), load, Some(rx))
+    if new_temp {
+        let cfg = match &load {
+            notty_config::LoadResult::Loaded(c) | notty_config::LoadResult::Missing(c) | notty_config::LoadResult::Defaulted(c, _) => c.clone(),
+        };
+        notty_ui::window::run_with_temp(load, Some(rx), cfg.files.temp_mode, cfg.files.default_extension.clone())
+    } else {
+        notty_ui::window::run_with_ipc(path.as_deref(), load, Some(rx))
+    }
 }

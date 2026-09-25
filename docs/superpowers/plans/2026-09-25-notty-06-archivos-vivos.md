@@ -1055,7 +1055,7 @@ git commit -m "feat(daemon): instancia única mediante un named pipe"
 - Consumes: `notty_config::{HotkeyMechanism, load, default_path}`, `notty_input::parse_key_spec` (reutilizado para leer las combinaciones desde config), `notty_ipc::Message`.
 - Produces: `daemon::run()` completo: icono en la bandeja (`Shell_NotifyIconW`) y dos atajos globales (`RegisterHotKey`) — por defecto `Win+Alt+N` (nuevo temporal) y `Win+Alt+Shift+N` (nuevo permanente) si `cfg.hotkey.mechanism == Daemon` — que, al pulsarse, lanzan `notty.exe --new-temp`/`notty.exe --new-permanent` (nuevos flags de `main.rs` que crean directamente un `EditorState::new_temp`/uno vacío con ruta `None`, sin pasar por el pipe: cada pulsación abre su propia ventana nueva, que es lo que se espera de "nuevo" temporal/permanente). `shortcut::create(target_exe: &Path, args: &str, hotkey_vk: u32, hotkey_mods: u32, lnk_path: &Path) -> windows::core::Result<()>` crea un `.lnk` con `IShellLinkW`/`IPersistFile` que incluye la tecla rápida (solo válida como `Ctrl+Alt+Letra` en un acceso directo de Windows, según limitación del propio sistema operativo — recuérdalo en el nombre de la constante de atajo por defecto para este mecanismo).
 
-- [ ] **Step 1: Añadir las funcionalidades de bandeja, atajos y COM/shell**
+- [x] **Step 1: Añadir las funcionalidades de bandeja, atajos y COM/shell**
 
 Run:
 
@@ -1063,7 +1063,7 @@ Run:
 cargo add windows -p notty --features Win32_UI_Shell,Win32_System_Com,Win32_UI_Input_KeyboardAndMouse
 ```
 
-- [ ] **Step 2: Bandeja y atajos globales**
+- [x] **Step 2: Bandeja y atajos globales**
 
 `crates/notty/src/daemon.rs`, sustituir el esqueleto de la Task 8 por la versión completa:
 
@@ -1173,7 +1173,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
 
 Ajusta `notty_config::LoadResult` en el `match` inicial de `run()` si su forma exacta difiere (ya se usa igual en `main.rs` desde el Plan 3); ajusta cualquier otra firma de `windows` al compilar.
 
-- [ ] **Step 3: Flags `--new-temp`/`--new-permanent` en `main.rs`**
+- [x] **Step 3: Flags `--new-temp`/`--new-permanent` en `main.rs`**
 
 En `crates/notty/src/main.rs`, junto al `if args.get(1) == Some("--daemon")` de la Task 8:
 
@@ -1187,7 +1187,7 @@ En `crates/notty/src/main.rs`, junto al `if args.get(1) == Some("--daemon")` de 
 
 Y, tras cargar `cfg`, si `args.get(1)` era `"--new-temp"`, crear la ventana con `EditorState::new_temp(cfg.files.temp_mode, &cfg.files.default_extension)` como documento inicial en vez del vacío de siempre (ajusta `notty_ui::window::run` para aceptar este caso, o añade una función hermana `run_with_temp(cfg, mode)` si resulta más simple que enredar la firma existente).
 
-- [ ] **Step 4: Alternativa `.lnk`**
+- [x] **Step 4: Alternativa `.lnk`**
 
 `crates/notty/src/shortcut.rs`:
 
@@ -1225,12 +1225,12 @@ pub fn create(target_exe: &Path, args: &str, description: &str, lnk_path: &Path)
 
 `crates/notty/src/main.rs` añade `mod shortcut;` y `mod daemon;` junto al resto de `mod`.
 
-- [ ] **Step 5: Compilar**
+- [x] **Step 5: Compilar**
 
 Run: `cargo build --workspace`
 Expected: compila.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/notty

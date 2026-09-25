@@ -323,6 +323,27 @@ pub fn run_with_ipc(
     load: notty_config::LoadResult,
     ipc_rx: Option<std::sync::mpsc::Receiver<notty_ipc::Message>>,
 ) -> Result<()> {
+    run_inner(path, load, ipc_rx, None)
+}
+
+/// Variante de `run_with_ipc` usada por `notty --new-temp` (Task 9): abre la ventana
+/// directamente con un documento temporal (`EditorState::new_temp`) en vez del vacío
+/// de siempre. No tiene ruta de línea de comandos que abrir.
+pub fn run_with_temp(
+    load: notty_config::LoadResult,
+    ipc_rx: Option<std::sync::mpsc::Receiver<notty_ipc::Message>>,
+    mode: notty_config::TempMode,
+    ext: String,
+) -> Result<()> {
+    run_inner(None, load, ipc_rx, Some((mode, ext)))
+}
+
+fn run_inner(
+    path: Option<&str>,
+    load: notty_config::LoadResult,
+    ipc_rx: Option<std::sync::mpsc::Receiver<notty_ipc::Message>>,
+    initial_temp: Option<(notty_config::TempMode, String)>,
+) -> Result<()> {
     // Snapshot de recuperación: vive el resto del proceso (`Box::leak`) para que el
     // `panic hook`, instalado una sola vez, tenga una dirección `'static` válida.
     let recovery: &'static RecoverySnapshot = Box::leak(Box::new(Mutex::new(Vec::new())));
@@ -396,7 +417,9 @@ pub fn run_with_ipc(
         setup_chrome(hwnd, dark);
 
         let mut ws = crate::Workspace::new();
-        if let Some(p) = path {
+        if let Some((mode, ext)) = &initial_temp {
+            *ws.active_mut() = EditorState::new_temp(*mode, ext);
+        } else if let Some(p) = path {
             let p = std::path::Path::new(p);
             match crate::open_as_document(p) {
                 Ok(opened) => *ws.active_mut() = EditorState::from_opened(opened),
