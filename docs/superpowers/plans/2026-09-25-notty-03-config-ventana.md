@@ -1245,7 +1245,7 @@ git commit -m "fix(ui): ajustes tras comprobar los tres presets" --allow-empty
   - Un grupo de 2 `BUTTON` con estilo `BS_AUTORADIOBUTTON` para pestañas/buffers.
   - Cada control, al recibir `WM_COMMAND` (`BN_CLICKED`), actualiza `cfg.borrow_mut()`, llama a `notty_config::save(&cfg.borrow(), &notty_config::default_path())` y luego a `on_change()` (para que la ventana principal recargue y repinte).
 
-- [ ] **Step 1: Añadir controles Win32**
+- [x] **Step 1: Añadir controles Win32**
 
 Run:
 
@@ -1253,7 +1253,7 @@ Run:
 cargo add windows -p notty-ui --features Win32_UI_Controls
 ```
 
-- [ ] **Step 2: Implementar la ventana de Ajustes**
+- [x] **Step 2: Implementar la ventana de Ajustes**
 
 `crates/notty-ui/src/settings_window.rs`. Arquitectura: una clase de ventana nueva (`"NottySettingsClass"`), hijos `BUTTON` creados con `CreateWindowExW` usando la clase predefinida `w!("BUTTON")` y los estilos `WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON` (o `BS_AUTOCHECKBOX`), cada uno con un id numérico distinto (`HMENU` construido desde el id con `HMENU(id as _)`). El estado (`Config` compartido y el callback) se guarda en `GWLP_USERDATA` de la ventana de Ajustes, igual que ya se hace para la ventana principal.
 
@@ -1437,12 +1437,12 @@ pub mod settings_window;
 
 (en la lista de `mod`/`pub mod`, junto a `pub mod window;`).
 
-- [ ] **Step 3: Comprobar que compila**
+- [x] **Step 3: Comprobar que compila**
 
 Run: `cargo build --workspace`
 Expected: compila.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add crates/notty-ui

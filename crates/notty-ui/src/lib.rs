@@ -7,6 +7,7 @@ mod gutter;
 mod hints;
 mod keymap;
 pub mod render;
+pub mod settings_window;
 mod status;
 mod viewport;
 pub mod window;
