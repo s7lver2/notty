@@ -16,6 +16,14 @@ impl Workspace {
         self.prompt = crate::Prompt::None;
     }
 
+    /// Acceso simultáneo al prompt (mutable) y al documento activo (solo lectura):
+    /// hace falta para que, por ejemplo, `SearchState::next` pueda mirar `Document`
+    /// mientras avanza `current` dentro de `ws.prompt`, sin que el borrow checker se
+    /// queje por pedir `&self` y `&mut self` del mismo `Workspace` a la vez.
+    pub fn prompt_and_active(&mut self) -> (&mut crate::Prompt, &EditorState) {
+        (&mut self.prompt, &self.docs[self.active])
+    }
+
     pub fn len(&self) -> usize {
         self.docs.len()
     }

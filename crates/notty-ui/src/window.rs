@@ -241,8 +241,15 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     let mods = Modifiers {
                         ctrl: (GetKeyState(VK_CONTROL.0 as i32) as u16 & 0x8000) != 0,
                         shift: (GetKeyState(VK_SHIFT.0 as i32) as u16 & 0x8000) != 0,
-                        alt: false,
+                        alt: alt_down,
                     };
+
+                    if !matches!(w.ws.prompt, crate::Prompt::None) {
+                        handle_prompt_keydown(w, hwnd, vk, mods);
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                        return LRESULT(0);
+                    }
+
                     let ui_mods = notty_input::Modifiers { ctrl: mods.ctrl, shift: mods.shift, alt: alt_down };
                     if let Some(cmd) = w.ui_keymap.get(&(vk, ui_mods)).copied() {
                         match cmd {
@@ -292,6 +299,27 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             update_title(hwnd, w.ws.active());
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
+                        crate::EditorAction::OpenPathPrompt => {
+                            let initial = w.ws.active().path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
+                            w.ws.prompt = crate::Prompt::Path(crate::PathPromptState::new(crate::Purpose::Open, initial));
+                            let _ = InvalidateRect(Some(hwnd), None, false);
+                        }
+                        crate::EditorAction::Find => {
+                            w.ws.prompt = crate::Prompt::Find(crate::SearchState::default());
+                            let _ = InvalidateRect(Some(hwnd), None, false);
+                        }
+                        crate::EditorAction::Replace => {
+                            w.ws.prompt = crate::Prompt::Replace(crate::SearchState::default());
+                            let _ = InvalidateRect(Some(hwnd), None, false);
+                        }
+                        crate::EditorAction::Save if w.ws.active().path.is_none() => {
+                            w.ws.prompt = crate::Prompt::Path(crate::PathPromptState::new(crate::Purpose::Save, String::new()));
+                            let _ = InvalidateRect(Some(hwnd), None, false);
+                        }
+                        crate::EditorAction::FindNext | crate::EditorAction::FindPrev => {
+                            // Fuera de un prompt de búsqueda activo (ya cubierto arriba, antes de
+                            // llegar aquí), F3 no tiene una búsqueda que repetir: no hace nada.
+                        }
                         crate::EditorAction::Save => {
                             let _ = w.ws.active_mut().save();
                             update_title(hwnd, w.ws.active());
@@ -309,6 +337,11 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             WM_CHAR => {
                 if let Some(w) = ptr.as_mut() {
                     if let Some(ch) = char::from_u32(wparam.0 as u32) {
+                        if !matches!(w.ws.prompt, crate::Prompt::None) {
+                            handle_prompt_char(w, ch);
+                            let _ = InvalidateRect(Some(hwnd), None, false);
+                            return LRESULT(0);
+                        }
                         w.ws.active_mut().insert_char(ch, std::time::Instant::now());
                         update_title(hwnd, w.ws.active());
                         let _ = InvalidateRect(Some(hwnd), None, false);
@@ -382,4 +415,215 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             _ => DefWindowProcW(hwnd, msg, wparam, lparam),
         }
     }
+}
+
+// --- Prompts (línea de ruta / buscar / reemplazar): teclado ------------------------
+
+/// Contexto de rutas del documento activo: `~` es el perfil del usuario y `.` es la
+/// carpeta del archivo abierto (si lo hay).
+fn path_ctx(w: &WindowState) -> notty_io::PathContext {
+    notty_io::PathContext {
+        home: notty_io::home_dir(),
+        current_dir: w.ws.active().path.as_ref().and_then(|p| p.parent().map(|d| d.to_path_buf())),
+    }
+}
+
+fn handle_prompt_keydown(w: &mut WindowState, hwnd: HWND, vk: u32, mods: Modifiers) {
+    // Esc cierra cualquier prompt.
+    if vk == 0x1B {
+        w.ws.close_prompt();
+        return;
+    }
+    if matches!(w.ws.prompt, crate::Prompt::Path(_)) {
+        handle_path_key(w, hwnd, vk, mods);
+    } else if matches!(w.ws.prompt, crate::Prompt::Find(_) | crate::Prompt::Replace(_)) {
+        handle_search_key(w, vk, mods);
+    }
+}
+
+fn handle_prompt_char(w: &mut WindowState, ch: char) {
+    if ch.is_control() {
+        return;
+    }
+    if matches!(w.ws.prompt, crate::Prompt::Path(_)) {
+        handle_path_char(w, ch);
+    } else if matches!(w.ws.prompt, crate::Prompt::Find(_) | crate::Prompt::Replace(_)) {
+        handle_search_char(w, ch);
+    }
+}
+
+fn handle_path_char(w: &mut WindowState, ch: char) {
+    let ctx = path_ctx(w);
+    if let crate::Prompt::Path(p) = &mut w.ws.prompt {
+        let raw = format!("{}{ch}", p.value);
+        p.type_text(&raw, &ctx);
+    }
+}
+
+fn handle_path_backspace(w: &mut WindowState) {
+    let ctx = path_ctx(w);
+    if let crate::Prompt::Path(p) = &mut w.ws.prompt {
+        let mut raw = p.value.clone();
+        raw.pop();
+        p.type_text(&raw, &ctx);
+    }
+}
+
+fn handle_path_key(w: &mut WindowState, hwnd: HWND, vk: u32, mods: Modifiers) {
+    match vk {
+        0x08 => handle_path_backspace(w), // Backspace
+        0x09 => {
+            if let crate::Prompt::Path(p) = &mut w.ws.prompt {
+                p.accept();
+            }
+        } // Tab
+        0x26 => {
+            if let crate::Prompt::Path(p) = &mut w.ws.prompt {
+                p.move_selection(-1);
+            }
+        } // ArrowUp
+        0x28 => {
+            if let crate::Prompt::Path(p) = &mut w.ws.prompt {
+                p.move_selection(1);
+            }
+        } // ArrowDown
+        0x0D => commit_path_prompt(w, hwnd), // Enter
+        0x4F if mods.ctrl => {
+            // TODO(plan futuro): diálogo nativo de Windows
+        }
+        _ => {}
+    }
+}
+
+/// `Enter` sobre la línea de ruta: valida, crea carpetas que falten si hace falta y,
+/// según `Purpose`, abre o guarda. Ver Task 7 Step 3 del plan para el detalle de cada caso.
+fn commit_path_prompt(w: &mut WindowState, hwnd: HWND) {
+    let (value, purpose, invalid) = match &w.ws.prompt {
+        crate::Prompt::Path(p) => (p.value.clone(), p.purpose, p.is_invalid()),
+        _ => return,
+    };
+    if invalid || value.is_empty() {
+        return;
+    }
+    if value.ends_with('\\') {
+        // Carpeta que se acaba de aceptar (p.ej. con Tab): seguimos escribiendo dentro,
+        // no cerramos el prompt.
+        return;
+    }
+
+    let path = std::path::PathBuf::from(&value);
+    let hint = notty_io::hint_for(&value);
+    let mut done = false;
+
+    match hint {
+        notty_io::Hint::Empty => {}
+        notty_io::Hint::Dir => {
+            // No tiene sentido "abrir" ni "guardar" una carpeta: no hacer nada.
+        }
+        notty_io::Hint::Exists if purpose == crate::Purpose::Open => {
+            if let Ok(opened) = crate::open_as_document(&path) {
+                w.ws.open(crate::EditorState::from_opened(opened));
+                done = true;
+            }
+        }
+        notty_io::Hint::Exists | notty_io::Hint::New | notty_io::Hint::DirNew => {
+            let _ = notty_io::create_parent_dirs(&path);
+            match purpose {
+                crate::Purpose::Open => {
+                    // Caso raro: se pidió "abrir" algo que no existe. Se trata como crear
+                    // un documento nuevo con esa ruta.
+                    let mut state = crate::EditorState::new_empty();
+                    state.path = Some(path.clone());
+                    w.ws.open(state);
+                    done = true;
+                }
+                crate::Purpose::Save => {
+                    w.ws.active_mut().path = Some(path.clone());
+                    done = w.ws.active_mut().save().is_ok();
+                }
+            }
+        }
+    }
+
+    if done {
+        w.ws.close_prompt();
+        unsafe {
+            update_title(hwnd, w.ws.active());
+        }
+    }
+}
+
+fn handle_search_char(w: &mut WindowState, ch: char) {
+    if let crate::Prompt::Find(s) | crate::Prompt::Replace(s) = &mut w.ws.prompt {
+        let mut q = s.query.clone();
+        q.push(ch);
+        s.set_query(q);
+    }
+}
+
+fn handle_search_key(w: &mut WindowState, vk: u32, mods: Modifiers) {
+    if mods.alt {
+        match vk {
+            0x43 => {
+                toggle_search(w, crate::SearchState::toggle_case);
+                return;
+            } // Alt+C
+            0x57 => {
+                toggle_search(w, crate::SearchState::toggle_word);
+                return;
+            } // Alt+W
+            0x52 => {
+                toggle_search(w, crate::SearchState::toggle_regex);
+                return;
+            } // Alt+R
+            _ => {}
+        }
+    }
+    match vk {
+        0x0D if mods.ctrl && mods.alt => replace_all_matches(w), // Ctrl+Alt+Enter
+        0x0D if mods.shift => nav_search(w, false),              // Shift+Enter
+        0x0D if matches!(w.ws.prompt, crate::Prompt::Replace(_)) => replace_current_match(w),
+        0x0D => nav_search(w, true), // Enter
+        _ => {}
+    }
+}
+
+fn toggle_search(w: &mut WindowState, f: impl FnOnce(&mut crate::SearchState)) {
+    if let crate::Prompt::Find(s) | crate::Prompt::Replace(s) = &mut w.ws.prompt {
+        f(s);
+    }
+}
+
+fn nav_search(w: &mut WindowState, forward: bool) {
+    let (prompt, active) = w.ws.prompt_and_active();
+    if let crate::Prompt::Find(s) | crate::Prompt::Replace(s) = prompt {
+        if forward {
+            s.next(&active.doc);
+        } else {
+            s.prev(&active.doc);
+        }
+    }
+}
+
+/// `Enter` en el prompt de reemplazar: sustituye solo la coincidencia actual y avanza
+/// a la siguiente (a diferencia de `Ctrl+Alt+Enter`, que usa `Document::replace_all`).
+fn replace_current_match(w: &mut WindowState) {
+    let (query, replacement, opts, current) = match &w.ws.prompt {
+        crate::Prompt::Replace(s) => (s.query.clone(), s.replacement.clone(), s.opts, s.current),
+        _ => return,
+    };
+    if let Ok(m) = w.ws.active().doc.find_all(&query, opts) {
+        if let Some(range) = m.get(current).cloned() {
+            w.ws.active_mut().doc.replace_range(range, &replacement, std::time::Instant::now());
+        }
+    }
+    nav_search(w, true);
+}
+
+fn replace_all_matches(w: &mut WindowState) {
+    let (query, replacement, opts) = match &w.ws.prompt {
+        crate::Prompt::Replace(s) => (s.query.clone(), s.replacement.clone(), s.opts),
+        _ => return,
+    };
+    let _ = w.ws.active_mut().doc.replace_all(&query, &replacement, opts, std::time::Instant::now());
 }
