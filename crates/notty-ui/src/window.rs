@@ -150,12 +150,13 @@ fn open_config_as_document(hwnd: HWND, path: std::path::PathBuf) {
     unsafe {
         let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState;
         if let Some(w) = ptr.as_mut() {
+            let cfg = w.cfg.borrow().clone();
             if let Ok(opened) = crate::open_as_document(&path) {
-                w.ws.open(EditorState::from_opened(opened));
+                w.ws.open(maybe_vim(EditorState::from_opened(opened), &cfg));
             } else {
                 let mut state = EditorState::new_empty();
                 state.path = Some(path);
-                w.ws.open(state);
+                w.ws.open(maybe_vim(state, &cfg));
             }
             update_title(hwnd, w.ws.active());
             let _ = InvalidateRect(Some(hwnd), None, false);
@@ -215,7 +216,8 @@ fn ipc_tick(w: &mut WindowState) -> bool {
             if !p.is_empty() {
                 let path = std::path::PathBuf::from(p);
                 if let Ok(opened) = crate::open_as_document(&path) {
-                    w.ws.open(EditorState::from_opened(opened));
+                    let cfg = w.cfg.borrow().clone();
+                    w.ws.open(maybe_vim(EditorState::from_opened(opened), &cfg));
                     changed = true;
                 }
             }
@@ -418,11 +420,11 @@ fn run_inner(
 
         let mut ws = crate::Workspace::new();
         if let Some((mode, ext)) = &initial_temp {
-            *ws.active_mut() = EditorState::new_temp(*mode, ext);
+            *ws.active_mut() = maybe_vim(EditorState::new_temp(*mode, ext), &cfg);
         } else if let Some(p) = path {
             let p = std::path::Path::new(p);
             match crate::open_as_document(p) {
-                Ok(opened) => *ws.active_mut() = EditorState::from_opened(opened),
+                Ok(opened) => *ws.active_mut() = maybe_vim(EditorState::from_opened(opened), &cfg),
                 Err(_) => {
                     // No es texto (o no se pudo decodificar): se abre directamente en vista
                     // raw, como pide la Task 7 de este plan.
@@ -431,7 +433,7 @@ fn run_inner(
                     if let Ok(raw) = crate::open_raw_doc(p) {
                         state.raw = Some(raw);
                     }
-                    *ws.active_mut() = state;
+                    *ws.active_mut() = maybe_vim(state, &cfg);
                 }
             }
         }
@@ -771,7 +773,10 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     let ui_mods = notty_input::Modifiers { ctrl: mods.ctrl, shift: mods.shift, alt: alt_down };
                     if let Some(cmd) = w.ui_keymap.get(&(vk, ui_mods)).copied() {
                         match cmd {
-                            notty_input::UiCommand::NewTab => w.ws.open(crate::EditorState::new_empty()),
+                            notty_input::UiCommand::NewTab => {
+                                let cfg = w.cfg.borrow().clone();
+                                w.ws.open(maybe_vim(crate::EditorState::new_empty(), &cfg));
+                            }
                             notty_input::UiCommand::NextTab => w.ws.next(),
                             notty_input::UiCommand::PrevTab => w.ws.prev(),
                             notty_input::UiCommand::CloseTab => {
@@ -978,7 +983,8 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                         crate::Hit::NewTab => {
-                            w.ws.open(crate::EditorState::new_empty());
+                            let cfg = w.cfg.borrow().clone();
+                            w.ws.open(maybe_vim(crate::EditorState::new_empty(), &cfg));
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                         crate::Hit::Menu(i) => {
@@ -1170,7 +1176,10 @@ fn run_menu_item(w: &mut WindowState, hwnd: HWND, menu_idx: usize, item_idx: usi
     let Some(def) = crate::menu::MENUS.get(menu_idx) else { return };
     let Some(MenuItem::Entry { cmd, .. }) = def.items.get(item_idx).copied() else { return };
     match cmd {
-        MenuCmd::New => w.ws.open(crate::EditorState::new_empty()),
+        MenuCmd::New => {
+            let cfg = w.cfg.borrow().clone();
+            w.ws.open(maybe_vim(crate::EditorState::new_empty(), &cfg));
+        }
         MenuCmd::Open => {
             let initial = w.ws.active().path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
             w.ws.prompt = crate::Prompt::Path(crate::PathPromptState::new(crate::Purpose::Open, initial));
@@ -1441,7 +1450,8 @@ fn commit_path_prompt(w: &mut WindowState, hwnd: HWND) {
         }
         notty_io::Hint::Exists if purpose == crate::Purpose::Open => {
             if let Ok(opened) = crate::open_as_document(&path) {
-                w.ws.open(crate::EditorState::from_opened(opened));
+                let cfg = w.cfg.borrow().clone();
+                w.ws.open(maybe_vim(crate::EditorState::from_opened(opened), &cfg));
                 done = true;
             }
         }
@@ -1453,7 +1463,8 @@ fn commit_path_prompt(w: &mut WindowState, hwnd: HWND) {
                     // un documento nuevo con esa ruta.
                     let mut state = crate::EditorState::new_empty();
                     state.path = Some(path.clone());
-                    w.ws.open(state);
+                    let cfg = w.cfg.borrow().clone();
+                    w.ws.open(maybe_vim(state, &cfg));
                     done = true;
                 }
                 crate::Purpose::Save => {

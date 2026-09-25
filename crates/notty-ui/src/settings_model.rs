@@ -2,7 +2,7 @@
 //! qué secciones y filas hay, y qué le pasa a `Config` cuando se toca una. No sabe
 //! dibujar ni de Win32/Direct2D.
 
-use notty_config::{Config, Files, MenuBar, Preset, TabsPosition, Theme};
+use notty_config::{Config, Files, HotkeyMechanism, MenuBar, Preset, TabsPosition, TempMode, Theme};
 
 /// Qué ajuste toca una fila interactiva (`Seg`/`Select`/`Toggle`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -17,6 +17,10 @@ pub enum SettingKey {
     StatusBar,
     MergedCommandLine,
     VimAlways,
+    TempMode,
+    Autosave,
+    HotkeyMechanism,
+    StartWithWindows,
 }
 
 /// El valor elegido; `apply` decide qué campo de `Config` toca según `SettingKey`.
@@ -28,6 +32,8 @@ pub enum SettingValue {
     TabsPosition(TabsPosition),
     MenuBar(MenuBar),
     Bool(bool),
+    TempMode(TempMode),
+    HotkeyMechanism(HotkeyMechanism),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -128,10 +134,44 @@ const TECLADO: &[Row] = &[
     },
 ];
 
+const ARCHIVOS: &[Row] = &[
+    Row::Seg {
+        title: "Archivos temporales",
+        desc: "Borrador: se guarda solo y se borra al cerrar si no le das ruta. Volátil: nunca toca el disco.",
+        key: SettingKey::TempMode,
+        options: &[
+            ("Borrador", SettingValue::TempMode(TempMode::Draft)),
+            ("Volátil", SettingValue::TempMode(TempMode::Volatile)),
+        ],
+    },
+    Row::Toggle {
+        title: "Autoguardado",
+        desc: "Guarda sola tras dejar de escribir. Solo si el archivo ya tiene ruta.",
+        key: SettingKey::Autosave,
+    },
+];
+
+const ATAJO_GLOBAL: &[Row] = &[
+    Row::Seg {
+        title: "Cómo se escucha el atajo",
+        desc: "Segundo plano: ~1 MB de RAM, cualquier combinación, instantáneo. Acceso directo: nada residente, solo Ctrl+Alt+letra.",
+        key: SettingKey::HotkeyMechanism,
+        options: &[
+            ("Segundo plano", SettingValue::HotkeyMechanism(HotkeyMechanism::Daemon)),
+            ("Acceso directo", SettingValue::HotkeyMechanism(HotkeyMechanism::Lnk)),
+        ],
+    },
+    Row::Kbd { title: "Nuevo temporal", keys: "Win+Alt+N" },
+    Row::Kbd { title: "Nuevo permanente", keys: "Win+Alt+Shift+N" },
+    Row::Toggle { title: "Iniciar con Windows", desc: "", key: SettingKey::StartWithWindows },
+];
+
 pub const SECTIONS: &[Section] = &[
     Section { id: "apariencia", name: "Apariencia", rows: APARIENCIA },
     Section { id: "ventana", name: "Ventana", rows: VENTANA },
     Section { id: "teclado", name: "Teclado", rows: TECLADO },
+    Section { id: "archivos", name: "Archivos", rows: ARCHIVOS },
+    Section { id: "atajo_global", name: "Atajo global", rows: ATAJO_GLOBAL },
 ];
 
 /// Las secciones son estáticas (no dependen de `cfg`): el parámetro está para que la
@@ -147,6 +187,27 @@ pub fn apply(cfg: &mut Config, key: SettingKey, value: SettingValue) {
     if let (SettingKey::Preset, SettingValue::Preset(p)) = (key, value) {
         notty_config::apply_preset(&mut cfg.ui, p);
         return;
+    }
+    // Archivos/Atajo global no son piezas de un preset de Apariencia: se resuelven
+    // aparte y no tocan `cfg.ui.preset`.
+    match (key, value) {
+        (SettingKey::TempMode, SettingValue::TempMode(m)) => {
+            cfg.files.temp_mode = m;
+            return;
+        }
+        (SettingKey::Autosave, SettingValue::Bool(b)) => {
+            cfg.files.autosave = b;
+            return;
+        }
+        (SettingKey::HotkeyMechanism, SettingValue::HotkeyMechanism(m)) => {
+            cfg.hotkey.mechanism = m;
+            return;
+        }
+        (SettingKey::StartWithWindows, SettingValue::Bool(b)) => {
+            cfg.hotkey.start_with_windows = b;
+            return;
+        }
+        _ => {}
     }
     match (key, value) {
         (SettingKey::Theme, SettingValue::Theme(t)) => cfg.ui.theme = t,
@@ -168,9 +229,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn three_sections_matching_config_today() {
+    fn archivos_and_atajo_global_sections_exist() {
         let names: Vec<&str> = SECTIONS.iter().map(|s| s.name).collect();
-        assert_eq!(names, ["Apariencia", "Ventana", "Teclado"]);
+        assert_eq!(names, ["Apariencia", "Ventana", "Teclado", "Archivos", "Atajo global"]);
     }
 
     #[test]
@@ -222,5 +283,26 @@ mod tests {
         let before = cfg.clone();
         apply(&mut cfg, SettingKey::Theme, SettingValue::Bool(true));
         assert_eq!(cfg, before);
+    }
+
+    #[test]
+    fn applying_temp_mode_and_autosave_touches_files_not_ui_preset() {
+        let mut cfg = Config::default();
+        let preset_before = cfg.ui.preset;
+        apply(&mut cfg, SettingKey::TempMode, SettingValue::TempMode(notty_config::TempMode::Volatile));
+        apply(&mut cfg, SettingKey::Autosave, SettingValue::Bool(true));
+        assert_eq!(cfg.files.temp_mode, notty_config::TempMode::Volatile);
+        assert!(cfg.files.autosave);
+        // Archivos/Atajo global no son piezas de un preset de Apariencia: no lo tocan.
+        assert_eq!(cfg.ui.preset, preset_before);
+    }
+
+    #[test]
+    fn applying_hotkey_settings_touches_hotkey_not_ui() {
+        let mut cfg = Config::default();
+        apply(&mut cfg, SettingKey::HotkeyMechanism, SettingValue::HotkeyMechanism(notty_config::HotkeyMechanism::Lnk));
+        apply(&mut cfg, SettingKey::StartWithWindows, SettingValue::Bool(false));
+        assert_eq!(cfg.hotkey.mechanism, notty_config::HotkeyMechanism::Lnk);
+        assert!(!cfg.hotkey.start_with_windows);
     }
 }

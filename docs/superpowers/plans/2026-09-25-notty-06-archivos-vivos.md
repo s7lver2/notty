@@ -1260,7 +1260,7 @@ git commit -m "feat(daemon): bandeja, atajos globales y acceso directo .lnk alte
 - Consumes: `cfg.files`, `cfg.hotkey`.
 - Produces: `SECTIONS` gana dos secciones más, **Archivos** y **Atajo global**, con las mismas filas que ya describía el Plan 5b como diferidas a este plan: `temp_mode` (Borrador/Volátil) y `autosave` en Archivos; `hotkey.mechanism` (Segundo plano/Acceso directo) y `start_with_windows` en Atajo global. `default_extension` y `large_file_mb` (campos de texto libre en la maqueta) **no** se añaden aquí — `Row` no tiene todavía una variante de campo de texto editable, y merece su propio ciclo TDD en el Plan 7 en vez de improvisarse. Quedan con sus valores por defecto (`.txt`, `50`), editables solo a mano en `config.toml`. Además, `window.rs` pasa a leer `cfg.borrow().ui.vim_always` al crear cualquier `EditorState` nuevo (pestaña nueva, documento abierto, mensaje del pipe, flags `--new-temp`/`--new-permanent`) para arrancarlo ya con `vim: Some(VimState::default())` si está activado.
 
-- [ ] **Step 1: Escribir los tests que fallan**
+- [x] **Step 1: Escribir los tests que fallan**
 
 Añadir a `mod tests` en `crates/notty-ui/src/settings_model.rs`:
 
@@ -1293,12 +1293,12 @@ Añadir a `mod tests` en `crates/notty-ui/src/settings_model.rs`:
     }
 ```
 
-- [ ] **Step 2: Ejecutar y ver que falla**
+- [x] **Step 2: Ejecutar y ver que falla**
 
 Run: `cargo test -p notty-ui settings_model`
 Expected: FAIL de compilación, `no variant named TempMode` (o similar).
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 En `crates/notty-ui/src/settings_model.rs`:
 
@@ -1378,12 +1378,12 @@ pub fn apply(cfg: &mut Config, key: SettingKey, value: SettingValue) {
 
 Guarda también con `notty_config::save` en el mismo sitio donde `settings_window.rs` ya lo hace tras cualquier `apply` (no cambia: sigue siendo un único punto para todos los ajustes).
 
-- [ ] **Step 4: Ejecutar y ver que pasa**
+- [x] **Step 4: Ejecutar y ver que pasa**
 
 Run: `cargo test --workspace`
 Expected: PASS, +2 tests (y el test `three_sections_matching_config_today` ya existente hay que actualizarlo/renombrarlo para las 5 secciones, o queda cubierto por el nuevo `archivos_and_atajo_global_sections_exist` — elimina el duplicado si hace falta).
 
-- [ ] **Step 5: `vim_always` al crear documentos**
+- [x] **Step 5: `vim_always` al crear documentos**
 
 En `crates/notty-ui/src/window.rs`, en cada sitio donde se construye un `EditorState::new_empty()`/`new_temp(..)`/`from_opened(..)` para añadirlo al `Workspace` (el `Ctrl+N` de `UiCommand::NewTab`, la apertura por ruta, la recepción de `Message::OpenPath` de la Task 8, los flags `--new-temp`/`--new-permanent` de la Task 9), envolver la creación así:
 
@@ -1398,12 +1398,12 @@ fn maybe_vim(mut st: crate::EditorState, cfg: &notty_config::Config) -> crate::E
 
 y llamar a `maybe_vim(EditorState::new_empty(), &cfg.borrow())` (o el constructor que toque) en cada uno de esos puntos en vez de usar el `EditorState` a secas.
 
-- [ ] **Step 6: Compilar**
+- [x] **Step 6: Compilar**
 
 Run: `cargo build --workspace`
 Expected: compila.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add crates/notty-ui
