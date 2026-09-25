@@ -15,7 +15,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     VK_MENU, VK_SHIFT,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DispatchMessageW, GWLP_USERDATA, GetClientRect, GetMessageW,
+    CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DispatchMessageW, GWLP_USERDATA, GetMessageW,
     GetWindowLongPtrW, HTCAPTION, HTCLIENT, HTMAXBUTTON, HTTOP, IsZoomed, MSG, NCCALCSIZE_PARAMS, PostQuitMessage,
     RegisterClassExW, SM_CXPADDEDBORDER, SM_CYFRAME, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW,
     SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos, SetWindowTextW,
@@ -70,9 +70,24 @@ impl WindowState {
             pressed: self.pressed,
             maximized,
             active_window: self.active_window,
-            menu_bar_visible: self.cfg.borrow().ui.menubar == notty_config::MenuBar::Visible || self.menu_visible,
+            menu_bar_visible: self.menu_bar_visible(),
             open_menu: None,
         }
+    }
+
+    /// Si la barra de menús debe dibujarse: `Visible` siempre, `Alt` solo mientras
+    /// `menu_visible` (el usuario acaba de pulsar Alt).
+    fn menu_bar_visible(&self) -> bool {
+        let menubar = self.cfg.borrow().ui.menubar;
+        menubar == notty_config::MenuBar::Visible || (menubar == notty_config::MenuBar::Alt && self.menu_visible)
+    }
+
+    /// Rectángulo del cuerpo y ancho del canal de números para el estado actual
+    /// (bandas resueltas con la config y el número de pestañas reales).
+    fn body_and_gutter(&self) -> (layout::Rect, f32) {
+        let ui = self.cfg.borrow().ui;
+        let total = self.ws.active().doc.buffer().len_lines();
+        self.renderer.body_and_gutter(&ui, self.ws.len(), self.menu_bar_visible(), total, self.ws.active().raw.is_some())
     }
 }
 
@@ -190,13 +205,10 @@ pub fn run(path: Option<&str>, load: notty_config::LoadResult) -> Result<()> {
         let dpi = GetDpiForWindow(hwnd);
         let renderer = Renderer::new(hwnd, dpi)?;
 
-        let mut client = RECT::default();
-        let _ = GetClientRect(hwnd, &mut client);
-        let scale = renderer.scale();
-        let height = ((client.bottom - client.top).max(0) as f32) / scale;
-        let width = ((client.right - client.left).max(0) as f32) / scale;
-        let frame = layout::frame(width, height, layout::Bands::default());
-        ws.active_mut().viewport = Viewport::new(renderer.line_height(), frame.body.height());
+        let total_lines = ws.active().doc.buffer().len_lines();
+        let menu_visible0 = cfg.ui.menubar == notty_config::MenuBar::Visible;
+        let (body, _gutter_w) = renderer.body_and_gutter(&cfg.ui, ws.len(), menu_visible0, total_lines, ws.active().raw.is_some());
+        ws.active_mut().viewport = Viewport::new(renderer.line_height(), body.height());
         update_title(hwnd, ws.active());
 
         let ui_keymap = {
@@ -320,10 +332,8 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     let width = (lparam.0 as u32) & 0xFFFF;
                     let height = ((lparam.0 as u32) >> 16) & 0xFFFF;
                     w.renderer.resize(width, height);
-                    let scale = w.renderer.scale();
-                    let (w_dip, h_dip) = (width as f32 / scale, height as f32 / scale);
-                    let frame = layout::frame(w_dip, h_dip, layout::Bands::default());
-                    w.ws.active_mut().viewport.visible_lines = layout::visible_lines(frame.body);
+                    let (body, _gutter_w) = w.body_and_gutter();
+                    w.ws.active_mut().viewport.visible_lines = layout::visible_lines(body);
                     let _ = InvalidateRect(Some(hwnd), None, false);
                 }
                 LRESULT(0)
@@ -666,10 +676,16 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             w.ws.activate(i);
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
+                        crate::Hit::TabClose(i) => {
+                            w.ws.close(i);
+                            let _ = InvalidateRect(Some(hwnd), None, false);
+                        }
+                        crate::Hit::NewTab => {
+                            w.ws.open(crate::EditorState::new_empty());
+                            let _ = InvalidateRect(Some(hwnd), None, false);
+                        }
                         crate::Hit::Body if w.ws.active().raw.is_none() => {
-                            let ui = w.render_ui();
-                            let total = w.ws.active().doc.buffer().len_lines();
-                            let (body, gutter_w) = w.renderer.body_and_gutter(&ui, total);
+                            let (body, gutter_w) = w.body_and_gutter();
                             let idx = w.renderer.char_index_at(w.ws.active(), body, gutter_w, x, y);
                             w.ws.active_mut().doc.set_cursor(idx);
                             w.selection_anchor = idx;
@@ -688,9 +704,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     let scale = w.renderer.scale();
                     let (x, y) = (x / scale, y / scale);
                     if w.mouse_down {
-                        let ui = w.render_ui();
-                        let total = w.ws.active().doc.buffer().len_lines();
-                        let (body, gutter_w) = w.renderer.body_and_gutter(&ui, total);
+                        let (body, gutter_w) = w.body_and_gutter();
                         let idx = w.renderer.char_index_at(w.ws.active(), body, gutter_w, x, y);
                         w.ws.active_mut().doc.set_selection(w.selection_anchor, idx);
                         let _ = InvalidateRect(Some(hwnd), None, false);

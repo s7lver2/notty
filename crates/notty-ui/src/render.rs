@@ -399,13 +399,15 @@ impl Renderer {
     }
 
     /// Rectángulo del cuerpo y ancho del canal de números para el tamaño actual de la
-    /// ventana y `total_lines` líneas, con las mismas bandas que usa `paint` (Task 5:
-    /// solo el cuerpo; las demás franjas llegan en las Tasks 6-9). Lo usa `window.rs`
-    /// para el hit-testing del ratón sobre el documento.
-    pub fn body_and_gutter(&self, ui: &UiConfig, total_lines: usize) -> (Rect, f32) {
+    /// ventana, `total_lines` líneas y `doc_count`/`menu_bar_visible` (mismas bandas
+    /// que resuelve `paint`). Lo usa `window.rs` para el hit-testing del ratón sobre
+    /// el documento y para `WM_SIZE`.
+    pub fn body_and_gutter(&self, ui: &UiConfig, doc_count: usize, menu_bar_visible: bool, total_lines: usize, is_raw: bool) -> (Rect, f32) {
         let (w, h) = self.size_dips();
-        let frame = layout::frame(w, h, layout::Bands::default());
-        let gutter_w = if ui.line_numbers { layout::gutter_width(total_lines, self.digit_width()) } else { 0.0 };
+        let bands = Self::resolve_bands(ui, doc_count, menu_bar_visible);
+        let frame = layout::frame(w, h, bands);
+        let gutter_w =
+            if ui.line_numbers && !is_raw { layout::gutter_width(total_lines, self.digit_width()) } else { 0.0 };
         (frame.body, gutter_w)
     }
 
@@ -448,20 +450,39 @@ impl Renderer {
         }
     }
 
+    /// Qué franjas se muestran, resuelto a partir de `ui`, el número de documentos y
+    /// si el menú `Alt` está desplegado (maqueta, `tabsVisible()` línea 462).
+    fn resolve_bands(ui: &UiConfig, doc_count: usize, menu_bar_visible: bool) -> layout::Bands {
+        use notty_config::{Files, TabsPosition};
+        let tabs_in_title = ui.files == Files::Tabs
+            && (ui.tabs_position == TabsPosition::Title
+                || (ui.tabs_position == TabsPosition::Auto && doc_count > 1));
+        let tabs_below = ui.files == Files::Tabs && ui.tabs_position == TabsPosition::Below;
+        layout::Bands {
+            tabs_in_title,
+            menubar: menu_bar_visible,
+            tabs_below,
+            hints: ui.hints_bar && !ui.merged_command_line,
+            merged_status: ui.merged_command_line,
+        }
+    }
+
     /// Dibuja fondo + documento del `Workspace` activo, con las medidas y colores de
-    /// la maqueta. De momento (Task 5) solo el fondo y el texto del documento: el resto
-    /// de franjas (título, pestañas, menú, atajos, estado, prompts, raw) llega en las
-    /// Tasks 7-9.
+    /// la maqueta: barra de título propia (icono, pestañas o título, botones), barra
+    /// de menús, pestañas debajo, canal de números, documento y barra de atajos. La
+    /// barra de estado / prompts y la vista raw llegan en las Tasks 8-9.
     pub fn paint(&mut self, ws: &Workspace, ui: &UiConfig, view: &ViewState) {
         self.hits.clear();
         let pal = theme::palette(view.dark);
         let state = ws.active();
         let buf = state.doc.buffer();
+        let is_raw = state.raw.is_some();
         let total_lines = buf.len_lines();
         let range = state.viewport.range(total_lines);
         let sel = state.doc.selection();
         let sel_range = sel.range();
         let head = sel.head;
+        let cursor_line = state.doc.line_col().0;
 
         let (search_matches, search_current): (Vec<std::ops::Range<usize>>, Option<usize>) = match &ws.prompt {
             crate::Prompt::Find(s) | crate::Prompt::Replace(s) => {
@@ -471,16 +492,28 @@ impl Renderer {
         };
 
         let (w, h) = self.size_dips();
-        let bands = layout::Bands::default();
+        let bands = Self::resolve_bands(ui, ws.len(), view.menu_bar_visible);
         let frame = layout::frame(w, h, bands);
+        // El botón de la barra de título queda cubierto por las pestañas/botones que
+        // se registran después (hit() prioriza lo último registrado).
+        self.hits.push((frame.titlebar, Hit::Caption));
         self.hits.push((frame.body, Hit::Body));
 
-        let gutter_w = if ui.line_numbers { layout::gutter_width(total_lines, self.digit_width()) } else { 0.0 };
+        let gutter_w = if ui.line_numbers && !is_raw { layout::gutter_width(total_lines, self.digit_width()) } else { 0.0 };
         let text_pad = frame.body.left + gutter_w + layout::TEXT_PAD_L;
 
         unsafe {
             self.target.BeginDraw();
             self.target.Clear(Some(&color(pal.surface)));
+
+            self.draw_titlebar(ws, ui, view, pal, frame);
+            if bands.menubar {
+                self.draw_menubar(view, pal, frame);
+            }
+            if bands.tabs_below {
+                self.draw_tabs_row(ws, view, pal, layout::TABS_BELOW_PAD_X, w - layout::TABS_BELOW_PAD_X, frame.tabs_below.bottom);
+                self.fill(Rect::new(0.0, frame.tabs_below.top, w, frame.tabs_below.top), pal.chrome);
+            }
 
             let mut y = frame.body.top + layout::TEXT_PAD_T;
             for line in range {
@@ -495,6 +528,17 @@ impl Renderer {
                 } else {
                     self.dwrite.CreateTextLayout(&w16, &self.fonts.mono_13, f32::MAX, layout::LINE_H).ok()
                 };
+
+                if ui.line_numbers && !is_raw {
+                    let num = (line + 1).to_string();
+                    let num_color = if line == cursor_line { pal.text } else { pal.text_3 };
+                    self.text_right(
+                        &num,
+                        &self.fonts.mono_13,
+                        Rect::new(frame.body.left, y, frame.body.left + gutter_w - layout::GUTTER_PAD_R, y + layout::LINE_H),
+                        num_color,
+                    );
+                }
 
                 if !sel.is_empty() && sel_range.start < full_end && sel_range.end > start {
                     let clamp_start = sel_range.start.max(start);
@@ -559,7 +603,194 @@ impl Renderer {
                 }
             }
 
+            if bands.hints {
+                self.draw_hints(state, ws, pal, frame);
+            }
+
             let _ = self.target.EndDraw(None, None);
+        }
+    }
+
+    /// Icono, pestañas o título, y botones de min/max/cerrar (`.titlebar`).
+    #[allow(unused_unsafe)]
+    unsafe fn draw_titlebar(&mut self, ws: &Workspace, ui: &UiConfig, view: &ViewState, pal: &theme::Palette, frame: layout::Frame) {
+        unsafe {
+            self.fill(frame.titlebar, pal.chrome);
+
+            // Icono de la app: rectángulo redondeado + tres líneas, en los primeros 36px.
+            let icon_x = (layout::APPICON_W - layout::APPICON_SIZE) / 2.0;
+            let icon_y = (layout::TITLEBAR_H - layout::APPICON_SIZE) / 2.0;
+            self.stroke_round_rect(
+                Rect::new(icon_x + 2.5, icon_y + 1.5, icon_x + 2.5 + 11.0, icon_y + 1.5 + 13.0),
+                2.0,
+                1.4,
+                pal.accent,
+            );
+            self.stroke_line(icon_x + 5.0, icon_y + 5.5, icon_x + 11.0, icon_y + 5.5, 1.3, pal.text_2);
+            self.stroke_line(icon_x + 5.0, icon_y + 8.0, icon_x + 11.0, icon_y + 8.0, 1.3, pal.text_2);
+            self.stroke_line(icon_x + 5.0, icon_y + 10.5, icon_x + 8.5, icon_y + 10.5, 1.3, pal.text_2);
+
+            let bands = Self::resolve_bands(ui, ws.len(), view.menu_bar_visible);
+            if bands.tabs_in_title {
+                self.draw_tabs_row(ws, view, pal, layout::APPICON_W, frame.caption_min.left, frame.titlebar.bottom);
+            } else {
+                let name = crate::doc_name(ws.active().path.as_deref());
+                let title = crate::window_title(&name, ws.active().doc.is_dirty(), ui.preset == notty_config::Preset::Zen);
+                self.text(
+                    &title,
+                    &self.fonts.ui_12,
+                    Rect::new(layout::APPICON_W, 0.0, frame.caption_min.left, layout::TITLEBAR_H),
+                    pal.text_2,
+                );
+            }
+
+            self.draw_caption_button(view, pal, frame.caption_min, Hit::Min, false);
+            self.draw_caption_button(view, pal, frame.caption_max, Hit::Max, view.maximized);
+            self.draw_caption_button(view, pal, frame.caption_close, Hit::Close, false);
+        }
+    }
+
+    #[allow(unused_unsafe)]
+    unsafe fn draw_caption_button(&mut self, view: &ViewState, pal: &theme::Palette, r: Rect, hit: Hit, maximized: bool) {
+        unsafe {
+            self.hits.push((r, hit));
+            let hovered = view.hover == hit;
+            let is_close = hit == Hit::Close;
+            if hovered {
+                self.fill(r, if is_close { pal.close_hover } else { pal.hover });
+            }
+            let glyph_color = if hovered && is_close { pal.close_hover_fg } else { pal.text_2 };
+            let cx = r.left + (r.width() - 10.0) / 2.0;
+            let cy = r.top + (r.height() - 10.0) / 2.0;
+            match hit {
+                Hit::Min => self.stroke_line(cx, cy + 5.0, cx + 10.0, cy + 5.0, 1.0, glyph_color),
+                Hit::Max if maximized => {
+                    self.stroke_rect(Rect::new(cx + 2.0, cy, cx + 10.0, cy + 8.0), 1.0, glyph_color);
+                    self.stroke_rect(Rect::new(cx, cy + 2.0, cx + 8.0, cy + 10.0), 1.0, glyph_color);
+                }
+                Hit::Max => self.stroke_rect(Rect::new(cx + 0.5, cy + 0.5, cx + 9.0, cy + 9.0), 1.0, glyph_color),
+                Hit::Close => {
+                    self.stroke_line(cx, cy, cx + 10.0, cy + 10.0, 1.0, glyph_color);
+                    self.stroke_line(cx + 10.0, cy, cx, cy + 10.0, 1.0, glyph_color);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Barra de menús (`.menubar`): "Archivo Editar Buscar Ver Ayuda".
+    #[allow(unused_unsafe)]
+    unsafe fn draw_menubar(&mut self, view: &ViewState, pal: &theme::Palette, frame: layout::Frame) {
+        unsafe {
+            self.fill(frame.menubar, pal.chrome);
+            let labels = ["Archivo", "Editar", "Buscar", "Ver", "Ayuda"];
+            let mut x = layout::MENUBAR_PAD_X;
+            let top = frame.menubar.top + (layout::MENUBAR_H - 22.0) / 2.0;
+            for (i, label) in labels.iter().enumerate() {
+                let w = self.measure(label, &self.fonts.ui_12_5) + layout::MENU_BTN_PAD_X * 2.0;
+                let r = Rect::new(x, top, x + w, top + 22.0);
+                let hovered = view.hover == Hit::Menu(i) || view.open_menu == Some(i);
+                if hovered {
+                    self.fill_round(r, 4.0, pal.hover);
+                }
+                self.text(label, &self.fonts.ui_12_5, r, pal.text);
+                self.hits.push((r, Hit::Menu(i)));
+                x += w + layout::MENU_BTN_GAP;
+            }
+        }
+    }
+
+    /// Fila de pestañas compartida entre la barra de título y `.tabs.below`.
+    #[allow(unused_unsafe)]
+    unsafe fn draw_tabs_row(&mut self, ws: &Workspace, view: &ViewState, pal: &theme::Palette, x0: f32, max_right: f32, bottom: f32) {
+        unsafe {
+            let names: Vec<String> = ws.iter().map(|d| crate::doc_name(d.path.as_deref())).collect();
+            let dirty: Vec<bool> = ws.iter().map(|d| d.doc.is_dirty()).collect();
+            let name_w: Vec<f32> = names.iter().map(|n| self.measure(n, &self.fonts.ui_12)).collect();
+            let dot_w = self.measure("●", &self.fonts.ui_9);
+            let (tabs, plus) = layout::tabs(x0, bottom, max_right, &name_w, &dirty, dot_w);
+
+            for (i, t) in tabs.iter().enumerate() {
+                let active = i == ws.active_index();
+                let hovered_tab = view.hover == Hit::Tab(i) || view.hover == Hit::TabClose(i);
+                if active {
+                    self.fill_round(t.rect, layout::TAB_RADIUS, pal.surface);
+                    self.fill(Rect::new(t.rect.left, t.rect.bottom - layout::TAB_RADIUS, t.rect.right, t.rect.bottom), pal.surface);
+                } else if hovered_tab {
+                    self.fill_round(t.rect, layout::TAB_RADIUS, pal.hover);
+                    self.fill(Rect::new(t.rect.left, t.rect.bottom - layout::TAB_RADIUS, t.rect.right, t.rect.bottom), pal.hover);
+                }
+                let name_color = if active { pal.text } else { pal.text_2 };
+                self.text(&names[i], &self.fonts.ui_12, Rect::new(t.name_x, t.rect.top, t.name_x + t.name_w, t.rect.bottom), name_color);
+                if let Some(dot_x) = t.dot_x {
+                    self.text(
+                        "●",
+                        &self.fonts.ui_9,
+                        Rect::new(dot_x, t.rect.top, dot_x + dot_w, t.rect.bottom),
+                        pal.text_2,
+                    );
+                }
+                self.hits.push((t.rect, Hit::Tab(i)));
+                if active || hovered_tab {
+                    let close_hovered = view.hover == Hit::TabClose(i);
+                    if close_hovered {
+                        self.fill_round(t.close, 4.0, pal.hover);
+                    }
+                    let cc = if close_hovered { pal.text } else { pal.text_3 };
+                    self.stroke_line(t.close.left + 1.0, t.close.top + 1.0, t.close.right - 1.0, t.close.bottom - 1.0, 1.1, cc);
+                    self.stroke_line(t.close.right - 1.0, t.close.top + 1.0, t.close.left + 1.0, t.close.bottom - 1.0, 1.1, cc);
+                    self.hits.push((t.close, Hit::TabClose(i)));
+                }
+            }
+
+            let plus_hovered = view.hover == Hit::NewTab;
+            if plus_hovered {
+                self.fill_round(plus, 5.0, pal.hover);
+            }
+            let pc = pal.text_3;
+            let pcx = plus.left + plus.width() / 2.0;
+            let pcy = plus.top + plus.height() / 2.0;
+            self.stroke_line(pcx - 5.0, pcy, pcx + 5.0, pcy, 1.1, pc);
+            self.stroke_line(pcx, pcy - 5.0, pcx, pcy + 5.0, 1.1, pc);
+            self.hits.push((plus, Hit::NewTab));
+        }
+    }
+
+    /// Barra de atajos (`.hints`): fondo `surface_2`, línea superior, pares tecla/acción.
+    #[allow(unused_unsafe)]
+    unsafe fn draw_hints(&self, state: &EditorState, ws: &Workspace, pal: &theme::Palette, frame: layout::Frame) {
+        unsafe {
+            self.fill(frame.hints, pal.surface_2);
+            self.stroke_line(0.0, frame.hints.top, frame.hints.width(), frame.hints.top, 1.0, pal.line);
+
+            let ctx = if !matches!(ws.prompt, crate::Prompt::None) {
+                match &ws.prompt {
+                    crate::Prompt::Path(p) if p.purpose == crate::Purpose::Save => crate::HintsCtx::PathSave,
+                    crate::Prompt::Path(_) => crate::HintsCtx::PathOpen,
+                    crate::Prompt::Find(_) => crate::HintsCtx::Find,
+                    crate::Prompt::Replace(_) => crate::HintsCtx::Replace,
+                    _ => crate::HintsCtx::Normal,
+                }
+            } else if state.raw.is_some() {
+                crate::HintsCtx::Raw
+            } else if let Some(vim) = &state.vim {
+                if vim.mode == crate::VimMode::Insert { crate::HintsCtx::VimInsert } else { crate::HintsCtx::VimNormal }
+            } else {
+                crate::HintsCtx::Normal
+            };
+
+            let mut x = layout::HINTS_PAD_X;
+            let items = crate::hints_items(ctx);
+            for (key, action) in items {
+                let key_w = self.measure(key, &self.fonts.mono_11_bold);
+                self.text(key, &self.fonts.mono_11_bold, Rect::new(x, frame.hints.top, x + key_w, frame.hints.bottom), pal.text_hint);
+                x += key_w;
+                let space_w = self.measure(" ", &self.fonts.mono_11);
+                x += space_w;
+                let action_w = self.measure(action, &self.fonts.mono_11);
+                self.text(action, &self.fonts.mono_11, Rect::new(x, frame.hints.top, x + action_w, frame.hints.bottom), pal.text_2);
+                x += action_w + layout::HINTS_GAP;
+            }
         }
     }
 }

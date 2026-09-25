@@ -69,11 +69,24 @@ impl Workspace {
     /// Cierra la pestaña activa. Devuelve `true` si de verdad quedó una lista más
     /// corta; si era la última, la sustituye por un documento vacío y devuelve `false`.
     pub fn close_active(&mut self) -> bool {
+        self.close(self.active)
+    }
+
+    /// Igual que `close_active`, pero con un índice explícito (clic en la ✕ de una
+    /// pestaña que no es la activa). Si `idx` cierra una pestaña anterior a la activa,
+    /// `active` se desplaza para seguir señalando al mismo documento.
+    pub fn close(&mut self, idx: usize) -> bool {
+        if idx >= self.docs.len() {
+            return false;
+        }
         if self.docs.len() == 1 {
             self.docs[0] = EditorState::new_empty();
             return false;
         }
-        self.docs.remove(self.active);
+        self.docs.remove(idx);
+        if idx < self.active {
+            self.active -= 1;
+        }
         self.active = self.active.min(self.docs.len() - 1);
         true
     }
@@ -144,6 +157,25 @@ mod tests {
     #[test]
     fn starts_without_a_prompt() {
         assert!(matches!(Workspace::new().prompt, Prompt::None));
+    }
+
+    #[test]
+    fn close_by_index_before_active_shifts_active_left() {
+        let mut w = Workspace::new();
+        w.open(EditorState::new_empty());
+        w.open(EditorState::new_empty());
+        assert_eq!(w.active_index(), 2);
+        assert!(w.close(0));
+        assert_eq!(w.len(), 2);
+        assert_eq!(w.active_index(), 1);
+    }
+
+    #[test]
+    fn close_by_index_out_of_range_does_nothing() {
+        let mut w = Workspace::new();
+        w.open(EditorState::new_empty());
+        assert!(!w.close(5));
+        assert_eq!(w.len(), 2);
     }
 
     #[test]
