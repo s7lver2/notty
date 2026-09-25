@@ -161,7 +161,7 @@ git commit -m "fix(ui): Ctrl+Alt+V y Ctrl+Shift+H ya no chocan con Paste/Replace
   - `pub enum VimOutcome { Handled, OpenFind, OpenCmdline, Bubble }`: `Handled` = la tecla ya hizo su efecto sobre `doc`; `OpenFind`/`OpenCmdline` = hay que abrir el prompt de búsqueda (`/`) o de comandos (`:`) de `notty-ui` (Plan 4); `Bubble` = la tecla no es de vim (por ejemplo con `Ctrl` u otro modificador que vim no usa) y debe tratarse como si vim no estuviera activo.
   - `VimState::handle_key(&mut self, doc: &mut notty_core::Document, vk: u32, ch: Option<char>, now: std::time::Instant) -> VimOutcome`: en modo `Insert`, cualquier `ch` imprimible se inserta con `doc.insert`, `Esc` (`vk == 0x1B`) pasa a `Normal`; en modo `Normal`/`Visual`, interpreta las teclas de la maqueta: `i`/`a`/`A`/`o` entran en `Insert` (con el cursor colocado según corresponda), `hjkl` mueven el cursor (en `Visual`, extendiendo la selección desde `visual_anchor`), `0`/`$` van a inicio/fin de línea, `x` borra el carácter bajo el cursor, `dd` (dos `d` seguidas) borra la línea, `gg`/`G` van al principio/fin del documento, `u` deshace (`doc.undo()`), `v` entra/sale de `Visual` marcando `visual_anchor`, `/` devuelve `VimOutcome::OpenFind`, `:` devuelve `VimOutcome::OpenCmdline`, cualquier otra tecla sin traducción devuelve `VimOutcome::Bubble`.
 
-- [ ] **Step 1: Escribir los tests que fallan**
+- [x] **Step 1: Escribir los tests que fallan**
 
 `crates/notty-ui/src/vim.rs`:
 
@@ -300,12 +300,12 @@ mod tests {
 
 (Cierra el bloque `mod tests` con `}` tras el último test.)
 
-- [ ] **Step 2: Ejecutar y ver que falla**
+- [x] **Step 2: Ejecutar y ver que falla**
 
 Run: `cargo test -p notty-ui vim`
 Expected: FAIL de compilación, `cannot find type VimState`.
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 Añadir **encima** del módulo de tests en `crates/notty-ui/src/vim.rs`:
 
@@ -464,12 +464,12 @@ impl VimState {
 }
 ```
 
-- [ ] **Step 4: Ejecutar y ver que pasa**
+- [x] **Step 4: Ejecutar y ver que pasa**
 
 Run: `cargo test --workspace`
 Expected: PASS, 173 tests (159 anteriores + 3 de la Task 1 + 13 de esta tarea, más los que aporten el resto de tareas de este plan; recuenta con `cargo test` en vez de fiarte solo de este número si algo no cuadra).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/notty-ui
