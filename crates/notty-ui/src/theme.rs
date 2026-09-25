@@ -120,6 +120,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::assertions_on_constants)]
     fn dark_surface_is_darker_than_chrome() {
         // En la maqueta el editor (--surface) es más oscuro que la barra de título (--chrome).
         assert!(DARK.surface.0 < DARK.chrome.0);
@@ -127,6 +128,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::assertions_on_constants)]
     fn text_hierarchy_is_ordered() {
         assert!(DARK.text.0 > DARK.text_2.0 && DARK.text_2.0 > DARK.text_3.0);
         assert!(LIGHT.text.0 < LIGHT.text_2.0 && LIGHT.text_2.0 < LIGHT.text_3.0);
