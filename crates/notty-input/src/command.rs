@@ -6,6 +6,7 @@ use crate::{Modifiers, parse_key_spec};
 pub enum UiCommand {
     OpenSettings,
     NewTab,
+    NewTempTab,
     NextTab,
     PrevTab,
     CloseTab,
@@ -15,6 +16,7 @@ pub fn default_ui_keymap() -> HashMap<(u32, Modifiers), UiCommand> {
     let bindings: &[(&str, UiCommand)] = &[
         ("Ctrl+,", UiCommand::OpenSettings),
         ("Ctrl+N", UiCommand::NewTab),
+        ("Ctrl+Shift+N", UiCommand::NewTempTab),
         ("Ctrl+Tab", UiCommand::NextTab),
         ("Ctrl+Shift+Tab", UiCommand::PrevTab),
         ("Ctrl+W", UiCommand::CloseTab),
@@ -40,10 +42,11 @@ mod tests {
     }
 
     #[test]
-    fn default_keymap_has_the_five_commands() {
+    fn default_keymap_has_the_six_commands() {
         let map = default_ui_keymap();
         assert_eq!(map.get(&(0xBC, m(true, false, false))), Some(&UiCommand::OpenSettings));
         assert_eq!(map.get(&(0x4E, m(true, false, false))), Some(&UiCommand::NewTab));
+        assert_eq!(map.get(&(0x4E, m(true, true, false))), Some(&UiCommand::NewTempTab));
         assert_eq!(map.get(&(0x09, m(true, false, false))), Some(&UiCommand::NextTab));
         assert_eq!(map.get(&(0x09, m(true, true, false))), Some(&UiCommand::PrevTab));
         assert_eq!(map.get(&(0x57, m(true, false, false))), Some(&UiCommand::CloseTab));

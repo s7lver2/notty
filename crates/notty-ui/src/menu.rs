@@ -19,8 +19,8 @@ pub enum MenuCmd {
     ToggleRaw,
     ToggleLineNumbers,
     ToggleHintsBar,
-    /// Todavía no existen en la app: se dibujan pero no hacen nada (Plan 6+).
     NewTemp,
+    /// Todavía no existen en la app: se dibujan pero no hacen nada (Plan 7+).
     Shortcuts,
     About,
 }
@@ -39,6 +39,7 @@ pub struct MenuDef {
 
 const ARCHIVO: &[MenuItem] = &[
     MenuItem::Entry { label: "Nuevo", shortcut: "^N", cmd: MenuCmd::New },
+    MenuItem::Entry { label: "Nuevo temporal", shortcut: "^⇧N", cmd: MenuCmd::NewTemp },
     MenuItem::Entry { label: "Abrir", shortcut: "^O", cmd: MenuCmd::Open },
     MenuItem::Entry { label: "Guardar", shortcut: "^S", cmd: MenuCmd::Save },
     MenuItem::Entry { label: "Guardar como", shortcut: "", cmd: MenuCmd::SaveAs },
@@ -69,7 +70,6 @@ const VER: &[MenuItem] = &[
 ];
 
 const AYUDA: &[MenuItem] = &[
-    MenuItem::Entry { label: "Nuevo temporal", shortcut: "", cmd: MenuCmd::NewTemp },
     MenuItem::Entry { label: "Atajos de teclado", shortcut: "", cmd: MenuCmd::Shortcuts },
     MenuItem::Entry { label: "Acerca de notty", shortcut: "", cmd: MenuCmd::About },
 ];

@@ -810,6 +810,13 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                                 let cfg = w.cfg.borrow().clone();
                                 w.ws.open(maybe_vim(crate::EditorState::new_empty(), &cfg));
                             }
+                            notty_input::UiCommand::NewTempTab => {
+                                let cfg = w.cfg.borrow().clone();
+                                w.ws.open(maybe_vim(
+                                    crate::EditorState::new_temp(cfg.files.temp_mode, &cfg.files.default_extension),
+                                    &cfg,
+                                ));
+                            }
                             notty_input::UiCommand::NextTab => w.ws.next(),
                             notty_input::UiCommand::PrevTab => w.ws.prev(),
                             notty_input::UiCommand::CloseTab => {
@@ -1242,7 +1249,11 @@ fn run_menu_item(w: &mut WindowState, hwnd: HWND, menu_idx: usize, item_idx: usi
             cfg.ui.hints_bar = !cfg.ui.hints_bar;
             let _ = notty_config::save(&cfg, &notty_config::default_path());
         }
-        MenuCmd::NewTemp | MenuCmd::Shortcuts | MenuCmd::About => {}
+        MenuCmd::NewTemp => {
+            let cfg = w.cfg.borrow().clone();
+            w.ws.open(maybe_vim(crate::EditorState::new_temp(cfg.files.temp_mode, &cfg.files.default_extension), &cfg));
+        }
+        MenuCmd::Shortcuts | MenuCmd::About => {}
     }
     unsafe {
         update_title(hwnd, w.ws.active());
