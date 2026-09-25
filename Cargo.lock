@@ -112,6 +112,7 @@ dependencies = [
 name = "notty"
 version = "0.1.0"
 dependencies = [
+ "notty-config",
  "notty-ui",
  "windows",
 ]
@@ -156,7 +157,9 @@ dependencies = [
 name = "notty-ui"
 version = "0.1.0"
 dependencies = [
+ "notty-config",
  "notty-core",
+ "notty-input",
  "notty-io",
  "tempfile",
  "windows",

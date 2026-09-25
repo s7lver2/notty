@@ -45,7 +45,7 @@ crates/notty-ui/src/window.rs           (modificado) conecta teclado a los promp
 - Consumes: nada nuevo.
 - Produces: `EditorAction` gana las variantes `Replace, FindNext, FindPrev, OpenPathPrompt`. `action_for_vk` mapea `Ctrl+H` (`0x48`) → `Replace`, `F3` (`0x72`) sin modificadores → `FindNext`, `F3` con `Shift` → `FindPrev`, `Ctrl+O` (`0x4F`) → `OpenPathPrompt`.
 
-- [ ] **Step 1: Escribir los tests que fallan**
+- [x] **Step 1: Escribir los tests que fallan**
 
 Añadir a `mod tests` en `crates/notty-ui/src/keymap.rs`:
 
@@ -67,12 +67,12 @@ Añadir a `mod tests` en `crates/notty-ui/src/keymap.rs`:
     }
 ```
 
-- [ ] **Step 2: Ejecutar y ver que falla**
+- [x] **Step 2: Ejecutar y ver que falla**
 
 Run: `cargo test -p notty-ui keymap`
 Expected: FAIL de compilación, `no variant named Replace found for enum EditorAction`.
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 En `crates/notty-ui/src/keymap.rs`, ampliar el `enum EditorAction`:
 
@@ -98,12 +98,12 @@ Y añadir estos brazos al `match` de `action_for_vk` (junto a los de `Save`/`Fin
 
 (`0x72` es `F3`; como no lleva `Ctrl`, el patrón `(vk, ctrl, shift)` usa `false` en la posición de `ctrl` explícitamente en vez de `_`, para no chocar con el resto de combinaciones de `F3`.)
 
-- [ ] **Step 4: Ejecutar y ver que pasa**
+- [x] **Step 4: Ejecutar y ver que pasa**
 
 Run: `cargo test --workspace`
 Expected: PASS. `notty-ui` gana 3 tests sobre los que tenía.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/notty-ui
@@ -125,7 +125,7 @@ git commit -m "feat(ui): acciones de teclado para reemplazar, F3 y abrir la lín
   - `pub fn normalize(raw: &str, ctx: &PathContext) -> String`: convierte `/` en `\`, colapsa barras repetidas, recorta espacios iniciales; si el resultado empieza por `~`, lo sustituye por `ctx.home`; si empieza por `.\` o es exactamente `.`, lo sustituye por `ctx.current_dir` (si es `None`, dejamos el `.` tal cual); expande `%NOMBRE%` con `std::env::var` cuando la variable existe (si no existe, se deja el texto tal cual, sin fallar).
   - `pub fn home_dir() -> std::path::PathBuf`: lee `%USERPROFILE%`; si no existe (solo en pruebas fuera de Windows), cae a `.`.
 
-- [ ] **Step 1: Preparar el módulo y los tests que fallan**
+- [x] **Step 1: Preparar el módulo y los tests que fallan**
 
 `crates/notty-io/src/pathline.rs`:
 
@@ -179,7 +179,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Ejecutar y ver que falla**
+- [x] **Step 2: Ejecutar y ver que falla**
 
 Añadir `mod pathline;` a `crates/notty-io/src/lib.rs` (sin re-export todavía) para que el archivo se compile:
 
@@ -190,7 +190,7 @@ mod pathline;
 Run: `cargo test -p notty-io pathline`
 Expected: FAIL de compilación, `cannot find type PathContext`.
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 Añadir **encima** del módulo de tests en `crates/notty-io/src/pathline.rs`:
 
@@ -255,12 +255,12 @@ fn expand_env(s: &str) -> String {
 }
 ```
 
-- [ ] **Step 4: Ejecutar y ver que pasa**
+- [x] **Step 4: Ejecutar y ver que pasa**
 
 Run: `cargo test -p notty-io`
 Expected: PASS, 27 + 7 = 34 tests en `notty-io`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/notty-io
@@ -284,7 +284,7 @@ git commit -m "feat(io): normaliza la línea de ruta (barras, ~, ., %VAR%)"
   - `pub fn hint_for(typed: &str) -> Hint`.
   - `pub const INVALID_CHARS: &[char] = &[':', '*', '?', '"', '<', '>', '|']` y `pub fn has_invalid_chars(segment: &str) -> bool` (comprueba solo el último segmento, para no marcar como inválido el `:` de una unidad tipo `C:`).
 
-- [ ] **Step 1: Escribir los tests que fallan**
+- [x] **Step 1: Escribir los tests que fallan**
 
 Añadir a `mod tests` en `crates/notty-io/src/pathline.rs`:
 
@@ -366,12 +366,12 @@ Añadir a `mod tests` en `crates/notty-io/src/pathline.rs`:
     }
 ```
 
-- [ ] **Step 2: Ejecutar y ver que falla**
+- [x] **Step 2: Ejecutar y ver que falla**
 
 Run: `cargo test -p notty-io pathline`
 Expected: FAIL de compilación, `cannot find function suggestions`.
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 Añadir **encima** del módulo de tests en `crates/notty-io/src/pathline.rs` (después de `expand_env`):
 
@@ -439,12 +439,12 @@ pub fn has_invalid_chars(segment: &str) -> bool {
 }
 ```
 
-- [ ] **Step 4: Ejecutar y ver que pasa**
+- [x] **Step 4: Ejecutar y ver que pasa**
 
 Run: `cargo test --workspace`
 Expected: PASS. `notty-io` pasa a 44 tests; total del workspace 126 (de antes) + 17 (Tasks 2-3) = 143.
 
-- [ ] **Step 5: Exportar el módulo**
+- [x] **Step 5: Exportar el módulo**
 
 `crates/notty-io/src/lib.rs` queda (añadiendo el `pub use` que faltaba):
 
@@ -464,7 +464,7 @@ pub use open::{Opened, RawBytes, open, open_raw};
 pub use pathline::{Entry, Hint, INVALID_CHARS, PathContext, has_invalid_chars, hint_for, home_dir, normalize, suggestions};
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/notty-io
@@ -493,7 +493,7 @@ git commit -m "feat(io): sugerencias de ruta y detección nuevo/existe/carpeta"
     - `move_selection(&mut self, delta: i32)`: mueve `selected` cíclicamente entre `0..suggestions().len()` (no hace nada si no hay sugerencias).
     - `accept(&mut self)`: sustituye el último segmento de `value` por la sugerencia seleccionada (añadiendo `\` si es carpeta); si ya coincidía exactamente con esa sugerencia y hay más de una, avanza a la siguiente antes de sustituir (mismo comportamiento que la maqueta: "Tab otra vez pasa a la siguiente").
 
-- [ ] **Step 1: Escribir los tests que fallan**
+- [x] **Step 1: Escribir los tests que fallan**
 
 `crates/notty-ui/src/path_prompt.rs`:
 
@@ -578,12 +578,12 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Ejecutar y ver que falla**
+- [x] **Step 2: Ejecutar y ver que falla**
 
 Run: `cargo test -p notty-ui path_prompt`
 Expected: FAIL de compilación, `cannot find type PathPromptState`.
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 Añadir **encima** del módulo de tests en `crates/notty-ui/src/path_prompt.rs`:
 
@@ -665,12 +665,12 @@ impl PathPromptState {
 }
 ```
 
-- [ ] **Step 4: Ejecutar y ver que pasa**
+- [x] **Step 4: Ejecutar y ver que pasa**
 
 Run: `cargo test --workspace`
 Expected: PASS, 150 tests (143 anteriores + 7).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/notty-ui
@@ -695,7 +695,7 @@ git commit -m "feat(ui): estado de la línea de ruta (sugerencias, fantasma, Tab
   - `next(&mut self, doc: &Document)` / `prev(&mut self, doc: &Document)`: avanzan/retroceden `current` cíclicamente sobre `matches(doc)` (no hacen nada si el resultado es `Err` o está vacío).
   - `toggle_case(&mut self)` / `toggle_word(&mut self)` / `toggle_regex(&mut self)`: invierten el campo correspondiente de `opts` y resetean `current` a `0`.
 
-- [ ] **Step 1: Escribir los tests que fallan**
+- [x] **Step 1: Escribir los tests que fallan**
 
 `crates/notty-ui/src/search_prompt.rs`:
 
@@ -774,12 +774,12 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Ejecutar y ver que falla**
+- [x] **Step 2: Ejecutar y ver que falla**
 
 Run: `cargo test -p notty-ui search_prompt`
 Expected: FAIL de compilación, `cannot find type SearchState`.
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 Añadir **encima** del módulo de tests en `crates/notty-ui/src/search_prompt.rs`:
 
@@ -853,12 +853,12 @@ impl SearchState {
 }
 ```
 
-- [ ] **Step 4: Ejecutar y ver que pasa**
+- [x] **Step 4: Ejecutar y ver que pasa**
 
 Run: `cargo test --workspace`
 Expected: PASS, 157 tests (150 anteriores + 7).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/notty-ui
@@ -878,7 +878,7 @@ git commit -m "feat(ui): estado de buscar/reemplazar sobre Document"
 - Consumes: `PathPromptState`, `SearchState`.
 - Produces: `pub enum Prompt { None, Path(PathPromptState), Find(SearchState), Replace(SearchState) }` (`Default` = `None`). `Workspace` gana el campo público `pub prompt: Prompt` (inicializado a `Prompt::None` en `new()`) y el método `close_prompt(&mut self)` (`self.prompt = Prompt::None`).
 
-- [ ] **Step 1: Escribir los tests que fallan**
+- [x] **Step 1: Escribir los tests que fallan**
 
 Añadir a `mod tests` en `crates/notty-ui/src/workspace.rs`:
 
@@ -897,12 +897,12 @@ Añadir a `mod tests` en `crates/notty-ui/src/workspace.rs`:
     }
 ```
 
-- [ ] **Step 2: Ejecutar y ver que falla**
+- [x] **Step 2: Ejecutar y ver que falla**
 
 Run: `cargo test -p notty-ui workspace`
 Expected: FAIL de compilación, `no field prompt on type Workspace`.
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 `crates/notty-ui/src/prompt.rs` (archivo completo, sin tests propios: es una enumeración sin lógica, ya cubierta por los tests de `PathPromptState`/`SearchState` y de `Workspace`):
 
@@ -980,12 +980,12 @@ pub use workspace::Workspace;
 
 (añade los `mod`/`pub use` nuevos a los que ya había del Plan 3; no borres el resto.)
 
-- [ ] **Step 4: Ejecutar y ver que pasa**
+- [x] **Step 4: Ejecutar y ver que pasa**
 
 Run: `cargo test --workspace`
 Expected: PASS, 159 tests (157 anteriores + 2).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/notty-ui
@@ -1003,7 +1003,7 @@ git commit -m "feat(ui): Prompt unificado (ruta/buscar/reemplazar) en Workspace"
 - Consumes: `EditorAction::{OpenPathPrompt, Find, Replace, FindNext, FindPrev, Save}`, `Prompt`, `PathPromptState`, `SearchState`.
 - Produces: el bucle de mensajes de `window.rs` reconoce cuándo hay un prompt activo (`!matches!(ws.prompt, Prompt::None)`) y, en ese caso, **todas** las teclas van al prompt en vez de al editor (igual que en la maqueta: mientras escribes una ruta o una búsqueda, las flechas y las letras no mueven el cursor del texto).
 
-- [ ] **Step 1: Abrir/cerrar prompts desde `EditorAction`**
+- [x] **Step 1: Abrir/cerrar prompts desde `EditorAction`**
 
 En el `match action` de `WM_KEYDOWN` (el que ya trata `Copy/Cut/Paste/Save` desde el Plan 2), añadir, **antes** de mirar si hay un prompt abierto:
 
@@ -1032,7 +1032,7 @@ match action {
 
 (La rama `Save if ws.active().path.is_none()` debe comprobarse **antes** de que el `match` llegue al brazo genérico de `Save`, que sigue llamando a `ws.active_mut().save()` cuando sí hay ruta — reorganiza el `match` existente para que esta guarda tenga prioridad, sin duplicar el resto de brazos ya escritos en los Planes 2 y 3.)
 
-- [ ] **Step 2: Redirigir el teclado al prompt cuando hay uno abierto**
+- [x] **Step 2: Redirigir el teclado al prompt cuando hay uno abierto**
 
 Justo al principio del manejador de `WM_KEYDOWN` y de `WM_CHAR` (antes de construir `action`/`ch` para el editor), comprobar si `ws.prompt` no es `None` y, en ese caso, despachar a una función nueva en vez de al camino normal:
 
@@ -1053,7 +1053,7 @@ fn handle_prompt_keydown(ws: &mut crate::Workspace, vk: u32, mods: notty_ui_modi
 
 (Ajusta la firma exacta a como esté organizado el estado por ventana en tu `window.rs`: si `EditorState`/`Workspace` ya viven dentro de una `struct` capturada por el `WndProc`, añade estas funciones como métodos de esa `struct` en vez de funciones sueltas — lo importante es el comportamiento, no la forma exacta de pasar el contexto.)
 
-- [ ] **Step 3: Teclas de la línea de ruta**
+- [x] **Step 3: Teclas de la línea de ruta**
 
 ```rust
 fn handle_path_key(p: &mut crate::PathPromptState, vk: u32, mods: Modifiers, ctx: &notty_io::PathContext) -> Option<PathAction> {
@@ -1079,7 +1079,7 @@ fn handle_path_key(p: &mut crate::PathPromptState, vk: u32, mods: Modifiers, ctx
 
 `PathAction::OpenWindowsDialog`: por ahora, deja un comentario `// TODO(plan futuro): diálogo nativo de Windows` y no hagas nada más (no es parte del alcance de este plan; la línea de ruta ya cubre el caso principal).
 
-- [ ] **Step 4: Teclas de buscar/reemplazar**
+- [x] **Step 4: Teclas de buscar/reemplazar**
 
 ```rust
 fn handle_search_key(s: &mut crate::SearchState, vk: u32, mods: Modifiers, doc: &notty_core::Document) -> Option<SearchAction> {
@@ -1103,12 +1103,12 @@ fn handle_search_key(s: &mut crate::SearchState, vk: u32, mods: Modifiers, doc: 
 
 En `Prompt::Replace`, `Enter` sin `Ctrl+Alt` reemplaza la coincidencia actual: usa `doc.replace_all` no es lo que hace falta aquí (reemplaza *todas*); para "reemplazar solo esta" haz `let m = s.matches(doc)?; let r = m[s.current].clone(); ws.active_mut().doc.replace_range(r, &s.replacement, Instant::now());` y luego `s.next(&ws.active().doc)`. `Ctrl+Alt+Enter` reemplaza todas: `ws.active_mut().doc.replace_all(&s.query, &s.replacement, s.opts, Instant::now())`.
 
-- [ ] **Step 5: Compilar**
+- [x] **Step 5: Compilar**
 
 Run: `cargo build --workspace`
 Expected: compila (con los ajustes de organización de `window.rs` que hagan falta para que todo lo anterior encaje con cómo esté escrito el estado por ventana tras los Planes 2 y 3).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/notty-ui
@@ -1128,7 +1128,7 @@ git commit -m "feat(ui): conecta el teclado a los prompts de ruta y búsqueda"
   - **Ruta:** el texto tecleado + el `ghost()` en gris a continuación, en monoespaciado; si `is_invalid()`, el texto en rojo (`--danger` del tema, aproximado a `D2D1_COLOR_F { r:0.85,g:0.35,b:0.35,a:1.0 }` en modo oscuro); si hay sugerencias, una caja pequeña justo encima de la barra de estado con hasta 5 filas (la fila `selected` resaltada con `sel_brush`), carpetas con `\` final, archivos sin marca.
   - **Buscar/reemplazar:** `"buscar: " + query` (y, si es `Replace`, una segunda línea o segmento `"por: " + replacement`), el contador de `count_label`, y tres indicadores `Aa` / `ab` / `.*` resaltados según `opts.case_sensitive`/`whole_word`/`regex`. Las coincidencias de `matches(doc)` visibles en pantalla se resaltan con un `FillRectangle` semitransparente por cada una que caiga en una línea visible (reutiliza el mismo mecanismo que ya pinta el fondo de la selección desde el Plan 2), con la actual (`current`) en un tono más marcado.
 
-- [ ] **Step 1: Implementar**
+- [x] **Step 1: Implementar**
 
 Modifica `Renderer::paint` (la firma ya recibe `ws: &Workspace` desde el Plan 3) para, tras dibujar el texto y antes/junto con la barra de estado:
 
@@ -1138,7 +1138,7 @@ Modifica `Renderer::paint` (la firma ya recibe `ws: &Workspace` desde el Plan 3)
 
 Ajusta cualquier firma de `windows` que haga falta al compilar.
 
-- [ ] **Step 2: Compilar y comprobar manualmente**
+- [x] **Step 2: Compilar y comprobar manualmente**
 
 Run: `cargo build --workspace`
 Expected: compila.
@@ -1151,7 +1151,7 @@ Expected (manual):
 - `Ctrl+H` añade el campo de reemplazo; `Enter` reemplaza una, `Ctrl+Alt+Enter` todas.
 - `Esc` cierra cualquier prompt y devuelve el foco al texto.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add crates/notty-ui
@@ -1164,7 +1164,7 @@ git commit -m "feat(ui): dibuja la línea de prompt, sugerencias y resaltado de 
 
 **Files:** ninguno nuevo; solo verificación.
 
-- [ ] **Step 1: Tests y lints de todo el workspace**
+- [x] **Step 1: Tests y lints de todo el workspace**
 
 Run: `cargo test --workspace`
 Expected: PASS, 159 tests (las Tasks 7-8 son integración Win32 sin tests automáticos nuevos).
@@ -1172,12 +1172,12 @@ Expected: PASS, 159 tests (las Tasks 7-8 son integración Win32 sin tests autom�
 Run: `cargo clippy --workspace --all-targets -- -D warnings`
 Expected: sin avisos. Corregir cualquier aviso en el archivo que lo señale y repetir hasta que quede limpio.
 
-- [ ] **Step 2: Build release**
+- [x] **Step 2: Build release**
 
 Run: `cargo build --release --workspace`
 Expected: compila sin errores.
 
-- [ ] **Step 3: Commit (si hubo cambios de la revisión)**
+- [x] **Step 3: Commit (si hubo cambios de la revisión)**
 
 ```bash
 git add -A
