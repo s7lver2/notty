@@ -351,7 +351,7 @@ Pulido general, sin lógica nueva: compara `docs/mockups/ref/ajustes.png` contra
 
 ### Task 8: Comprobación final
 
-- [ ] **Step 1:** `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo build --release --workspace`: todo limpio.
-- [ ] **Step 2:** Repasa mentalmente (o con capturas si el foco lo permite) que ninguna animación bloquea la escritura: abre el menú y escribe/haz clic antes de que termine de fundir, confirma que la acción se aplica igual que si no hubiera animación.
-- [ ] **Step 3:** Confirma que el `WM_TIMER` de animación de cada ventana se para de verdad en reposo (no hay ninguna animación activa) — revisa el código, no hace falta instrumentación especial.
-- [ ] **Step 4: Commit** `chore(ui): repaso final tras animaciones y pulido de Ajustes` (`--allow-empty` si no hubo cambios de esta revisión).
+- [x] **Step 1:** `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo build --release --workspace`: todo limpio.
+- [x] **Step 2:** Repasa mentalmente (o con capturas si el foco lo permite) que ninguna animación bloquea la escritura: abre el menú y escribe/haz clic antes de que termine de fundir, confirma que la acción se aplica igual que si no hubiera animación.
+- [x] **Step 3:** Confirma que el `WM_TIMER` de animación de cada ventana se para de verdad en reposo (no hay ninguna animación activa) — revisa el código, no hace falta instrumentación especial.
+- [x] **Step 4: Commit** `chore(ui): repaso final tras animaciones y pulido de Ajustes` (`--allow-empty` si no hubo cambios de esta revisión).
