@@ -637,7 +637,7 @@ git commit -m "feat(ipc): protocolo del pipe de instancia única y del daemon"
 - Consumes: `notty_io::{drafts_dir, draft_filename, atomic_write, create_parent_dirs}`.
 - Produces: `EditorState` gana `pub temp: Option<notty_config::TempMode>` y `pub open_mtime: Option<std::time::SystemTime>` (`None` en `new_empty`/`from_opened` salvo que `from_opened` sí rellene `open_mtime` con `notty_io::mtime(&path)`, ignorando el error). `pub fn new_temp_at(mode: notty_config::TempMode, dir: &Path, ext: &str, now: std::time::SystemTime) -> EditorState`: en `Draft`, calcula la ruta con `dir.join(draft_filename(now, ext))`, la asigna a `path` y dirty a `false` (el archivo aún no existe en disco hasta el primer guardado/autoguardado, ver Task 7); en `Volatile`, `path = None` igual que `new_empty`. `pub fn new_temp(mode, ext) -> EditorState` (envoltorio que usa `notty_io::drafts_dir()` y `SystemTime::now()`).
 
-- [ ] **Step 1: Escribir los tests que fallan**
+- [x] **Step 1: Escribir los tests que fallan**
 
 Añadir a `mod tests` en `crates/notty-ui/src/editor.rs`:
 
@@ -660,12 +660,12 @@ Añadir a `mod tests` en `crates/notty-ui/src/editor.rs`:
     }
 ```
 
-- [ ] **Step 2: Ejecutar y ver que falla**
+- [x] **Step 2: Ejecutar y ver que falla**
 
 Run: `cargo test -p notty-ui editor new_temp`
 Expected: FAIL de compilación, `no function or associated item named new_temp_at`.
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 Añadir los dos campos a `struct EditorState` (junto a `path`, `encoding`, etc.) y a `new_empty`/`from_opened`:
 
@@ -695,12 +695,12 @@ Añadir el nuevo constructor en el primer `impl EditorState` (junto a `new_empty
 
 (`TempMode` necesita `PartialEq`/`Eq`, ya los tiene desde la Task 1 de este plan.)
 
-- [ ] **Step 4: Ejecutar y ver que pasa**
+- [x] **Step 4: Ejecutar y ver que pasa**
 
 Run: `cargo test --workspace`
 Expected: PASS, +2 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/notty-ui

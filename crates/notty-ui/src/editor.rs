@@ -21,6 +21,8 @@ pub struct EditorState {
     /// / Ctrl+Shift+H como el resto de `EditorState`.
     pub raw_cursor: usize,
     pub raw_pending_nibble: Option<u8>,
+    pub temp: Option<notty_config::TempMode>,
+    pub open_mtime: Option<std::time::SystemTime>,
 }
 
 impl EditorState {
@@ -35,10 +37,13 @@ impl EditorState {
             raw: None,
             raw_cursor: 0,
             raw_pending_nibble: None,
+            temp: None,
+            open_mtime: None,
         }
     }
 
     pub fn from_opened(opened: OpenedDoc) -> Self {
+        let open_mtime = notty_io::mtime(&opened.path).ok();
         Self {
             doc: opened.document,
             viewport: Viewport { first_line: 0, visible_lines: 1 },
@@ -49,7 +54,22 @@ impl EditorState {
             raw: None,
             raw_cursor: 0,
             raw_pending_nibble: None,
+            temp: None,
+            open_mtime,
         }
+    }
+
+    pub fn new_temp_at(mode: notty_config::TempMode, dir: &std::path::Path, ext: &str, now: std::time::SystemTime) -> Self {
+        let mut s = Self::new_empty();
+        s.temp = Some(mode);
+        if mode == notty_config::TempMode::Draft {
+            s.path = Some(dir.join(notty_io::draft_filename(now, ext)));
+        }
+        s
+    }
+
+    pub fn new_temp(mode: notty_config::TempMode, ext: &str) -> Self {
+        Self::new_temp_at(mode, &notty_io::drafts_dir(), ext, std::time::SystemTime::now())
     }
 }
 
@@ -155,6 +175,23 @@ mod tests {
         s.doc = Document::new(text, "\n");
         s.viewport = Viewport { first_line: 0, visible_lines: 3 };
         s
+    }
+
+    #[test]
+    fn draft_gets_a_real_path_inside_the_given_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = EditorState::new_temp_at(notty_config::TempMode::Draft, dir.path(), ".txt", std::time::SystemTime::UNIX_EPOCH);
+        assert_eq!(s.temp, Some(notty_config::TempMode::Draft));
+        assert!(s.path.as_ref().unwrap().starts_with(dir.path()));
+        assert!(s.path.as_ref().unwrap().extension().is_some());
+    }
+
+    #[test]
+    fn volatile_has_no_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = EditorState::new_temp_at(notty_config::TempMode::Volatile, dir.path(), ".txt", std::time::SystemTime::now());
+        assert_eq!(s.temp, Some(notty_config::TempMode::Volatile));
+        assert!(s.path.is_none());
     }
 
     #[test]
