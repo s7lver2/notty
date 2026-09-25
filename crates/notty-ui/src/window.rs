@@ -46,6 +46,8 @@ struct WindowState {
     hover: Hit,
     pressed: Hit,
     active_window: bool,
+    /// Índice del menú de la barra abierto (clic en `Hit::Menu(i)`), si lo hay.
+    open_menu: Option<usize>,
 }
 
 impl WindowState {
@@ -71,7 +73,7 @@ impl WindowState {
             maximized,
             active_window: self.active_window,
             menu_bar_visible: self.menu_bar_visible(),
-            open_menu: None,
+            open_menu: self.open_menu,
         }
     }
 
@@ -229,6 +231,7 @@ pub fn run(path: Option<&str>, load: notty_config::LoadResult) -> Result<()> {
             hover: Hit::None,
             pressed: Hit::None,
             active_window: true,
+            open_menu: None,
         });
         let ptr = Box::into_raw(window_state);
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, ptr as isize);
@@ -500,6 +503,12 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         alt: alt_down,
                     };
 
+                    if w.open_menu.is_some() && vk == 0x1B {
+                        w.open_menu = None;
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                        return LRESULT(0);
+                    }
+
                     if !matches!(w.ws.prompt, crate::Prompt::None) {
                         handle_prompt_keydown(w, hwnd, vk, mods);
                         let _ = InvalidateRect(Some(hwnd), None, false);
@@ -711,7 +720,18 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             w.ws.open(crate::EditorState::new_empty());
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
+                        crate::Hit::Menu(i) => {
+                            w.open_menu = if w.open_menu == Some(i) { None } else { Some(i) };
+                            let _ = InvalidateRect(Some(hwnd), None, false);
+                        }
+                        crate::Hit::MenuItem(j) => {
+                            if let Some(i) = w.open_menu.take() {
+                                run_menu_item(w, hwnd, i, j);
+                            }
+                            let _ = InvalidateRect(Some(hwnd), None, false);
+                        }
                         crate::Hit::Body if w.ws.active().raw.is_none() => {
+                            w.open_menu = None;
                             let (body, gutter_w) = w.body_and_gutter();
                             let idx = w.renderer.char_index_at(w.ws.active(), body, gutter_w, x, y);
                             w.ws.active_mut().doc.set_cursor(idx);
@@ -720,7 +740,12 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             SetCapture(hwnd);
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
-                        _ => {}
+                        _ => {
+                            if w.open_menu.is_some() {
+                                w.open_menu = None;
+                                let _ = InvalidateRect(Some(hwnd), None, false);
+                            }
+                        }
                     }
                 }
                 LRESULT(0)
@@ -827,6 +852,77 @@ fn handle_vim_char(w: &mut WindowState, ch: char) {
                 w.ws.active_mut().insert_char(ch, std::time::Instant::now());
             }
         }
+    }
+}
+
+// --- Menús desplegables ---------------------------------------------------------------
+
+/// Ejecuta el comando del elemento `item_idx` del menú `menu_idx` (`crate::menu::MENUS`),
+/// mapeado a lo que ya existe en la app (ver Task 9 del plan). Los comandos que
+/// todavía no tienen nada detrás (`NewTemp`, `Shortcuts`, `About`) no hacen nada.
+fn run_menu_item(w: &mut WindowState, hwnd: HWND, menu_idx: usize, item_idx: usize) {
+    use crate::menu::{MenuCmd, MenuItem};
+    let Some(def) = crate::menu::MENUS.get(menu_idx) else { return };
+    let Some(MenuItem::Entry { cmd, .. }) = def.items.get(item_idx).copied() else { return };
+    match cmd {
+        MenuCmd::New => w.ws.open(crate::EditorState::new_empty()),
+        MenuCmd::Open => {
+            let initial = w.ws.active().path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
+            w.ws.prompt = crate::Prompt::Path(crate::PathPromptState::new(crate::Purpose::Open, initial));
+        }
+        MenuCmd::Save => {
+            if w.ws.active().path.is_none() {
+                w.ws.prompt = crate::Prompt::Path(crate::PathPromptState::new(crate::Purpose::Save, String::new()));
+            } else {
+                let _ = w.ws.active_mut().save();
+            }
+        }
+        MenuCmd::SaveAs => {
+            w.ws.prompt = crate::Prompt::Path(crate::PathPromptState::new(crate::Purpose::Save, String::new()));
+        }
+        MenuCmd::Settings => {
+            let cfg_for_settings = w.cfg.clone();
+            let hwnd_copy = hwnd;
+            let _ = crate::settings_window::open(
+                hwnd,
+                cfg_for_settings,
+                Box::new(move || unsafe {
+                    let _ = InvalidateRect(Some(hwnd_copy), None, false);
+                }),
+            );
+        }
+        MenuCmd::CloseTab => {
+            w.ws.close_active();
+        }
+        MenuCmd::Undo => {
+            w.ws.active_mut().doc.undo();
+        }
+        MenuCmd::Redo => {
+            w.ws.active_mut().doc.redo();
+        }
+        MenuCmd::Find => w.ws.prompt = crate::Prompt::Find(crate::SearchState::default()),
+        MenuCmd::Replace => w.ws.prompt = crate::Prompt::Replace(crate::SearchState::default()),
+        MenuCmd::FindNext => nav_search(w, true),
+        MenuCmd::FindPrev => nav_search(w, false),
+        MenuCmd::ToggleVim => {
+            let st = w.ws.active_mut();
+            st.vim = if st.vim.is_some() { None } else { Some(crate::VimState::default()) };
+        }
+        MenuCmd::ToggleRaw => toggle_raw(w),
+        MenuCmd::ToggleLineNumbers => {
+            let mut cfg = w.cfg.borrow_mut();
+            cfg.ui.line_numbers = !cfg.ui.line_numbers;
+            let _ = notty_config::save(&cfg, &notty_config::default_path());
+        }
+        MenuCmd::ToggleHintsBar => {
+            let mut cfg = w.cfg.borrow_mut();
+            cfg.ui.hints_bar = !cfg.ui.hints_bar;
+            let _ = notty_config::save(&cfg, &notty_config::default_path());
+        }
+        MenuCmd::NewTemp | MenuCmd::Shortcuts | MenuCmd::About => {}
+    }
+    unsafe {
+        update_title(hwnd, w.ws.active());
     }
 }
 

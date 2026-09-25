@@ -7,6 +7,7 @@ pub mod editor;
 mod hex;
 pub mod layout;
 mod keymap;
+pub mod menu;
 mod path_prompt;
 mod prompt;
 mod raw_doc;

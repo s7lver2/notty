@@ -55,6 +55,19 @@ impl RawDoc {
         true
     }
 
+    /// Si el byte `i` se editó (difiere del original mapeado) y todavía no se ha
+    /// guardado. Tras `save()`, `dirty` vuelve a `false` y esto deja de marcar nada:
+    /// «modificado» es relativo a lo que hay en disco ahora mismo.
+    pub fn is_modified(&self, i: usize) -> bool {
+        match &self.edit_buf {
+            Some(buf) if self.dirty => match (self.view.get(i), buf.get(i)) {
+                (Some(orig), Some(cur)) => orig != cur,
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+
     pub fn set_byte(&mut self, i: usize, value: u8) -> bool {
         match &mut self.edit_buf {
             Some(buf) if i < buf.len() => {
@@ -132,6 +145,22 @@ mod tests {
         assert_eq!(doc.byte(1), 0xFF);
         assert!(doc.is_dirty());
         assert_eq!(fs::read(&p).unwrap(), vec![1, 2, 3]); // el disco no cambia todavía
+    }
+
+    #[test]
+    fn is_modified_tracks_edited_bytes_until_saved() {
+        let dir = tempdir().unwrap();
+        let p = dir.path().join("a.bin");
+        fs::write(&p, [1u8, 2, 3]).unwrap();
+        let mut doc = open_raw_doc(&p).unwrap();
+        assert!(!doc.is_modified(1)); // sin edit_buf todavía
+        doc.enable_write();
+        assert!(!doc.is_modified(1)); // idéntico al original
+        doc.set_byte(1, 0xFF);
+        assert!(doc.is_modified(1));
+        assert!(!doc.is_modified(0));
+        doc.save().unwrap();
+        assert!(!doc.is_modified(1)); // ya no hay diferencia con el disco
     }
 
     #[test]

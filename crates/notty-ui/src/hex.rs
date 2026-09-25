@@ -13,7 +13,7 @@ pub fn hex_row(offset: usize, bytes: &[u8]) -> String {
         }
     }
     let ascii: String = bytes.iter().map(|&b| if (0x20..=0x7E).contains(&b) { b as char } else { '.' }).collect();
-    format!("{offset:08X}   {hex} {ascii}")
+    format!("{offset:08x}   {hex} {ascii}")
 }
 
 /// Divide una secuencia de bytes en filas de 16 y las formatea. Función interna

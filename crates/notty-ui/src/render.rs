@@ -166,6 +166,10 @@ pub struct Renderer {
     fonts: Fonts,
     dpi: u32,
     hits: Vec<(Rect, Hit)>,
+    /// Posición donde debe dibujarse el desplegable del menú abierto (si lo hay),
+    /// calculada por `draw_menubar` pero pintada al final de `paint` para quedar
+    /// encima de todo lo demás.
+    pending_dropdown: Option<(f32, f32)>,
 }
 
 impl Renderer {
@@ -245,6 +249,7 @@ impl Renderer {
                 },
                 dpi,
                 hits: Vec::new(),
+                pending_dropdown: None,
             })
         }
     }
@@ -476,6 +481,7 @@ impl Renderer {
     /// barra de estado / prompts y la vista raw llegan en las Tasks 8-9.
     pub fn paint(&mut self, ws: &Workspace, ui: &UiConfig, view: &ViewState) {
         self.hits.clear();
+        self.pending_dropdown = None;
         let pal = theme::palette(view.dark);
         let state = ws.active();
         let buf = state.doc.buffer();
@@ -518,6 +524,11 @@ impl Renderer {
                 self.fill(Rect::new(0.0, frame.tabs_below.top, w, frame.tabs_below.top), pal.chrome);
             }
 
+            if is_raw {
+                if let Some(raw) = &state.raw {
+                    self.draw_hex(raw, state.raw_cursor, state.raw_pending_nibble, pal, frame);
+                }
+            } else {
             let mut y = frame.body.top + layout::TEXT_PAD_T;
             for line in range {
                 let start = buf.line_start(line);
@@ -605,12 +616,17 @@ impl Renderer {
                     break;
                 }
             }
+            }
 
             if bands.hints {
                 self.draw_hints(state, ws, pal, frame);
             }
 
             self.draw_status(ws, state, pal, frame, bands.merged_status);
+
+            if let (Some((x, top)), Some(i)) = (self.pending_dropdown.take(), view.open_menu) {
+                self.draw_dropdown(crate::menu::MENUS[i].items, x, top, view, pal);
+            }
 
             let _ = self.target.EndDraw(None, None);
         }
@@ -688,19 +704,74 @@ impl Renderer {
     unsafe fn draw_menubar(&mut self, view: &ViewState, pal: &theme::Palette, frame: layout::Frame) {
         unsafe {
             self.fill(frame.menubar, pal.chrome);
-            let labels = ["Archivo", "Editar", "Buscar", "Ver", "Ayuda"];
             let mut x = layout::MENUBAR_PAD_X;
             let top = frame.menubar.top + (layout::MENUBAR_H - 22.0) / 2.0;
-            for (i, label) in labels.iter().enumerate() {
-                let w = self.measure(label, &self.fonts.ui_12_5) + layout::MENU_BTN_PAD_X * 2.0;
+            let mut open_x = None;
+            for (i, def) in crate::menu::MENUS.iter().enumerate() {
+                let w = self.measure(def.name, &self.fonts.ui_12_5) + layout::MENU_BTN_PAD_X * 2.0;
                 let r = Rect::new(x, top, x + w, top + 22.0);
                 let hovered = view.hover == Hit::Menu(i) || view.open_menu == Some(i);
                 if hovered {
                     self.fill_round(r, 4.0, pal.hover);
                 }
-                self.text(label, &self.fonts.ui_12_5, r, pal.text);
+                self.text(def.name, &self.fonts.ui_12_5, r, pal.text);
                 self.hits.push((r, Hit::Menu(i)));
+                if view.open_menu == Some(i) {
+                    open_x = Some(x);
+                }
                 x += w + layout::MENU_BTN_GAP;
+            }
+            self.pending_dropdown = open_x.map(|x| (x, frame.menubar.bottom - 2.0));
+        }
+    }
+
+    /// Desplegable de un menú (`.dropdown`/`.menu-item`/`.menu-sep`): ancho mínimo
+    /// 250, fondo `chrome_hi`, radio 8, sombra aproximada como en `draw_suggestions`.
+    #[allow(unused_unsafe)]
+    unsafe fn draw_dropdown(&mut self, items: &[crate::menu::MenuItem], x: f32, top: f32, view: &ViewState, pal: &theme::Palette) {
+        use crate::menu::MenuItem;
+        unsafe {
+            let row_h = 28.0;
+            let sep_h = 9.0;
+            let content_w = items
+                .iter()
+                .map(|it| match it {
+                    MenuItem::Entry { label, shortcut, .. } => {
+                        self.measure(label, &self.fonts.ui_12_5) + if shortcut.is_empty() { 0.0 } else { self.measure(shortcut, &self.fonts.mono_11) + 24.0 }
+                    }
+                    MenuItem::Sep => 0.0,
+                })
+                .fold(0.0f32, f32::max);
+            let width = (content_w + 24.0).max(250.0);
+            let height: f32 = layout::POPUP_PAD * 2.0
+                + items.iter().map(|it| if matches!(it, MenuItem::Sep) { sep_h } else { row_h }).sum::<f32>();
+            let box_r = Rect::new(x, top, x + width, top + height);
+
+            self.fill_round(Rect::new(box_r.left - 2.0, box_r.top - 2.0, box_r.right + 2.0, box_r.bottom + 2.0), layout::POPUP_RADIUS + 2.0, pal.shadow);
+            self.fill_round(box_r, layout::POPUP_RADIUS, pal.chrome_hi);
+            self.stroke_round_rect(box_r, layout::POPUP_RADIUS, 1.0, pal.shadow_ring);
+
+            let mut y = box_r.top + layout::POPUP_PAD;
+            for (j, it) in items.iter().enumerate() {
+                match it {
+                    MenuItem::Sep => {
+                        let ly = y + sep_h / 2.0;
+                        self.stroke_line(box_r.left + 4.0, ly, box_r.right - 4.0, ly, 1.0, pal.line);
+                        y += sep_h;
+                    }
+                    MenuItem::Entry { label, shortcut, .. } => {
+                        let r = Rect::new(box_r.left + 4.0, y, box_r.right - 4.0, y + row_h);
+                        if view.hover == Hit::MenuItem(j) {
+                            self.fill_round(r, 4.0, pal.hover);
+                        }
+                        self.text(label, &self.fonts.ui_12_5, Rect::new(r.left + 6.0, r.top, r.right - 6.0, r.bottom), pal.text);
+                        if !shortcut.is_empty() {
+                            self.text_right(shortcut, &self.fonts.mono_11, Rect::new(r.left + 6.0, r.top, r.right - 6.0, r.bottom), pal.text_3);
+                        }
+                        self.hits.push((r, Hit::MenuItem(j)));
+                        y += row_h;
+                    }
+                }
             }
         }
     }
@@ -1097,6 +1168,77 @@ impl Renderer {
         if active_caret {
             let cx = r.left + vw.min(r.width().max(0.0));
             self.fill(Rect::new(cx, r.top + 4.0, cx + 1.0, r.bottom - 4.0), pal.text);
+        }
+    }
+
+    /// Cuadrícula hexadecimal (`renderHex`): origen `(body.left+16, body.top+10)`,
+    /// `mono_13`, interlineado `LINE_H`. Como `mono_13` es monoespacial, cada columna
+    /// cae en un múltiplo exacto del ancho de un carácter (`digit_width`), así que las
+    /// posiciones se calculan aritméticamente en vez de con `HitTestTextPosition` —
+    /// más simple y evita necesitar un `IDWriteTextRenderer` a medida para colorear
+    /// rangos dentro de un único layout por fila (desviación de tiempo respecto al
+    /// plan, que pedía `SetDrawingEffect`; el resultado visual es el mismo).
+    fn draw_hex(&mut self, raw: &crate::RawDoc, cursor: usize, pending_nibble: Option<u8>, pal: &theme::Palette, frame: layout::Frame) {
+        const PREFIX_COLS: f32 = 11.0; // "XXXXXXXX   " (8 dígitos de offset + 3 espacios)
+        const ASCII_COL: f32 = 61.0; // PREFIX_COLS + 16*3 + 1 (espacio extra tras el 8º) + 1 (espacio literal)
+
+        let char_w = self.digit_width();
+        let origin_x = frame.body.left + layout::HEX_PAD_L;
+        let origin_y = frame.body.top + layout::TEXT_PAD_T;
+        let total = raw.len();
+        let rows = total.div_ceil(16).max(1);
+        let sel_row = cursor / 16;
+        let sel_col = cursor % 16;
+
+        let mut y = origin_y;
+        for row in 0..rows {
+            if y > frame.body.bottom {
+                break;
+            }
+            let row_start = row * 16;
+            let row_len = (total - row_start).min(16);
+
+            let offset_str = format!("{row_start:08x}");
+            self.text(&offset_str, &self.fonts.mono_13, Rect::new(origin_x, y, origin_x + 8.0 * char_w, y + layout::LINE_H), pal.text_3);
+
+            for col in 0..row_len {
+                let i = row_start + col;
+                let b = raw.byte(i);
+                let is_sel = row == sel_row && col == sel_col;
+                let modified = raw.is_modified(i);
+                let col_x = origin_x + (PREFIX_COLS + col as f32 * 3.0 + if col >= 8 { 1.0 } else { 0.0 }) * char_w;
+                let cell = Rect::new(col_x, y, col_x + 2.0 * char_w, y + layout::LINE_H);
+
+                if is_sel {
+                    self.fill_round(cell, 2.0, pal.accent);
+                }
+                let (label, font, color) = if is_sel {
+                    if let Some(hi) = pending_nibble {
+                        (format!("{hi:X}"), &self.fonts.mono_13_bold, pal.on_accent)
+                    } else {
+                        (format!("{b:02X}"), &self.fonts.mono_13, pal.on_accent)
+                    }
+                } else if modified {
+                    (format!("{b:02X}"), &self.fonts.mono_13_bold, pal.accent)
+                } else if b == 0 {
+                    (format!("{b:02X}"), &self.fonts.mono_13, pal.text_3)
+                } else {
+                    (format!("{b:02X}"), &self.fonts.mono_13, pal.text)
+                };
+                self.text(&label, font, cell, color);
+
+                let ascii_x = origin_x + (ASCII_COL + col as f32) * char_w;
+                let ascii_cell = Rect::new(ascii_x, y, ascii_x + char_w, y + layout::LINE_H);
+                let ch = if (0x20..=0x7E).contains(&b) { b as char } else { '.' };
+                if is_sel {
+                    self.fill(ascii_cell, pal.accent_soft);
+                    self.text(&ch.to_string(), &self.fonts.mono_13, ascii_cell, pal.text);
+                } else {
+                    self.text(&ch.to_string(), &self.fonts.mono_13, ascii_cell, pal.text_2);
+                }
+            }
+
+            y += layout::LINE_H;
         }
     }
 }
