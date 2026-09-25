@@ -63,7 +63,7 @@ crates/notty/src/main.rs             (modificado) carga config.toml antes de cre
   - `pub struct Config { pub ui: UiConfig }` con `Default` (serde `Deserialize`/`Serialize`, todos los campos con `#[serde(default)]` para que un `config.toml` parcial no falle).
   - `pub fn apply_preset(ui: &mut UiConfig, preset: Preset)`: fija `ui.preset` y las piezas de cada preset según la spec (Moderna: `tabs_position=Title, menubar=Hidden, hints_bar=true, status_bar=true`; Clásica: `tabs_position=Below, menubar=Visible, hints_bar=false, status_bar=true`; Zen: `tabs_position=Auto, menubar=Hidden, hints_bar=false, status_bar=true`). No toca `theme`, `line_numbers` ni `files` (son independientes del preset).
 
-- [ ] **Step 1: Crear el crate y añadir dependencias al workspace**
+- [x] **Step 1: Crear el crate y añadir dependencias al workspace**
 
 `Cargo.toml` (raíz), añadir a `[workspace.dependencies]`:
 
@@ -106,7 +106,7 @@ pub use storage::{LoadResult, default_path, load, save};
 
 (`storage` se implementa en la Task 3; declararlo ya evita tener que volver a tocar `lib.rs`.)
 
-- [ ] **Step 2: Escribir los tests que fallan**
+- [x] **Step 2: Escribir los tests que fallan**
 
 `crates/notty-config/src/model.rs`:
 
@@ -206,12 +206,12 @@ mod tests {
 }
 ```
 
-- [ ] **Step 3: Ejecutar y ver que falla**
+- [x] **Step 3: Ejecutar y ver que falla**
 
 Run: `cargo test -p notty-config`
 Expected: FAIL de compilación, `cannot find type UiConfig` (el crate aún no tiene contenido antes de los tests).
 
-- [ ] **Step 4: Implementar el modelo**
+- [x] **Step 4: Implementar el modelo**
 
 Añadir **encima** del módulo de tests en `crates/notty-config/src/model.rs`:
 
@@ -332,7 +332,7 @@ pub fn apply_preset(ui: &mut UiConfig, preset: Preset) {
 }
 ```
 
-- [ ] **Step 5: Ejecutar y ver que pasa**
+- [x] **Step 5: Ejecutar y ver que pasa**
 
 Run: `cargo test -p notty-config`
 Expected: FAIL todavía, porque `lib.rs` declara `mod storage;` y ese archivo no existe. Crear un `crates/notty-config/src/storage.rs` vacío temporal:
@@ -344,7 +344,7 @@ Expected: FAIL todavía, porque `lib.rs` declara `mod storage;` y ese archivo no
 Volver a ejecutar: `cargo test -p notty-config`
 Expected: PASS, 10 tests.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add Cargo.toml Cargo.lock crates/notty-config
