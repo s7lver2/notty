@@ -179,6 +179,11 @@ pub struct Renderer {
     /// calculada por `draw_menubar` pero pintada al final de `paint` para quedar
     /// encima de todo lo demás.
     pending_dropdown: Option<(f32, f32)>,
+    /// Multiplicador de opacidad aplicado a todo lo que se dibuje con los helpers de
+    /// `fill`/`stroke`/`text` de aquí en adelante (`1.0` = sin cambio). Usado por
+    /// `settings_window` para el fundido de apertura de la ventana (Task 5 del plan de
+    /// animaciones): más simple que tocar cada llamada de dibujo una a una.
+    fade: std::cell::Cell<f32>,
 }
 
 impl Renderer {
@@ -259,6 +264,7 @@ impl Renderer {
                 dpi,
                 hits: Vec::new(),
                 pending_dropdown: None,
+                fade: std::cell::Cell::new(1.0),
             })
         }
     }
@@ -324,6 +330,29 @@ impl Renderer {
         }
     }
 
+    /// Transformación de mundo para lo que se dibuje a partir de ahora (hasta el
+    /// siguiente `set_transform`/`reset_transform`): usada por `settings_window` para
+    /// la escala de apertura (Task 5 del plan de animaciones). No afecta al
+    /// hit-testing: los rects guardados en `hits` siguen en coordenadas lógicas.
+    pub(crate) fn set_transform(&self, m: Matrix3x2) {
+        unsafe {
+            self.target.SetTransform(&m);
+        }
+    }
+
+    pub(crate) fn reset_transform(&self) {
+        unsafe {
+            self.target.SetTransform(&Matrix3x2::identity());
+        }
+    }
+
+    /// Ver el campo `fade`: multiplica la opacidad de todo lo dibujado después de esta
+    /// llamada hasta el próximo `set_fade`. `1.0` (el valor por defecto tras cada
+    /// `Renderer::new`) no cambia nada.
+    pub(crate) fn set_fade(&self, factor: f32) {
+        self.fade.set(factor.clamp(0.0, 1.0));
+    }
+
     // --- Helpers de dibujo con la brocha única --------------------------------------
 
     pub(crate) fn fill(&self, r: Rect, c: Rgba) {
@@ -331,7 +360,7 @@ impl Renderer {
             return;
         }
         unsafe {
-            self.brush.SetColor(&color(c));
+            self.brush.SetColor(&color(c.faded(self.fade.get())));
             self.target.FillRectangle(&rect_of(r), &self.brush);
         }
     }
@@ -341,7 +370,7 @@ impl Renderer {
             return;
         }
         unsafe {
-            self.brush.SetColor(&color(c));
+            self.brush.SetColor(&color(c.faded(self.fade.get())));
             self.target.FillRoundedRectangle(
                 &D2D1_ROUNDED_RECT { rect: rect_of(r), radiusX: radius, radiusY: radius },
                 &self.brush,
@@ -352,7 +381,7 @@ impl Renderer {
     #[allow(dead_code)]
     pub(crate) fn stroke_line(&self, x0: f32, y0: f32, x1: f32, y1: f32, width: f32, c: Rgba) {
         unsafe {
-            self.brush.SetColor(&color(c));
+            self.brush.SetColor(&color(c.faded(self.fade.get())));
             self.target.DrawLine(Vector2 { X: x0, Y: y0 }, Vector2 { X: x1, Y: y1 }, &self.brush, width, None);
         }
     }
@@ -363,7 +392,7 @@ impl Renderer {
             return;
         }
         unsafe {
-            self.brush.SetColor(&color(c));
+            self.brush.SetColor(&color(c.faded(self.fade.get())));
             self.target.DrawRectangle(&rect_of(r), &self.brush, width, None);
         }
     }
@@ -371,7 +400,7 @@ impl Renderer {
     /// Círculo centrado en `(cx, cy)` de radio `radius`, sin relleno.
     pub(crate) fn stroke_circle(&self, cx: f32, cy: f32, radius: f32, width: f32, c: Rgba) {
         unsafe {
-            self.brush.SetColor(&color(c));
+            self.brush.SetColor(&color(c.faded(self.fade.get())));
             let ellipse = D2D1_ELLIPSE { point: Vector2 { X: cx, Y: cy }, radiusX: radius, radiusY: radius };
             self.target.DrawEllipse(&ellipse, &self.brush, width, None);
         }
@@ -380,7 +409,7 @@ impl Renderer {
     /// Círculo relleno centrado en `(cx, cy)` de radio `radius` (el punto del icono).
     pub(crate) fn fill_circle(&self, cx: f32, cy: f32, radius: f32, c: Rgba) {
         unsafe {
-            self.brush.SetColor(&color(c));
+            self.brush.SetColor(&color(c.faded(self.fade.get())));
             let ellipse = D2D1_ELLIPSE { point: Vector2 { X: cx, Y: cy }, radiusX: radius, radiusY: radius };
             self.target.FillEllipse(&ellipse, &self.brush);
         }
@@ -392,7 +421,7 @@ impl Renderer {
             return;
         }
         unsafe {
-            self.brush.SetColor(&color(c));
+            self.brush.SetColor(&color(c.faded(self.fade.get())));
             self.target.DrawRoundedRectangle(
                 &D2D1_ROUNDED_RECT { rect: rect_of(r), radiusX: radius, radiusY: radius },
                 &self.brush,
@@ -426,7 +455,7 @@ impl Renderer {
                 if right {
                     let _ = layout.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
                 }
-                self.brush.SetColor(&color(c));
+                self.brush.SetColor(&color(c.faded(self.fade.get())));
                 self.target.DrawTextLayout(
                     Vector2 { X: r.left, Y: r.top },
                     &layout,

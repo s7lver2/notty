@@ -306,18 +306,18 @@ En `draw_dropdown` (menú de la barra) y en `draw_suggestions` (línea de ruta):
 
 **Contexto de esta ventana:** tiene su propio `State`/`wndproc`/bucle de mensajes (Plan 5b la dejó como una ventana Win32 aparte de la principal, con su propio `Renderer`). Todo lo de esta tarea vive dentro de ese archivo; no toca `window.rs`.
 
-- [ ] **Step 1: Interruptor deslizante**
+- [x] **Step 1: Interruptor deslizante**
 
 Añade a `State`: `toggle_anims: std::collections::HashMap<usize, crate::Anim>` (una animación por fila de `Toggle`, indexada por su posición en la sección actual — se puede limpiar entera al cambiar de sección). Al alternar un `Toggle` (`Hit::Toggle(row)`, donde ya se llama a `setting::apply`/se guarda), arranca/reinicia `toggle_anims.insert(row, Anim::new_maybe(Instant::now(), Duration::from_millis(140), animations_enabled))` con `from`/`to` según el nuevo estado, y arranca el temporizador de esta ventana (mismo patrón `ensure_anim_timer`/`ID_ANIM_TIMER`, pero local a `settings_window.rs` — esta ventana ya tiene su propio `WM_TIMER` o hay que añadirlo si no lo tenía; revisa el código real y adáptalo).
 
 Al dibujar cada `Toggle` (donde ya se calcula la posición de la bolita a partir de si está activado): si hay una animación en curso para esa fila, usa `anim.value(now, x_off, x_on)` para la `x` de la bolita en vez de saltar directamente a la posición final; el fondo del interruptor (el color de la pista) puede fundir igual con `faded`/interpolación de color simple (mezcla lineal componente a componente entre el color apagado y el encendido, ya que no hay helper de mezcla de color: `fn lerp_color(a: Rgba, b: Rgba, t: f32) -> Rgba` trivial, dos o tres líneas).
 
-- [ ] **Step 2: Ventana de Ajustes con fundido+escala al abrir**
+- [x] **Step 2: Ventana de Ajustes con fundido+escala al abrir**
 
 En `settings_window::open`, la ventana ya se crea y se muestra (`ShowWindow`); en vez de que el primer `WM_PAINT` dibuje directamente al 100%, arranca una animación de apertura (`Duration::from_millis(150)`) nada más crear la ventana, guardada en `State`. Mientras esté activa, en el `paint()` de esta ventana: (a) funde todo el contenido con `faded(t)` sobre el mismo fondo ya opaco (no hace falta tocar la opacidad de la ventana en sí vía Win32, con fundir los colores dibujados basta para el efecto visual), y (b) aplica una escala uniforme del 97% al 100% centrada en el centro de la ventana a las coordenadas antes de dibujar — esto último es más delicado con las primitivas actuales (todo se dibuja con rectángulos/texto en coordenadas absolutas, no hay una transformación global): la forma más simple de conseguirlo sin reescribir cada función de dibujo es aplicar una transformación de mundo a Direct2D antes de `BeginDraw` (`self.target.SetTransform(&matrix)`, con una `Matrix3x2` de escala+traslación) y `SetTransform(&Matrix3x2::identity())` al terminar — así todo lo que se dibuje ese frame queda escalado sin tocar ninguna coordenada a mano. Si `SetTransform` no está disponible o da problemas con el hit-testing (los rectángulos guardados en `hits` seguirían en coordenadas sin escalar, lo cual es correcto: el ratón se compara contra las coordenadas lógicas, no contra lo que se ve escalado un instante), documenta la desviación y simplifica a solo el fundido (sin escala) si el `SetTransform` complica demasiado esta tarea — el fundido solo ya es una mejora notable sobre el "pop" actual.
 
-- [ ] **Step 3:** Compilar, abrir Ajustes y capturar su estado final (debe verse idéntico a antes).
-- [ ] **Step 4: Commit** `feat(ui): interruptor deslizante y Ajustes funde+escala al abrir`
+- [x] **Step 3:** Compilar, abrir Ajustes y capturar su estado final (debe verse idéntico a antes).
+- [x] **Step 4: Commit** `feat(ui): interruptor deslizante y Ajustes funde+escala al abrir`
 
 ---
 

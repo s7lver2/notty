@@ -656,7 +656,7 @@ pub(crate) fn system_uses_dark_mode() -> bool {
 /// Si el usuario desactivó las animaciones del sistema (Accesibilidad → Efectos
 /// visuales), las de notty también se saltan. Se consulta una vez al arrancar la
 /// ventana y se guarda en `WindowState`; no hace falta escuchar cambios en caliente.
-fn system_animations_enabled() -> bool {
+pub(crate) fn system_animations_enabled() -> bool {
     unsafe {
         let mut enabled = windows::core::BOOL(1);
         let ok = windows::Win32::UI::WindowsAndMessaging::SystemParametersInfoW(

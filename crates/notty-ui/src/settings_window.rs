@@ -17,18 +17,22 @@ use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
 use windows::Win32::UI::WindowsAndMessaging::{
     CS_DROPSHADOW, CreateWindowExW, DefWindowProcW, DispatchMessageW, GWLP_USERDATA, GetMessageW, GetWindowLongPtrW,
-    GetWindowRect, HTCAPTION, HTCLIENT, IDC_ARROW, LoadCursorW, MSG, PostQuitMessage, RegisterClassExW, SW_SHOW,
-    SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos, ShowWindow, TranslateMessage, WM_DESTROY, WM_KEYDOWN,
-    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCHITTEST, WM_PAINT, WNDCLASSEXW, WS_CLIPSIBLINGS, WS_POPUP,
-    WS_VISIBLE,
+    GetWindowRect, HTCAPTION, HTCLIENT, IDC_ARROW, KillTimer, LoadCursorW, MSG, PostQuitMessage, RegisterClassExW,
+    SW_SHOW, SWP_NOZORDER, SetTimer, SetWindowLongPtrW, SetWindowPos, ShowWindow, TranslateMessage, WM_DESTROY,
+    WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCHITTEST, WM_PAINT, WM_TIMER, WNDCLASSEXW,
+    WS_CLIPSIBLINGS, WS_POPUP, WS_VISIBLE,
 };
 use windows::core::{PCWSTR, Result, w};
+use windows_numerics::{Matrix3x2, Vector2};
 
 use notty_config::Config;
 
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
+
 use crate::layout::Rect;
 use crate::settings_model::{Row, SettingKey, SettingValue};
-use crate::theme;
+use crate::theme::{self, Rgba};
 
 /// Geometría de un `Select` abierto, para dibujar su desplegable al final de `paint`
 /// (igual que `pending_dropdown` en `render.rs`): fila, caja y sus opciones.
@@ -40,6 +44,10 @@ const WIN_W: f32 = 820.0;
 const WIN_H: f32 = 620.0;
 const NAV_W: f32 = 200.0;
 const CLOSE_W: f32 = 46.0;
+
+/// Id del `SetTimer` de animación de esta ventana (interruptores + fundido/escala de
+/// apertura), igual que `ID_ANIM_TIMER` en `window.rs` pero local a esta ventana.
+const ID_ANIM_TIMER: usize = 1;
 
 /// Zonas de clic propias de esta ventana (no comparte `render::Hit` con la principal:
 /// los controles son distintos y el desplegable de `.select` solo tiene sentido aquí).
@@ -71,6 +79,34 @@ struct State {
     hover: Hit,
     open_select: Option<usize>,
     hits: Vec<(Rect, Hit)>,
+    /// Si las animaciones del sistema están activadas, ver `window::system_animations_enabled`.
+    animations_enabled: bool,
+    /// Animación en curso del fundido+escala de apertura de la ventana. `None` en
+    /// reposo (se dibuja siempre a partir de entonces igual que antes de este plan).
+    open_anim: Option<crate::Anim>,
+    /// Animación en curso de cada `Toggle` que se acaba de alternar, indexada por su
+    /// fila dentro de la sección activa: `(animación, estado 'on' de destino)`. Se
+    /// limpia entera al cambiar de sección (Hit::Nav).
+    toggle_anims: HashMap<usize, (crate::Anim, bool)>,
+    /// Si el `SetTimer` de animación (`ID_ANIM_TIMER`) está corriendo.
+    anim_timer_running: bool,
+}
+
+/// Arranca el temporizador de animación (60Hz) de esta ventana si no estaba corriendo.
+fn ensure_anim_timer(st: &mut State, hwnd: HWND) {
+    if !st.anim_timer_running {
+        unsafe {
+            let _ = SetTimer(Some(hwnd), ID_ANIM_TIMER, 16, None);
+        }
+        st.anim_timer_running = true;
+    }
+}
+
+/// Mezcla lineal componente a componente entre `a` y `b` (`t == 0.0` da `a`, `t == 1.0`
+/// da `b`): usada para el fundido de color del interruptor deslizante.
+fn lerp_color(a: Rgba, b: Rgba, t: f32) -> Rgba {
+    let t = t.clamp(0.0, 1.0);
+    Rgba(a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t, a.2 + (b.2 - a.2) * t, a.3 + (b.3 - a.3) * t)
 }
 
 fn to_wide(s: &str) -> Vec<u16> {
@@ -142,6 +178,7 @@ pub fn open(
         crate::window::apply_dark_mode(hwnd, dark);
 
         let renderer = Renderer::new(hwnd, dpi)?;
+        let animations_enabled = crate::window::system_animations_enabled();
         let state = Box::new(State {
             cfg,
             on_change,
@@ -151,8 +188,16 @@ pub fn open(
             hover: Hit::None,
             open_select: None,
             hits: Vec::new(),
+            animations_enabled,
+            open_anim: Some(crate::Anim::new_maybe(Instant::now(), Duration::from_millis(150), animations_enabled)),
+            toggle_anims: HashMap::new(),
+            anim_timer_running: false,
         });
-        SetWindowLongPtrW(hwnd, GWLP_USERDATA, Box::into_raw(state) as isize);
+        let ptr = Box::into_raw(state);
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, ptr as isize);
+        if let Some(st) = ptr.as_mut() {
+            ensure_anim_timer(st, hwnd);
+        }
 
         let _ = ShowWindow(hwnd, SW_SHOW);
         let _ = SetWindowPos(hwnd, None, x, y, w_px, h_px, SWP_NOZORDER);
@@ -251,7 +296,27 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 }
                 LRESULT(0)
             }
+            WM_TIMER => {
+                if wparam.0 == ID_ANIM_TIMER {
+                    if let Some(st) = ptr.as_mut() {
+                        let now = Instant::now();
+                        if st.open_anim.is_some_and(|a| a.is_done(now)) {
+                            st.open_anim = None;
+                        }
+                        st.toggle_anims.retain(|_, (a, _)| !a.is_done(now));
+                        let still_animating = st.open_anim.is_some() || !st.toggle_anims.is_empty();
+                        if !still_animating {
+                            let _ = KillTimer(Some(hwnd), ID_ANIM_TIMER);
+                            st.anim_timer_running = false;
+                        }
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                    }
+                    return LRESULT(0);
+                }
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
             WM_DESTROY => {
+                let _ = KillTimer(Some(hwnd), ID_ANIM_TIMER);
                 if !ptr.is_null() {
                     drop(Box::from_raw(ptr));
                     SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
@@ -287,6 +352,7 @@ fn handle_click(hwnd: HWND, st: &mut State, x: f32, y: f32) {
         Hit::Nav(i) => {
             st.active_section = i;
             st.open_select = None;
+            st.toggle_anims.clear();
             unsafe {
                 let _ = InvalidateRect(Some(hwnd), None, false);
             }
@@ -298,7 +364,7 @@ fn handle_click(hwnd: HWND, st: &mut State, x: f32, y: f32) {
             (st.on_open_path)(notty_config::default_path());
         }
         Hit::Toggle(row) => {
-            toggle_row(st, row);
+            toggle_row(st, row, hwnd);
             unsafe {
                 let _ = InvalidateRect(Some(hwnd), None, false);
             }
@@ -333,8 +399,9 @@ fn handle_click(hwnd: HWND, st: &mut State, x: f32, y: f32) {
     }
 }
 
-/// Invierte el `Toggle` de la fila `row` (de la sección activa).
-fn toggle_row(st: &mut State, row: usize) {
+/// Invierte el `Toggle` de la fila `row` (de la sección activa) y arranca su animación
+/// de deslizamiento.
+fn toggle_row(st: &mut State, row: usize, hwnd: HWND) {
     let Some(Row::Toggle { key, .. }) = crate::settings_model::sections(&st.cfg.borrow())[st.active_section]
         .rows
         .get(row)
@@ -342,9 +409,14 @@ fn toggle_row(st: &mut State, row: usize) {
     else {
         return;
     };
-    let new_value = SettingValue::Bool(!current_bool(&st.cfg.borrow(), key));
-    crate::settings_model::apply(&mut st.cfg.borrow_mut(), key, new_value);
+    let target_on = !current_bool(&st.cfg.borrow(), key);
+    crate::settings_model::apply(&mut st.cfg.borrow_mut(), key, SettingValue::Bool(target_on));
     save_and_notify(st);
+    st.toggle_anims.insert(
+        row,
+        (crate::Anim::new_maybe(Instant::now(), Duration::from_millis(140), st.animations_enabled), target_on),
+    );
+    ensure_anim_timer(st, hwnd);
 }
 
 fn current_bool(cfg: &Config, key: SettingKey) -> bool {
@@ -401,6 +473,18 @@ fn paint(st: &mut State) {
     let r = &st.renderer;
 
     r.begin_paint(pal.chrome);
+
+    // Fundido de 0 a 1 y escala de 97% a 100% al abrir la ventana (Task 5 del plan de
+    // animaciones): `t == None` (animación terminada o desactivada) dibuja exactamente
+    // igual que antes, sin coste extra. El fondo ya se acaba de pintar opaco arriba
+    // (`Clear`, ajeno al `fade`); lo que sigue son los controles/texto, cuya opacidad
+    // si se funde ya blend-ea visualmente contra ese fondo opaco.
+    let open_t = st.open_anim.map(|a| a.value(std::time::Instant::now(), 0.0, 1.0));
+    if let Some(t) = open_t {
+        let scale = 0.97 + 0.03 * t;
+        r.set_transform(Matrix3x2::scale_around(scale, scale, Vector2 { X: w / 2.0, Y: h / 2.0 }));
+        r.set_fade(t);
+    }
 
     // Barra de título: icono + "Ajustes · notty" + botón cerrar.
     let titlebar = Rect::new(0.0, 0.0, w, TITLEBAR_H);
@@ -486,7 +570,8 @@ fn paint(st: &mut State) {
                 draw_row_text(r, rr, title, desc, pal);
                 let on = current_bool(&st.cfg.borrow(), *key);
                 let track = Rect::new(rr.right - 12.0 - 40.0, rr.top + (rr.height() - 20.0) / 2.0, rr.right - 12.0, rr.top + (rr.height() - 20.0) / 2.0 + 20.0);
-                draw_toggle(r, track, on, pal);
+                let anim = st.toggle_anims.get(&i).copied();
+                draw_toggle(r, track, on, pal, anim);
                 st.hits.push((rr, Hit::Toggle(i)));
                 ry += rr.height() + 3.0;
             }
@@ -562,6 +647,11 @@ fn paint(st: &mut State) {
         let _ = row_idx;
     }
 
+    if open_t.is_some() {
+        r.reset_transform();
+        r.set_fade(1.0);
+    }
+
     r.end_paint();
 }
 
@@ -582,16 +672,29 @@ fn draw_row_text(r: &Renderer, rr: Rect, title: &str, desc: &str, pal: &theme::P
 
 /// `.toggle`: pista 40x20 radio 10; apagada = borde `text_2` y bolita `text_2` a la
 /// izquierda; encendida = fondo `accent` y bolita `on_accent` desplazada a la derecha.
-fn draw_toggle(r: &Renderer, track: Rect, on: bool, pal: &theme::Palette) {
-    if on {
-        r.fill_round(track, 10.0, pal.accent);
-    } else {
-        r.stroke_round_rect(track, 10.0, 1.0, pal.text_2);
-    }
+/// Si `anim` es `Some((a, target_on))`, la bolita desliza y la pista funde entre los
+/// dos estados en vez de saltar directamente al destino (Task 5 del plan de
+/// animaciones); `t` (`0.0` = apagado, `1.0` = encendido) resume el progreso.
+fn draw_toggle(r: &Renderer, track: Rect, on: bool, pal: &theme::Palette, anim: Option<(crate::Anim, bool)>) {
+    let t = match anim {
+        Some((a, target_on)) => {
+            let raw = a.value(Instant::now(), 0.0, 1.0);
+            if target_on { raw } else { 1.0 - raw }
+        }
+        None => {
+            if on {
+                1.0
+            } else {
+                0.0
+            }
+        }
+    };
+    r.fill_round(track, 10.0, pal.accent.faded(t));
+    r.stroke_round_rect(track, 10.0, 1.0, pal.text_2.faded(1.0 - t));
     let ball_d = 10.0;
-    let bx = if on { track.left + 20.0 } else { track.left + 5.0 };
+    let bx = track.left + 5.0 + (20.0 - 5.0) * t;
     let by = track.top + (track.height() - ball_d) / 2.0;
-    let ball_c = if on { pal.on_accent } else { pal.text_2 };
+    let ball_c = lerp_color(pal.text_2, pal.on_accent, t);
     r.fill_round(Rect::new(bx, by, bx + ball_d, by + ball_d), ball_d / 2.0, ball_c);
 }
 
