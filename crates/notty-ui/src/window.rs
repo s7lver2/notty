@@ -16,21 +16,33 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DispatchMessageW, GWLP_USERDATA, GetMessageW,
-    GetWindowLongPtrW, HTCAPTION, HTCLIENT, HTMAXBUTTON, HTTOP, IDC_ARROW, IDC_IBEAM, IsZoomed, LoadCursorW, MSG,
-    NCCALCSIZE_PARAMS, PostQuitMessage, RegisterClassExW, SM_CXPADDEDBORDER, SM_CYFRAME, SW_MAXIMIZE, SW_MINIMIZE,
-    SW_RESTORE, SW_SHOW, SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetCursor, SetWindowLongPtrW,
-    SetWindowPos, SetWindowTextW, ShowWindow, TranslateMessage, WHEEL_DELTA, WM_ACTIVATE, WM_CHAR, WM_DESTROY,
-    WM_DPICHANGED, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCALCSIZE,
-    WM_NCHITTEST, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_NCMOUSELEAVE, WM_NCMOUSEMOVE, WM_PAINT, WM_SETCURSOR,
-    WM_SETTINGCHANGE, WM_SIZE, WM_SYSKEYDOWN, WNDCLASSEXW, WS_EX_APPWINDOW, WS_OVERLAPPEDWINDOW,
+    GetWindowLongPtrW, HTCAPTION, HTCLIENT, HTMAXBUTTON, HTTOP, IDC_ARROW, IDC_IBEAM, IsZoomed, KillTimer,
+    LoadCursorW, MSG, NCCALCSIZE_PARAMS, PostQuitMessage, RegisterClassExW, SM_CXPADDEDBORDER, SM_CYFRAME,
+    SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+    SetCursor, SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow, TranslateMessage,
+    WHEEL_DELTA, WM_ACTIVATE, WM_CHAR, WM_DESTROY, WM_DPICHANGED, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP,
+    WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCALCSIZE, WM_NCHITTEST, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_NCMOUSELEAVE,
+    WM_NCMOUSEMOVE, WM_PAINT, WM_SETCURSOR, WM_SETTINGCHANGE, WM_SIZE, WM_SYSKEYDOWN, WM_TIMER, WNDCLASSEXW,
+    WS_EX_APPWINDOW, WS_OVERLAPPEDWINDOW,
 };
 use windows::core::{PCWSTR, Result, w};
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Mutex;
 
 use crate::layout;
 use crate::{EditorState, Hit, Modifiers, Renderer, Viewport};
+
+/// Id del `SetTimer` de autoguardado (dispara cada segundo; el manejador de `WM_TIMER`
+/// decide si de verdad hay algo que guardar).
+const ID_AUTOSAVE_TIMER: usize = 1;
+
+/// Snapshot de documentos sucios (nombre, texto, sucio) leído por el `panic hook` para
+/// volcar a `notty_io::recovery_dir()`. Vive en memoria estática (`Box::leak`) para que
+/// el hook, que se instala una única vez para todo el proceso, tenga una dirección
+/// válida sin depender de que el hilo que entra en pánico coopere activamente.
+type RecoverySnapshot = Mutex<Vec<(String, String, bool)>>;
 
 /// Estado ligado a una ventana concreta: se guarda en `GWLP_USERDATA` mientras vive.
 struct WindowState {
@@ -48,6 +60,8 @@ struct WindowState {
     active_window: bool,
     /// Índice del menú de la barra abierto (clic en `Hit::Menu(i)`), si lo hay.
     open_menu: Option<usize>,
+    /// Snapshot para el `panic hook`, ver `RecoverySnapshot`.
+    recovery: &'static RecoverySnapshot,
 }
 
 impl WindowState {
@@ -141,10 +155,138 @@ fn open_config_as_document(hwnd: HWND, path: std::path::PathBuf) {
     }
 }
 
+/// Guarda el documento activo, pero antes comprueba si el archivo cambió en disco
+/// desde que se abrió: si es así, abre `Prompt::Conflict` en vez de escribir encima.
+fn try_save(w: &mut WindowState) {
+    let path_and_since = {
+        let st = w.ws.active();
+        st.path.clone().map(|p| (p, st.open_mtime))
+    };
+    if let Some((path, Some(since))) = path_and_since {
+        if notty_io::changed_since(&path, since) {
+            w.ws.open_conflict();
+            return;
+        }
+    }
+    let _ = w.ws.active_mut().save();
+    if let Some(path) = w.ws.active().path.clone() {
+        w.ws.active_mut().open_mtime = notty_io::mtime(&path).ok();
+    }
+}
+
+/// `WM_TIMER` de autoguardado: dispara cada segundo, pero solo actúa si hay cambios
+/// sin guardar (equivalente en la práctica a reprogramar el temporizador tras cada
+/// tecla, y mucho más simple — ver Task 7 Step 3 del plan). Solo se autoguarda el
+/// documento activo, solo si tiene ruta real, no es temporal volátil, y no hay ya un
+/// conflicto sin resolver.
+fn autosave_tick(w: &mut WindowState) {
+    if !w.cfg.borrow().files.autosave {
+        return;
+    }
+    if matches!(w.ws.prompt, crate::Prompt::Conflict) {
+        return;
+    }
+    let st = w.ws.active();
+    let has_real_path = st.path.is_some() && !matches!(st.temp, Some(notty_config::TempMode::Volatile));
+    if has_real_path && st.doc.is_dirty() {
+        try_save(w);
+    }
+    refresh_recovery(w);
+}
+
+/// Resuelve `Prompt::Conflict`: `M` conserva lo escrito en notty y lo guarda, `D`
+/// descarta los cambios locales y recarga lo que hay en disco. Cualquier otra tecla
+/// no hace nada (Esc ya se maneja antes, en `handle_prompt_keydown`).
+fn handle_conflict_key(w: &mut WindowState, vk: u32) {
+    match vk {
+        0x4D => {
+            // M: el mío.
+            let _ = w.ws.active_mut().save();
+            if let Some(path) = w.ws.active().path.clone() {
+                w.ws.active_mut().open_mtime = notty_io::mtime(&path).ok();
+            }
+            w.ws.close_prompt();
+        }
+        0x44 => {
+            // D: el del disco.
+            if let Some(path) = w.ws.active().path.clone() {
+                if let Ok(opened) = crate::open_as_document(&path) {
+                    let st = w.ws.active_mut();
+                    st.doc = opened.document;
+                    st.encoding = opened.encoding;
+                    st.eol = opened.eol;
+                    st.open_mtime = notty_io::mtime(&path).ok();
+                }
+            }
+            w.ws.close_prompt();
+        }
+        _ => {}
+    }
+}
+
+/// Crea el documento con el `EditorState` que toque, y si `cfg.ui.vim_always` está
+/// activo, lo arranca ya en modo vim.
+fn maybe_vim(mut st: EditorState, cfg: &notty_config::Config) -> EditorState {
+    if cfg.ui.vim_always {
+        st.vim = Some(crate::VimState::default());
+    }
+    st
+}
+
+/// Nombre legible para un documento en el volcado de recuperación: el nombre de
+/// archivo si tiene ruta, o "sin-titulo-N" si no.
+fn recovery_name(st: &EditorState, idx: usize) -> String {
+    match &st.path {
+        Some(p) => p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| format!("doc-{idx}")),
+        None => format!("sin-titulo-{idx}"),
+    }
+}
+
+/// Actualiza el snapshot leído por el `panic hook` con el estado actual de todos los
+/// documentos. Se llama tras los manejadores que de verdad pueden ensuciar un
+/// documento (edición de texto, autoguardado, abrir/cerrar pestañas).
+fn refresh_recovery(w: &WindowState) {
+    let snapshot: Vec<(String, String, bool)> = w
+        .ws
+        .iter()
+        .enumerate()
+        .map(|(i, st)| {
+            let text = st.doc.buffer().slice(0..st.doc.buffer().len_chars());
+            (recovery_name(st, i), text, st.doc.is_dirty())
+        })
+        .collect();
+    let mut guard = w.recovery.lock().unwrap_or_else(|e| e.into_inner());
+    *guard = snapshot;
+}
+
+/// Instala el `panic hook` de recuperación: si el proceso entra en pánico, vuelca a
+/// `notty_io::recovery_dir()` el texto de cada documento sucio del último snapshot
+/// leído (ver `refresh_recovery`). Se instala una sola vez, al arrancar `run`.
+fn install_recovery_hook(snapshot: &'static RecoverySnapshot) {
+    std::panic::set_hook(Box::new(move |info| {
+        eprintln!("notty: pánico: {info}");
+        let entries: Vec<notty_io::RecoveryEntry> = {
+            let guard = snapshot.lock().unwrap_or_else(|e| e.into_inner());
+            guard
+                .iter()
+                .filter(|(_, _, dirty)| *dirty)
+                .enumerate()
+                .map(|(i, (name, text, _))| notty_io::RecoveryEntry { name: format!("{i}_{name}"), text: text.clone() })
+                .collect()
+        };
+        let _ = notty_io::dump_recovery(&notty_io::recovery_dir(), &entries);
+    }));
+}
+
 /// Abre la ventana principal de notty y bloquea hasta que se cierra.
 /// `path` es la ruta pasada por línea de comandos, si la hay; `load` es el resultado
 /// de cargar `config.toml` (que puede traer un aviso si el archivo estaba roto).
 pub fn run(path: Option<&str>, load: notty_config::LoadResult) -> Result<()> {
+    // Snapshot de recuperación: vive el resto del proceso (`Box::leak`) para que el
+    // `panic hook`, instalado una sola vez, tenga una dirección `'static` válida.
+    let recovery: &'static RecoverySnapshot = Box::leak(Box::new(Mutex::new(Vec::new())));
+    install_recovery_hook(recovery);
+
     let (cfg, broken_msg) = match load {
         notty_config::LoadResult::Loaded(cfg) | notty_config::LoadResult::Missing(cfg) => (cfg, None),
         notty_config::LoadResult::Defaulted(cfg, msg) => (cfg, Some(msg)),
@@ -229,6 +371,21 @@ pub fn run(path: Option<&str>, load: notty_config::LoadResult) -> Result<()> {
                 }
             }
         }
+
+        // Recuperación tras una caída anterior: se ofrecen como documentos nuevos con
+        // ruta CLICKME (ninguno es "el archivo original" — solo se volcó nombre+texto,
+        // no la ruta —, así que el usuario decide dónde guardarlos, como con cualquier
+        // documento nuevo). Se borra el volcado en cuanto se han recuperado.
+        let recovered = notty_io::list_recovery(&notty_io::recovery_dir());
+        if !recovered.is_empty() {
+            for entry in &recovered {
+                let mut st = EditorState::new_empty();
+                st.doc = notty_core::Document::new(&entry.text, "\r\n");
+                ws.open(st);
+            }
+            let _ = notty_io::clear_recovery(&notty_io::recovery_dir());
+        }
+
         let dpi = GetDpiForWindow(hwnd);
         let renderer = Renderer::new(hwnd, dpi)?;
 
@@ -257,11 +414,16 @@ pub fn run(path: Option<&str>, load: notty_config::LoadResult) -> Result<()> {
             pressed: Hit::None,
             active_window: true,
             open_menu: None,
+            recovery,
         });
         let ptr = Box::into_raw(window_state);
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, ptr as isize);
+        if let Some(w) = ptr.as_ref() {
+            refresh_recovery(w);
+        }
 
         let _ = ShowWindow(hwnd, SW_SHOW);
+        let _ = SetTimer(Some(hwnd), ID_AUTOSAVE_TIMER, 1000, None);
 
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
@@ -654,13 +816,14 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             // llegar aquí), F3 no tiene una búsqueda que repetir: no hace nada.
                         }
                         crate::EditorAction::Save => {
-                            let _ = w.ws.active_mut().save();
+                            try_save(w);
                             update_title(hwnd, w.ws.active());
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                         other => {
                             w.ws.active_mut().apply(other, std::time::Instant::now());
                             update_title(hwnd, w.ws.active());
+                            refresh_recovery(w);
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                     }
@@ -684,11 +847,13 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         if w.ws.active().vim.is_some() {
                             handle_vim_char(w, ch);
                             update_title(hwnd, w.ws.active());
+                            refresh_recovery(w);
                             let _ = InvalidateRect(Some(hwnd), None, false);
                             return LRESULT(0);
                         }
                         w.ws.active_mut().insert_char(ch, std::time::Instant::now());
                         update_title(hwnd, w.ws.active());
+                        refresh_recovery(w);
                         let _ = InvalidateRect(Some(hwnd), None, false);
                     }
                 }
@@ -870,7 +1035,18 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 }
                 DefWindowProcW(hwnd, msg, wparam, lparam)
             }
+            WM_TIMER => {
+                if wparam.0 == ID_AUTOSAVE_TIMER {
+                    if let Some(w) = ptr.as_mut() {
+                        autosave_tick(w);
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                    }
+                    return LRESULT(0);
+                }
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
             WM_DESTROY => {
+                let _ = KillTimer(Some(hwnd), ID_AUTOSAVE_TIMER);
                 PostQuitMessage(0);
                 LRESULT(0)
             }
@@ -927,7 +1103,7 @@ fn run_menu_item(w: &mut WindowState, hwnd: HWND, menu_idx: usize, item_idx: usi
             if w.ws.active().path.is_none() {
                 w.ws.prompt = crate::Prompt::Path(crate::PathPromptState::new(crate::Purpose::Save, String::new()));
             } else {
-                let _ = w.ws.active_mut().save();
+                try_save(w);
             }
         }
         MenuCmd::SaveAs => {
@@ -1084,6 +1260,8 @@ fn handle_prompt_keydown(w: &mut WindowState, hwnd: HWND, vk: u32, mods: Modifie
         handle_search_key(w, vk, mods);
     } else if matches!(w.ws.prompt, crate::Prompt::VimCmdline(_)) {
         handle_vim_cmdline_key(w, hwnd, vk);
+    } else if matches!(w.ws.prompt, crate::Prompt::Conflict) {
+        handle_conflict_key(w, vk);
     }
 }
 
@@ -1243,13 +1421,13 @@ fn commit_vim_cmdline(w: &mut WindowState, hwnd: HWND) {
     w.ws.close_prompt();
     match crate::parse_vim_cmd(&line) {
         crate::VimCmd::Save => {
-            let _ = w.ws.active_mut().save();
+            try_save(w);
         }
         crate::VimCmd::Quit => {
             w.ws.close_active();
         }
         crate::VimCmd::SaveAndQuit => {
-            let _ = w.ws.active_mut().save();
+            try_save(w);
             w.ws.close_active();
         }
         crate::VimCmd::Substitute { pattern, replacement, global, ignore_case } => {

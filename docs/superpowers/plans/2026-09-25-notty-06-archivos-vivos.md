@@ -787,7 +787,7 @@ git commit -m "feat(ui): Prompt::Conflict para el aviso de cambio externo al gua
 - Consumes: `notty_io::{changed_since, dump_recovery, list_recovery, clear_recovery, recovery_dir, RecoveryEntry}`, `Prompt::Conflict`, `cfg.borrow().files`.
 - Produces: guardar (`Ctrl+S` o autoguardado) comprueba primero si `st.path` es `Some` y `notty_io::changed_since(path, st.open_mtime.unwrap_or(UNIX_EPOCH))`; si es así, abre `Prompt::Conflict` en vez de escribir. Un temporizador (`SetTimer`) dispara el autoguardado ~1s después de la última edición para documentos con ruta real y `cfg.files.autosave`. Un `panic hook` instalado al arrancar vuelca todos los documentos sucios a `notty_io::recovery_dir()`; al arrancar, si `list_recovery` no está vacío, se ofrece recuperarlos.
 
-- [ ] **Step 1: Guardar con comprobación de conflicto**
+- [x] **Step 1: Guardar con comprobación de conflicto**
 
 Modificar el punto donde `window.rs` llama a `st.save()` (el guardado normal del Plan 2/Plan 4) para, antes de guardar, comprobar el conflicto:
 
@@ -811,17 +811,17 @@ fn try_save(ws: &mut crate::Workspace) {
 
 Sustituye las llamadas directas a `ws.active_mut().save()` que ya hubiera en el manejo de `EditorAction::Save`/autoguardado por `try_save(ws)`.
 
-- [ ] **Step 2: Resolver el conflicto**
+- [x] **Step 2: Resolver el conflicto**
 
 Cuando `ws.prompt == Prompt::Conflict`, dos teclas: `M` (0x4D) = "el mío" → `ws.active_mut().save()` seguido de actualizar `open_mtime` y `ws.close_prompt()`; `D` (0x44) = "el del disco" → releer el archivo con `notty_ui::open_as_document` y sustituir `ws.active_mut().doc`/`encoding`/`eol` por lo leído, `open_mtime` actualizado, `ws.close_prompt()`. `Esc` cierra sin hacer nada (el usuario decide más tarde, y el autoguardado sigue pausado mientras exista el conflicto — ver Step 3).
 
-- [ ] **Step 3: Autoguardado con `SetTimer`**
+- [x] **Step 3: Autoguardado con `SetTimer`**
 
 Al crear la ventana (`run`), llamar a `SetTimer(hwnd, ID_AUTOSAVE_TIMER, 1000, None)` (constante `ID_AUTOSAVE_TIMER: usize = 1`). En `WM_TIMER` con `wparam.0 == ID_AUTOSAVE_TIMER`: si `cfg.borrow().files.autosave`, recorrer los documentos del `Workspace` (o, más simple para esta primera versión, solo el activo) y, para cada uno con `path: Some(..)`, `temp: None o Draft` (los volátiles nunca se autoguardan), `doc.is_dirty()` y `matches!(ws.prompt, Prompt::Conflict) == false`, llamar a `try_save`.
 
 (El "1s tras la última edición" del enunciado se simplifica aquí a un temporizador periódico de 1s que solo actúa si hay cambios sin guardar; es equivalente en la práctica y mucho más simple que reprogramar el temporizador en cada tecla — documenta esta simplificación si decides no reimplementar el debounce exacto.)
 
-- [ ] **Step 4: `panic hook` y recuperación al arrancar**
+- [x] **Step 4: `panic hook` y recuperación al arrancar**
 
 En `crates/notty/src/main.rs`, antes de crear la ventana:
 
@@ -873,7 +873,7 @@ if !recovered.is_empty() {
 }
 ```
 
-- [ ] **Step 5: Compilar y comprobar manualmente**
+- [x] **Step 5: Compilar y comprobar manualmente**
 
 Run: `cargo build --workspace`
 Expected: compila.
@@ -884,7 +884,7 @@ Expected (manual): aparece el conflicto; `M` conserva lo escrito en notty y lo g
 Run: activar `autosave = true` en `config.toml`, editar un documento con ruta real y esperar ~1-2s sin tocar nada.
 Expected (manual): el archivo en disco cambia solo, sin pulsar `Ctrl+S`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/notty crates/notty-ui
