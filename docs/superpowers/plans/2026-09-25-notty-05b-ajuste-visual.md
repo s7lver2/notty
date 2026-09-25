@@ -628,7 +628,7 @@ La maqueta define los presets así (línea 362): Moderna y Clásica con números
 
 Esta tarea deja la base; las Tasks 6-9 dibujan cada parte encima.
 
-- [ ] **Step 1: Estado del renderer.** Sustituye los 8 pinceles por **una** `ID2D1SolidColorBrush` y un ayudante que le cambia el color antes de cada uso:
+- [x] **Step 1: Estado del renderer.** Sustituye los 8 pinceles por **una** `ID2D1SolidColorBrush` y un ayudante que le cambia el color antes de cada uso:
 
 ```rust
 fn color(c: Rgba) -> D2D1_COLOR_F { D2D1_COLOR_F { r: c.0, g: c.1, b: c.2, a: c.3 } }
@@ -644,9 +644,9 @@ fn measure(&self, s: &str, fmt: &IDWriteTextFormat) -> f32 // GetMetrics().width
 
   Fallback de familia: al crear el renderer, busca `Segoe UI Variable Text` en `GetSystemFontCollection` con `FindFamilyName`; si `exists` es falso, usa `Segoe UI`. Igual con `Cascadia Mono` → `Consolas`.
 
-- [ ] **Step 2: DPI.** `Renderer::new(hwnd, dpi: u32)` crea el render target con `pixelSize` = tamaño real del cliente (`GetClientRect`) y llama a `SetDpi(dpi as f32, dpi as f32)`. Añade `pub fn set_dpi(&mut self, dpi: u32)` y `pub fn scale(&self) -> f32` (= `dpi / 96`). `resize(w, h)` sigue recibiendo píxeles físicos. `GetSize()` ya devuelve DIPs.
+- [x] **Step 2: DPI.** `Renderer::new(hwnd, dpi: u32)` crea el render target con `pixelSize` = tamaño real del cliente (`GetClientRect`) y llama a `SetDpi(dpi as f32, dpi as f32)`. Añade `pub fn set_dpi(&mut self, dpi: u32)` y `pub fn scale(&self) -> f32` (= `dpi / 96`). `resize(w, h)` sigue recibiendo píxeles físicos. `GetSize()` ya devuelve DIPs.
 
-- [ ] **Step 3: Zonas para el ratón.** Sustituye `tab_rects` y `pencil_rect` por una lista que se rellena durante cada `paint`:
+- [x] **Step 3: Zonas para el ratón.** Sustituye `tab_rects` y `pencil_rect` por una lista que se rellena durante cada `paint`:
 
 ```rust
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -672,7 +672,7 @@ pub fn hit(&self, x_dip: f32, y_dip: f32) -> Hit  // recorre `hits` de atrás ad
 
   Adapta `window.rs` para que siga compilando con la nueva API (el clic en pestaña y en el lápiz pasan por `renderer.hit`); el resto de `window.rs` se toca en la Task 8.
 
-- [ ] **Step 4: Nuevo `paint(ws, ui, view: &ViewState)`** donde `ViewState` (definido en `render.rs`, lo rellena `window.rs`) lleva lo que no está en el `Workspace`:
+- [x] **Step 4: Nuevo `paint(ws, ui, view: &ViewState)`** donde `ViewState` (definido en `render.rs`, lo rellena `window.rs`) lleva lo que no está en el `Workspace`:
 
 ```rust
 pub struct ViewState {
@@ -692,9 +692,9 @@ pub struct ViewState {
   Las franjas se calculan con `layout::frame(size.width, size.height, bands)`, con `bands` resuelto así (maqueta, `tabsVisible()` línea 462):
   `tabs_in_title` = `files == Tabs` y (`tabs_position == Title` o (`Auto` y `ws.len() > 1`)); `tabs_below` = `files == Tabs` y `tabs_position == Below`; `menubar` = `Visible`, o `Alt` con el menú desplegado; `hints` = `hints_bar` (y no fusionada); `merged_status` = `merged_command_line`.
 
-- [ ] **Step 5:** Deja dibujado, como mínimo, el fondo y el documento con las medidas nuevas (`mono_13`, interlineado `LINE_H`, origen del texto en `body.left + gutter_w + TEXT_PAD_L`, `body.top + TEXT_PAD_T`), para poder compilar y capturar. `char_index_at` usa ese mismo origen, en DIPs.
-- [ ] **Step 6:** `cargo build --release`, `cargo test --workspace`, captura con `tools/shot-app.ps1`: el texto debe caer en la misma posición y tamaño que en `ref/moderna-oscuro.png` (aunque todavía falte la barra de título propia).
-- [ ] **Step 7: Commit** `refactor(ui): renderer con paleta, formatos de texto de la maqueta y zonas de ratón`
+- [x] **Step 5:** Deja dibujado, como mínimo, el fondo y el documento con las medidas nuevas (`mono_13`, interlineado `LINE_H`, origen del texto en `body.left + gutter_w + TEXT_PAD_L`, `body.top + TEXT_PAD_T`), para poder compilar y capturar. `char_index_at` usa ese mismo origen, en DIPs.
+- [x] **Step 6:** `cargo build --release`, `cargo test --workspace`, captura con `tools/shot-app.ps1`: el texto debe caer en la misma posición y tamaño que en `ref/moderna-oscuro.png` (aunque todavía falte la barra de título propia).
+- [x] **Step 7: Commit** `refactor(ui): renderer con paleta, formatos de texto de la maqueta y zonas de ratón`
 
 ---
 

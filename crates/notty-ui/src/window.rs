@@ -44,6 +44,13 @@ impl WindowState {
         }
         ui
     }
+
+    /// Contexto de dibujo que no vive en `Workspace`/`UiConfig` (Task 5: solo el tema;
+    /// hover/pressed/maximized/menú llegan con la barra de título propia en la Task 6).
+    fn view_state(&self) -> crate::ViewState {
+        let dark = crate::is_dark(self.cfg.borrow().ui.theme, system_uses_dark_mode());
+        crate::ViewState { dark, ..Default::default() }
+    }
 }
 
 fn point_from_lparam(lparam: LPARAM) -> (f32, f32) {
@@ -137,7 +144,8 @@ pub fn run(path: Option<&str>, load: notty_config::LoadResult) -> Result<()> {
                 }
             }
         }
-        let renderer = Renderer::new(hwnd)?;
+        let dpi = windows::Win32::UI::HiDpi::GetDpiForWindow(hwnd);
+        let renderer = Renderer::new(hwnd, dpi)?;
 
         let mut client = RECT::default();
         let _ = GetClientRect(hwnd, &mut client);
@@ -228,7 +236,8 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             WM_PAINT => {
                 if let Some(w) = ptr.as_mut() {
                     let ui = w.render_ui();
-                    w.renderer.paint(&w.ws, &ui);
+                    let view = w.view_state();
+                    w.renderer.paint(&w.ws, &ui, &view);
                 }
                 let _ = ValidateRect(Some(hwnd), None);
                 LRESULT(0)
@@ -413,30 +422,32 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             WM_LBUTTONDOWN => {
                 if let Some(w) = ptr.as_mut() {
                     let (x, y) = point_from_lparam(lparam);
-                    let clicked_tab = w
-                        .renderer
-                        .tab_rects()
-                        .iter()
-                        .position(|&(l, t, r, b)| x >= l && x < r && y >= t && y < b);
-                    let clicked_pencil = w
-                        .renderer
-                        .pencil_rect()
-                        .is_some_and(|(l, t, r, b)| x >= l && x < r && y >= t && y < b);
-                    if clicked_pencil && w.ws.active().raw.is_some() {
-                        if let Some(raw) = w.ws.active_mut().raw.as_mut() {
-                            raw.enable_write();
+                    let scale = w.renderer.scale();
+                    let (x, y) = (x / scale, y / scale);
+                    let hit = w.renderer.hit(x, y);
+                    match hit {
+                        crate::Hit::Pencil if w.ws.active().raw.is_some() => {
+                            if let Some(raw) = w.ws.active_mut().raw.as_mut() {
+                                raw.enable_write();
+                            }
+                            let _ = InvalidateRect(Some(hwnd), None, false);
                         }
-                        let _ = InvalidateRect(Some(hwnd), None, false);
-                    } else if let Some(i) = clicked_tab {
-                        w.ws.activate(i);
-                        let _ = InvalidateRect(Some(hwnd), None, false);
-                    } else if w.ws.active().raw.is_none() {
-                        let idx = w.renderer.char_index_at(w.ws.active(), x, y);
-                        w.ws.active_mut().doc.set_cursor(idx);
-                        w.selection_anchor = idx;
-                        w.mouse_down = true;
-                        SetCapture(hwnd);
-                        let _ = InvalidateRect(Some(hwnd), None, false);
+                        crate::Hit::Tab(i) => {
+                            w.ws.activate(i);
+                            let _ = InvalidateRect(Some(hwnd), None, false);
+                        }
+                        crate::Hit::Body if w.ws.active().raw.is_none() => {
+                            let ui = w.render_ui();
+                            let total = w.ws.active().doc.buffer().len_lines();
+                            let (body, gutter_w) = w.renderer.body_and_gutter(&ui, total);
+                            let idx = w.renderer.char_index_at(w.ws.active(), body, gutter_w, x, y);
+                            w.ws.active_mut().doc.set_cursor(idx);
+                            w.selection_anchor = idx;
+                            w.mouse_down = true;
+                            SetCapture(hwnd);
+                            let _ = InvalidateRect(Some(hwnd), None, false);
+                        }
+                        _ => {}
                     }
                 }
                 LRESULT(0)
@@ -445,7 +456,12 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 if let Some(w) = ptr.as_mut() {
                     if w.mouse_down {
                         let (x, y) = point_from_lparam(lparam);
-                        let idx = w.renderer.char_index_at(w.ws.active(), x, y);
+                        let scale = w.renderer.scale();
+                        let (x, y) = (x / scale, y / scale);
+                        let ui = w.render_ui();
+                        let total = w.ws.active().doc.buffer().len_lines();
+                        let (body, gutter_w) = w.renderer.body_and_gutter(&ui, total);
+                        let idx = w.renderer.char_index_at(w.ws.active(), body, gutter_w, x, y);
                         w.ws.active_mut().doc.set_selection(w.selection_anchor, idx);
                         let _ = InvalidateRect(Some(hwnd), None, false);
                     }

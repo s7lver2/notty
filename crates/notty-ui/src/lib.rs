@@ -28,7 +28,7 @@ pub use keymap::{EditorAction, Modifiers, action_for_vk};
 pub use path_prompt::{PathPromptState, Purpose};
 pub use prompt::Prompt;
 pub use raw_doc::{RawDoc, open_raw_doc};
-pub use render::Renderer;
+pub use render::{Hit, Renderer, ViewState};
 pub use search_prompt::SearchState;
 pub use theme::{Palette, Rgba, is_dark, palette};
 pub use viewport::Viewport;
