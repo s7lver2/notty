@@ -63,18 +63,18 @@ pub fn open(parent: HWND, cfg: Rc<RefCell<Config>>, on_change: Box<dyn Fn()>) ->
         let line_numbers = cfg.borrow().ui.line_numbers;
         let files = cfg.borrow().ui.files;
 
-        radio(hwnd, instance.into(), "Moderna", 20, 20, ID_PRESET_MODERNA, preset == Preset::Moderna);
-        radio(hwnd, instance.into(), "Clásica", 20, 48, ID_PRESET_CLASICA, preset == Preset::Clasica);
-        radio(hwnd, instance.into(), "Zen", 20, 76, ID_PRESET_ZEN, preset == Preset::Zen);
+        radio(hwnd, instance, "Moderna", 20, 20, ID_PRESET_MODERNA, preset == Preset::Moderna);
+        radio(hwnd, instance, "Clásica", 20, 48, ID_PRESET_CLASICA, preset == Preset::Clasica);
+        radio(hwnd, instance, "Zen", 20, 76, ID_PRESET_ZEN, preset == Preset::Zen);
 
-        radio(hwnd, instance.into(), "Tema: sistema", 20, 116, ID_THEME_SYSTEM, theme == Theme::System);
-        radio(hwnd, instance.into(), "Tema: claro", 20, 144, ID_THEME_LIGHT, theme == Theme::Light);
-        radio(hwnd, instance.into(), "Tema: oscuro", 20, 172, ID_THEME_DARK, theme == Theme::Dark);
+        radio(hwnd, instance, "Tema: sistema", 20, 116, ID_THEME_SYSTEM, theme == Theme::System);
+        radio(hwnd, instance, "Tema: claro", 20, 144, ID_THEME_LIGHT, theme == Theme::Light);
+        radio(hwnd, instance, "Tema: oscuro", 20, 172, ID_THEME_DARK, theme == Theme::Dark);
 
-        checkbox(hwnd, instance.into(), "Números de línea", 20, 212, ID_LINE_NUMBERS, line_numbers);
+        checkbox(hwnd, instance, "Números de línea", 20, 212, ID_LINE_NUMBERS, line_numbers);
 
-        radio(hwnd, instance.into(), "Pestañas", 20, 252, ID_FILES_TABS, files == Files::Tabs);
-        radio(hwnd, instance.into(), "Buffers", 160, 252, ID_FILES_BUFFERS, files == Files::Buffers);
+        radio(hwnd, instance, "Pestañas", 20, 252, ID_FILES_TABS, files == Files::Tabs);
+        radio(hwnd, instance, "Buffers", 160, 252, ID_FILES_BUFFERS, files == Files::Buffers);
 
         let state = Box::new(State { cfg, on_change });
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, Box::into_raw(state) as isize);
@@ -112,6 +112,7 @@ unsafe fn checkbox(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 unsafe fn make_button(
     parent: HWND,
     instance: windows::Win32::Foundation::HMODULE,
@@ -150,7 +151,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
     unsafe {
         match msg {
             WM_COMMAND => {
-                let id = (wparam.0 & 0xFFFF) as usize;
+                let id = wparam.0 & 0xFFFF;
                 let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut State;
                 if !ptr.is_null() {
                     let state = &mut *ptr;

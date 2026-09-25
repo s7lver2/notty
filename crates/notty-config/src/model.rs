@@ -94,7 +94,7 @@ mod tests {
         assert_eq!(ui.menubar, MenuBar::Hidden);
         assert!(ui.hints_bar);
         assert!(ui.status_bar);
-        assert!(ui.line_numbers == true || ui.line_numbers == false); // solo comprueba que existe el campo
+        let _ = ui.line_numbers; // solo comprueba que existe el campo
     }
 
     #[test]

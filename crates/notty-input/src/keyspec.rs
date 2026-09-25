@@ -41,7 +41,7 @@ fn key_code(lower: &str, original: &str) -> Option<u32> {
             _ => None,
         };
     }
-    match lower.as_ref() {
+    match lower {
         "tab" => Some(0x09),
         "enter" | "return" => Some(0x0D),
         "esc" | "escape" => Some(0x1B),

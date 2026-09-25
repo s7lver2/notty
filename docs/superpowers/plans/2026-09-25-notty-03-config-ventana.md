@@ -1521,7 +1521,7 @@ git commit -m "feat(ui): conecta Ajustes con la ventana principal y avisa de con
 
 **Files:** ninguno nuevo; solo verificación.
 
-- [ ] **Step 1: Tests y lints de todo el workspace**
+- [x] **Step 1: Tests y lints de todo el workspace**
 
 Run: `cargo test --workspace`
 Expected: PASS, 126 tests (ninguna tarea de este plan a partir de la 5 añade tests automáticos nuevos, son integración Win32).
@@ -1529,12 +1529,12 @@ Expected: PASS, 126 tests (ninguna tarea de este plan a partir de la 5 añade te
 Run: `cargo clippy --workspace --all-targets -- -D warnings`
 Expected: sin avisos. Corregir cualquier aviso en el archivo que lo señale y repetir hasta que quede limpio.
 
-- [ ] **Step 2: Build release**
+- [x] **Step 2: Build release**
 
 Run: `cargo build --release --workspace`
 Expected: compila sin errores.
 
-- [ ] **Step 3: Commit (si hubo cambios de la revisión)**
+- [x] **Step 3: Commit (si hubo cambios de la revisión)**
 
 ```bash
 git add -A

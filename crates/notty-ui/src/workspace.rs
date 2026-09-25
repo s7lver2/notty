@@ -15,6 +15,11 @@ impl Workspace {
         self.docs.len()
     }
 
+    /// Siempre `false`: un `Workspace` nunca se queda sin documentos.
+    pub fn is_empty(&self) -> bool {
+        false
+    }
+
     pub fn active_index(&self) -> usize {
         self.active
     }
