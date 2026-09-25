@@ -49,7 +49,11 @@ impl Workspace {
         self.docs.iter()
     }
 
-    pub fn open(&mut self, state: EditorState) {
+    /// `EditorState::new_empty`/`from_opened` no conocen el tamaño de la ventana (se
+    /// crean con `visible_lines: 1`): se hereda el de la pestaña activa, que sí lo
+    /// tiene, para que el documento no se vea "de una línea" hasta el próximo resize.
+    pub fn open(&mut self, mut state: EditorState) {
+        state.viewport.visible_lines = self.active().viewport.visible_lines;
         self.docs.push(state);
         self.active = self.docs.len() - 1;
     }
@@ -80,7 +84,9 @@ impl Workspace {
             return false;
         }
         if self.docs.len() == 1 {
+            let visible_lines = self.docs[0].viewport.visible_lines;
             self.docs[0] = EditorState::new_empty();
+            self.docs[0].viewport.visible_lines = visible_lines;
             return false;
         }
         self.docs.remove(idx);
@@ -116,6 +122,26 @@ mod tests {
         w.open(EditorState::new_empty());
         assert_eq!(w.len(), 2);
         assert_eq!(w.active_index(), 1);
+    }
+
+    /// `EditorState::new_empty` arranca con `visible_lines: 1` (no conoce el tamaño de
+    /// la ventana); `open` debe heredar el de la pestaña activa, o el documento se ve
+    /// "de una sola línea" hasta el próximo resize.
+    #[test]
+    fn open_inherits_visible_lines_from_the_active_doc() {
+        let mut w = Workspace::new();
+        w.active_mut().viewport.visible_lines = 30;
+        w.open(EditorState::new_empty());
+        assert_eq!(w.active().viewport.visible_lines, 30);
+    }
+
+    #[test]
+    fn closing_the_last_doc_keeps_visible_lines() {
+        let mut w = Workspace::new();
+        w.active_mut().viewport.visible_lines = 30;
+        w.close_active();
+        assert_eq!(w.len(), 1);
+        assert_eq!(w.active().viewport.visible_lines, 30);
     }
 
     #[test]

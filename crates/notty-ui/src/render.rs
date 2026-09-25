@@ -833,8 +833,12 @@ impl Renderer {
                         self.fill_round(t.close, 4.0, pal.hover);
                     }
                     let cc = if close_hovered { pal.text } else { pal.text_3 };
-                    self.stroke_line(t.close.left + 1.0, t.close.top + 1.0, t.close.right - 1.0, t.close.bottom - 1.0, 1.1, cc);
-                    self.stroke_line(t.close.right - 1.0, t.close.top + 1.0, t.close.left + 1.0, t.close.bottom - 1.0, 1.1, cc);
+                    // El glifo de la ✕ es de 10x10 (xIcon(10) de la maqueta), centrado en
+                    // el botón de 18x18: no ocupa el botón entero.
+                    let cx = t.close.left + t.close.width() / 2.0;
+                    let cy = t.close.top + t.close.height() / 2.0;
+                    self.stroke_line(cx - 5.0, cy - 5.0, cx + 5.0, cy + 5.0, 1.1, cc);
+                    self.stroke_line(cx + 5.0, cy - 5.0, cx - 5.0, cy + 5.0, 1.1, cc);
                     self.hits.push((t.close, Hit::TabClose(i)));
                 }
             }
@@ -949,7 +953,6 @@ impl Renderer {
                 let label = "CLICKME";
                 let w = self.measure(label, &self.fonts.mono_12) + 8.0;
                 let click_r = Rect::new(x, r.top, x + w, r.bottom);
-                self.fill_round(click_r, 4.0, pal.accent_soft);
                 self.text(label, &self.fonts.mono_12, Rect::new(x + 4.0, r.top, x + w - 4.0, r.bottom), pal.accent);
                 self.hits.push((click_r, Hit::Clickme));
             } else if !merged {

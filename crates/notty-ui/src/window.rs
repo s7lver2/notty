@@ -16,13 +16,13 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DispatchMessageW, GWLP_USERDATA, GetMessageW,
-    GetWindowLongPtrW, HTCAPTION, HTCLIENT, HTMAXBUTTON, HTTOP, IsZoomed, MSG, NCCALCSIZE_PARAMS, PostQuitMessage,
-    RegisterClassExW, SM_CXPADDEDBORDER, SM_CYFRAME, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW,
-    SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos, SetWindowTextW,
-    ShowWindow, TranslateMessage, WHEEL_DELTA, WM_ACTIVATE, WM_CHAR, WM_DESTROY, WM_DPICHANGED, WM_KEYDOWN,
-    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCALCSIZE, WM_NCHITTEST, WM_NCLBUTTONDOWN,
-    WM_NCLBUTTONUP, WM_NCMOUSELEAVE, WM_NCMOUSEMOVE, WM_PAINT, WM_SETTINGCHANGE, WM_SIZE, WM_SYSKEYDOWN, WNDCLASSEXW,
-    WS_EX_APPWINDOW, WS_OVERLAPPEDWINDOW,
+    GetWindowLongPtrW, HTCAPTION, HTCLIENT, HTMAXBUTTON, HTTOP, IDC_ARROW, IDC_IBEAM, IsZoomed, LoadCursorW, MSG,
+    NCCALCSIZE_PARAMS, PostQuitMessage, RegisterClassExW, SM_CXPADDEDBORDER, SM_CYFRAME, SW_MAXIMIZE, SW_MINIMIZE,
+    SW_RESTORE, SW_SHOW, SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetCursor, SetWindowLongPtrW,
+    SetWindowPos, SetWindowTextW, ShowWindow, TranslateMessage, WHEEL_DELTA, WM_ACTIVATE, WM_CHAR, WM_DESTROY,
+    WM_DPICHANGED, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCALCSIZE,
+    WM_NCHITTEST, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_NCMOUSELEAVE, WM_NCMOUSEMOVE, WM_PAINT, WM_SETCURSOR,
+    WM_SETTINGCHANGE, WM_SIZE, WM_SYSKEYDOWN, WNDCLASSEXW, WS_EX_APPWINDOW, WS_OVERLAPPEDWINDOW,
 };
 use windows::core::{PCWSTR, Result, w};
 
@@ -171,6 +171,10 @@ pub fn run(path: Option<&str>, load: notty_config::LoadResult) -> Result<()> {
             lpfnWndProc: Some(wndproc),
             hInstance: instance.into(),
             lpszClassName: class_name,
+            // Sin esto Windows no toca el cursor al entrar en la ventana: se queda con
+            // el que hubiera antes (a veces uno de arrastre o de redimensionar de otra
+            // ventana), lo que se ve como "cursor raro" al seleccionar texto.
+            hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
             ..Default::default()
         };
         RegisterClassExW(&wc);
@@ -830,6 +834,23 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 let _ = ReleaseCapture();
                 LRESULT(0)
             }
+            WM_SETCURSOR => {
+                // El hit-test de `WM_NCHITTEST` ya decide bordes/barra de título; aquí solo
+                // hace falta el I-beam sobre el documento (`Hit::Body`), y la flecha en el
+                // resto del cliente propio (pestañas, barras, prompts) en vez de lo que sea
+                // que el cursor tuviera antes de entrar en la ventana.
+                if (lparam.0 as u32) & 0xFFFF == HTCLIENT {
+                    if let Some(w) = ptr.as_ref() {
+                        let over_text = w.mouse_down || w.hover == Hit::Body;
+                        let id = if over_text { IDC_IBEAM } else { IDC_ARROW };
+                        if let Ok(cursor) = LoadCursorW(None, id) {
+                            SetCursor(Some(cursor));
+                        }
+                        return LRESULT(1);
+                    }
+                }
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
             WM_MOUSEWHEEL => {
                 if let Some(w) = ptr.as_mut() {
                     let delta = ((wparam.0 >> 16) as i16) as i32;
@@ -861,6 +882,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
 // --- Modo vim: WM_CHAR (letras) -----------------------------------------------------
 
 fn handle_vim_char(w: &mut WindowState, ch: char) {
+    let was_insert = w.ws.active().vim.as_ref().is_some_and(|v| v.mode == crate::VimMode::Insert);
     let outcome = {
         let st = w.ws.active_mut();
         let mut vim = st.vim.take().unwrap();
@@ -872,9 +894,14 @@ fn handle_vim_char(w: &mut WindowState, ch: char) {
         crate::VimOutcome::Handled => {}
         crate::VimOutcome::OpenFind => w.ws.prompt = crate::Prompt::Find(crate::SearchState::default()),
         crate::VimOutcome::OpenCmdline => w.ws.prompt = crate::Prompt::VimCmdline(String::new()),
+        // `Bubble` solo puede llegar de un modo Insert que rechazó un carácter de
+        // control (ver `VimState::handle_insert`): ahí sí se trata como texto normal.
+        // Una tecla sin mapear en Normal/Visual también da `Bubble`, pero vim de
+        // verdad la ignora en vez de escribirla — si no, cualquier letra que vim no
+        // reconozca (q, w, e, p, n...) se colaba en el documento mientras la barra
+        // seguía diciendo "-- NORMAL --".
         crate::VimOutcome::Bubble => {
-            // La tecla no es de vim: se trata como si vim no estuviera activo.
-            if !ch.is_control() {
+            if was_insert && !ch.is_control() {
                 w.ws.active_mut().insert_char(ch, std::time::Instant::now());
             }
         }
