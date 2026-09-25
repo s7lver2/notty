@@ -499,7 +499,7 @@ mod tests {
 
 Reproduce **literalmente** `renderHints()` (maqueta, líneas 514-523) y la parte de texto de `renderStatus()` (líneas 529-551).
 
-- [ ] **Step 1: Escribe `chrome_text.rs`**
+- [x] **Step 1: Escribe `chrome_text.rs`**
 
 ```rust
 //! Qué pone en la barra de atajos y en la barra de estado, según lo que se esté haciendo.
@@ -602,8 +602,8 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2:** Borra `hints.rs` y `status.rs`, ajusta `lib.rs` (`mod chrome_text; pub use chrome_text::*;`), y sustituye sus usos en `render.rs` provisionalmente (se reescribe en la Task 5). `cargo test --workspace` pasa.
-- [ ] **Step 3: Commit** `feat(ui): textos de atajos y estado con el formato de la maqueta`
+- [x] **Step 2:** Borra `hints.rs` y `status.rs`, ajusta `lib.rs` (`mod chrome_text; pub use chrome_text::*;`), y sustituye sus usos en `render.rs` provisionalmente (se reescribe en la Task 5). `cargo test --workspace` pasa.
+- [x] **Step 3: Commit** `feat(ui): textos de atajos y estado con el formato de la maqueta`
 
 ---
 

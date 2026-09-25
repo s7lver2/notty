@@ -502,7 +502,9 @@ impl Renderer {
 
             if show_hints {
                 let hints_top = size.height - bottom_reserved;
-                self.draw_text_line(crate::hints_text(false, false), PADDING_X, hints_top, size.width - PADDING_X);
+                let items = crate::hints_items(crate::HintsCtx::Normal);
+                let hints_text: String = items.iter().map(|(k, v)| format!("{k} {v}")).collect::<Vec<_>>().join("   ");
+                self.draw_text_line(&hints_text, PADDING_X, hints_top, size.width - PADDING_X);
             }
 
             let status_top = size.height - self.line_height;
@@ -537,7 +539,8 @@ impl Renderer {
             if matches!(ws.prompt, crate::Prompt::None) {
                 // Barra de estado normal: posición del caret, codificación y EOL,
                 // alineada a la esquina inferior derecha.
-                let status = crate::status_line(&state.doc, state.encoding, state.eol);
+                let right = crate::status_right(&state.doc, state.encoding, state.eol);
+                let status = format!("Texto · {} · {} · {}", right[0], right[1], right[2]);
                 let status_wide: Vec<u16> = status.encode_utf16().collect();
                 if !status_wide.is_empty() {
                     if let Ok(layout) = self._dwrite.CreateTextLayout(
