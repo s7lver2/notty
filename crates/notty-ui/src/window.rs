@@ -164,6 +164,23 @@ fn open_config_as_document(hwnd: HWND, path: std::path::PathBuf) {
     }
 }
 
+/// Abre la ventana de Ajustes sobre `hwnd`: `Ctrl+,`, el menú Archivo → Ajustes, y el
+/// engranaje de la barra de título llegan todos aquí, para no repetir el `Box::new`.
+fn open_settings(w: &WindowState, hwnd: HWND) {
+    let cfg_for_settings = w.cfg.clone();
+    let cfg_for_theme = w.cfg.clone();
+    let _ = crate::settings_window::open(
+        hwnd,
+        cfg_for_settings,
+        Box::new(move || unsafe {
+            let dark = crate::is_dark(cfg_for_theme.borrow().ui.theme, system_uses_dark_mode());
+            apply_dark_mode(hwnd, dark);
+            let _ = InvalidateRect(Some(hwnd), None, false);
+        }),
+        Box::new(move |path| open_config_as_document(hwnd, path)),
+    );
+}
+
 /// Guarda el documento activo, pero antes comprueba si el archivo cambió en disco
 /// desde que se abrió: si es así, abre `Prompt::Conflict` en vez de escribir encima.
 fn try_save(w: &mut WindowState) {
@@ -782,22 +799,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             notty_input::UiCommand::CloseTab => {
                                 w.ws.close_active();
                             }
-                            notty_input::UiCommand::OpenSettings => {
-                                let cfg_for_settings = w.cfg.clone();
-                                let cfg_for_theme = w.cfg.clone();
-                                let hwnd_copy = hwnd;
-                                let hwnd_for_open = hwnd;
-                                let _ = crate::settings_window::open(
-                                    hwnd,
-                                    cfg_for_settings,
-                                    Box::new(move || {
-                                        let dark = crate::is_dark(cfg_for_theme.borrow().ui.theme, system_uses_dark_mode());
-                                        apply_dark_mode(hwnd_copy, dark);
-                                        let _ = InvalidateRect(Some(hwnd_copy), None, false);
-                                    }),
-                                    Box::new(move |path| open_config_as_document(hwnd_for_open, path)),
-                                );
-                            }
+                            notty_input::UiCommand::OpenSettings => open_settings(w, hwnd),
                         }
                         update_title(hwnd, w.ws.active());
                         let _ = InvalidateRect(Some(hwnd), None, false);
@@ -951,6 +953,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             w.ws.prompt = crate::Prompt::Path(crate::PathPromptState::new(crate::Purpose::Save, String::new()));
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
+                        crate::Hit::Settings => open_settings(w, hwnd),
                         crate::Hit::SearchOpt(k) => {
                             if let crate::Prompt::Find(s) | crate::Prompt::Replace(s) = &mut w.ws.prompt {
                                 match k {
@@ -1194,22 +1197,7 @@ fn run_menu_item(w: &mut WindowState, hwnd: HWND, menu_idx: usize, item_idx: usi
         MenuCmd::SaveAs => {
             w.ws.prompt = crate::Prompt::Path(crate::PathPromptState::new(crate::Purpose::Save, String::new()));
         }
-        MenuCmd::Settings => {
-            let cfg_for_settings = w.cfg.clone();
-            let cfg_for_theme = w.cfg.clone();
-            let hwnd_copy = hwnd;
-            let hwnd_for_open = hwnd;
-            let _ = crate::settings_window::open(
-                hwnd,
-                cfg_for_settings,
-                Box::new(move || unsafe {
-                    let dark = crate::is_dark(cfg_for_theme.borrow().ui.theme, system_uses_dark_mode());
-                    apply_dark_mode(hwnd_copy, dark);
-                    let _ = InvalidateRect(Some(hwnd_copy), None, false);
-                }),
-                Box::new(move |path| open_config_as_document(hwnd_for_open, path)),
-            );
-        }
+        MenuCmd::Settings => open_settings(w, hwnd),
         MenuCmd::CloseTab => {
             w.ws.close_active();
         }
@@ -1442,35 +1430,51 @@ fn commit_path_prompt(w: &mut WindowState, hwnd: HWND) {
     let path = std::path::PathBuf::from(&value);
     let hint = notty_io::hint_for(&value);
     let mut done = false;
+    // Nunca se cierra el prompt sin decir por qué si algo falla (permisos, disco
+    // lleno, carpeta que no se pudo crear...): antes se descartaba el error con
+    // `let _ =` y el usuario se quedaba mirando un Enter que no hacía nada.
+    let mut error: Option<String> = None;
 
     match hint {
         notty_io::Hint::Empty => {}
         notty_io::Hint::Dir => {
             // No tiene sentido "abrir" ni "guardar" una carpeta: no hacer nada.
         }
-        notty_io::Hint::Exists if purpose == crate::Purpose::Open => {
-            if let Ok(opened) = crate::open_as_document(&path) {
+        notty_io::Hint::Exists if purpose == crate::Purpose::Open => match crate::open_as_document(&path) {
+            Ok(opened) => {
                 let cfg = w.cfg.borrow().clone();
                 w.ws.open(maybe_vim(crate::EditorState::from_opened(opened), &cfg));
                 done = true;
             }
-        }
+            Err(e) => error = Some(e.to_string()),
+        },
         notty_io::Hint::Exists | notty_io::Hint::New | notty_io::Hint::DirNew => {
-            let _ = notty_io::create_parent_dirs(&path);
-            match purpose {
-                crate::Purpose::Open => {
-                    // Caso raro: se pidió "abrir" algo que no existe. Se trata como crear
-                    // un documento nuevo con esa ruta.
-                    let mut state = crate::EditorState::new_empty();
-                    state.path = Some(path.clone());
-                    let cfg = w.cfg.borrow().clone();
-                    w.ws.open(maybe_vim(state, &cfg));
-                    done = true;
-                }
-                crate::Purpose::Save => {
-                    w.ws.active_mut().path = Some(path.clone());
-                    done = w.ws.active_mut().save().is_ok();
-                }
+            match notty_io::create_parent_dirs(&path) {
+                Ok(_) => match purpose {
+                    crate::Purpose::Open => {
+                        // Caso raro: se pidió "abrir" algo que no existe. Se trata como crear
+                        // un documento nuevo con esa ruta.
+                        let mut state = crate::EditorState::new_empty();
+                        state.path = Some(path.clone());
+                        let cfg = w.cfg.borrow().clone();
+                        w.ws.open(maybe_vim(state, &cfg));
+                        done = true;
+                    }
+                    crate::Purpose::Save => {
+                        // Si save() falla, se deshace el cambio de `path`: el documento no
+                        // se queda apuntando en silencio a una ruta que no se pudo escribir.
+                        let previous_path = w.ws.active().path.clone();
+                        w.ws.active_mut().path = Some(path.clone());
+                        match w.ws.active_mut().save() {
+                            Ok(()) => done = true,
+                            Err(e) => {
+                                w.ws.active_mut().path = previous_path;
+                                error = Some(e.to_string());
+                            }
+                        }
+                    }
+                },
+                Err(e) => error = Some(e.to_string()),
             }
         }
     }
@@ -1480,6 +1484,8 @@ fn commit_path_prompt(w: &mut WindowState, hwnd: HWND) {
         unsafe {
             update_title(hwnd, w.ws.active());
         }
+    } else if let (Some(msg), crate::Prompt::Path(p)) = (error, &mut w.ws.prompt) {
+        p.last_error = Some(msg);
     }
 }
 

@@ -13,17 +13,26 @@ pub struct PathPromptState {
     /// teclear) siga comparando candidatos contra lo que el usuario escribió de verdad,
     /// en vez de contra el segmento vacío que queda tras añadir la `\` final.
     pending_prefix: Option<String>,
+    /// Por qué falló el último intento de aceptar esta ruta (permisos, disco lleno,
+    /// carpeta que no se pudo crear...). Se enseña en rojo en vez de la palabra de
+    /// estado normal; nunca se cierra el prompt sin avisar de por qué no pasó nada.
+    pub last_error: Option<String>,
 }
 
 impl PathPromptState {
+    /// Si no hay una ruta inicial que reutilizar (guardar desde CLICKME, o abrir sin
+    /// un documento ya abierto), la línea de ruta arranca en `C:\` en vez de vacía,
+    /// para que las sugerencias aparezcan al instante sin tener que teclear nada.
     pub fn new(purpose: Purpose, initial: String) -> Self {
-        Self { value: initial, purpose, selected: 0, pending_prefix: None }
+        let value = if initial.is_empty() { r"C:\".to_string() } else { initial };
+        Self { value, purpose, selected: 0, pending_prefix: None, last_error: None }
     }
 
     pub fn type_text(&mut self, raw: &str, ctx: &notty_io::PathContext) {
         self.value = notty_io::normalize(raw, ctx);
         self.selected = 0;
         self.pending_prefix = None;
+        self.last_error = None;
     }
 
     pub fn suggestions(&self) -> Vec<notty_io::Entry> {
@@ -128,6 +137,26 @@ mod tests {
         std::fs::create_dir(dir.path().join("proyectos-viejos")).unwrap();
         std::fs::write(dir.path().join("presupuesto.txt"), "x").unwrap();
         dir
+    }
+
+    #[test]
+    fn typing_again_clears_the_last_error() {
+        let mut p = PathPromptState::new(Purpose::Save, String::new());
+        p.last_error = Some("sin permisos".to_string());
+        p.type_text("a", &ctx(&std::path::PathBuf::from(".")));
+        assert!(p.last_error.is_none());
+    }
+
+    #[test]
+    fn empty_initial_value_defaults_to_c_drive() {
+        let p = PathPromptState::new(Purpose::Open, String::new());
+        assert_eq!(p.value, r"C:\");
+    }
+
+    #[test]
+    fn non_empty_initial_value_is_kept_as_is() {
+        let p = PathPromptState::new(Purpose::Save, r"D:\notas.txt".to_string());
+        assert_eq!(p.value, r"D:\notas.txt");
     }
 
     #[test]

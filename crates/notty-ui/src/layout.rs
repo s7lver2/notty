@@ -91,6 +91,10 @@ pub struct Bands {
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Frame {
     pub titlebar: Rect,
+    /// Botón de Ajustes: no es un botón de ventana (no está en la maqueta), es propio
+    /// de notty para que Ajustes se pueda encontrar sin saber el atajo de memoria.
+    /// Más estrecho que los de ventana para distinguirlo de ellos a simple vista.
+    pub settings_btn: Rect,
     pub caption_min: Rect,
     pub caption_max: Rect,
     pub caption_close: Rect,
@@ -101,11 +105,16 @@ pub struct Frame {
     pub status: Rect,
 }
 
+/// Ancho del botón de Ajustes de la barra de título: más estrecho que los 46px de los
+/// botones de ventana (min/max/cerrar), para que no parezca uno de ellos.
+pub const SETTINGS_BTN_W: f32 = 40.0;
+
 pub fn frame(w: f32, h: f32, bands: Bands) -> Frame {
     let titlebar = Rect::new(0.0, 0.0, w, TITLEBAR_H);
     let close = Rect::new(w - CAPTION_BTN_W, 0.0, w, TITLEBAR_H);
     let max = Rect::new(close.left - CAPTION_BTN_W, 0.0, close.left, TITLEBAR_H);
     let min = Rect::new(max.left - CAPTION_BTN_W, 0.0, max.left, TITLEBAR_H);
+    let settings_btn = Rect::new(min.left - SETTINGS_BTN_W, 0.0, min.left, TITLEBAR_H);
 
     let mut y = TITLEBAR_H;
     let menubar = if bands.menubar {
@@ -133,7 +142,7 @@ pub fn frame(w: f32, h: f32, bands: Bands) -> Frame {
     let body_bottom = if hints.is_empty() { status.top } else { hints.top };
     let body = Rect::new(0.0, y, w, body_bottom.max(y));
 
-    Frame { titlebar, caption_min: min, caption_max: max, caption_close: close, menubar, tabs_below, body, hints, status }
+    Frame { titlebar, settings_btn, caption_min: min, caption_max: max, caption_close: close, menubar, tabs_below, body, hints, status }
 }
 
 /// Ancho del canal de números: 52 DIPs como la maqueta, o más si el número más largo
@@ -206,6 +215,14 @@ mod tests {
         assert_eq!(f.body.bottom, 554.0);
         assert_eq!(f.caption_close.left, 874.0);
         assert_eq!(f.caption_min.left, 782.0);
+    }
+
+    #[test]
+    fn settings_button_sits_left_of_the_window_buttons_and_is_narrower() {
+        let f = frame(920.0, 600.0, Bands::default());
+        assert_eq!(f.settings_btn.right, f.caption_min.left);
+        assert_eq!(f.settings_btn.width(), SETTINGS_BTN_W);
+        assert!(f.settings_btn.width() < CAPTION_BTN_W);
     }
 
     #[test]

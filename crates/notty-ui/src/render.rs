@@ -5,7 +5,7 @@
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Direct2D::Common::{D2D1_COLOR_F, D2D_RECT_F, D2D_SIZE_U};
 use windows::Win32::Graphics::Direct2D::{
-    D2D1_BRUSH_PROPERTIES, D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_FACTORY_TYPE_SINGLE_THREADED,
+    D2D1_BRUSH_PROPERTIES, D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_ELLIPSE, D2D1_FACTORY_TYPE_SINGLE_THREADED,
     D2D1_HWND_RENDER_TARGET_PROPERTIES, D2D1_RENDER_TARGET_PROPERTIES, D2D1_ROUNDED_RECT, D2D1CreateFactory,
     ID2D1Factory, ID2D1HwndRenderTarget, ID2D1SolidColorBrush,
 };
@@ -61,6 +61,9 @@ pub enum Hit {
     MenuItem(usize),
     Clickme,
     Pencil,
+    /// Botón de Ajustes en la barra de título (no está en la maqueta: existe para que
+    /// Ajustes se pueda encontrar sin saber `Ctrl+,` de memoria).
+    Settings,
     Suggestion(usize),
     /// 0 = Aa, 1 = ab, 2 = .*
     SearchOpt(u8),
@@ -358,6 +361,15 @@ impl Renderer {
         }
     }
 
+    /// Círculo centrado en `(cx, cy)` de radio `radius`, sin relleno.
+    pub(crate) fn stroke_circle(&self, cx: f32, cy: f32, radius: f32, width: f32, c: Rgba) {
+        unsafe {
+            self.brush.SetColor(&color(c));
+            let ellipse = D2D1_ELLIPSE { point: Vector2 { X: cx, Y: cy }, radiusX: radius, radiusY: radius };
+            self.target.DrawEllipse(&ellipse, &self.brush, width, None);
+        }
+    }
+
     #[allow(dead_code)]
     pub(crate) fn stroke_round_rect(&self, r: Rect, radius: f32, width: f32, c: Rgba) {
         if r.is_empty() {
@@ -642,7 +654,7 @@ impl Renderer {
                 self.draw_hints(state, ws, pal, frame);
             }
 
-            self.draw_status(ws, state, pal, frame, bands.merged_status);
+            self.draw_status(ws, state, pal, frame, bands.merged_status, view);
 
             if let (Some((x, top)), Some(i)) = (self.pending_dropdown.take(), view.open_menu) {
                 self.draw_dropdown(crate::menu::MENUS[i].items, x, top, view, pal);
@@ -685,9 +697,32 @@ impl Renderer {
                 );
             }
 
+            self.draw_settings_button(view, pal, frame.settings_btn);
             self.draw_caption_button(view, pal, frame.caption_min, Hit::Min, false);
             self.draw_caption_button(view, pal, frame.caption_max, Hit::Max, view.maximized);
             self.draw_caption_button(view, pal, frame.caption_close, Hit::Close, false);
+        }
+    }
+
+    /// Botón de Ajustes: un engranaje simple (anillo + 6 dientes cortos), para que
+    /// Ajustes se pueda encontrar sin saber `Ctrl+,` de memoria.
+    #[allow(unused_unsafe)]
+    unsafe fn draw_settings_button(&mut self, view: &ViewState, pal: &theme::Palette, r: Rect) {
+        unsafe {
+            self.hits.push((r, Hit::Settings));
+            let hovered = view.hover == Hit::Settings;
+            if hovered {
+                self.fill(r, pal.hover);
+            }
+            let cx = r.left + r.width() / 2.0;
+            let cy = r.top + r.height() / 2.0;
+            let c = if hovered { pal.text } else { pal.text_2 };
+            self.stroke_circle(cx, cy, 3.0, 1.2, c);
+            for i in 0..6 {
+                let a = std::f32::consts::PI * 2.0 * (i as f32) / 6.0;
+                let (dx, dy) = (a.cos(), a.sin());
+                self.stroke_line(cx + dx * 4.5, cy + dy * 4.5, cx + dx * 6.5, cy + dy * 6.5, 1.2, c);
+            }
         }
     }
 
@@ -897,7 +932,7 @@ impl Renderer {
     /// Barra de estado (`.status`) o, si hay un prompt activo, lo dibuja en su lugar
     /// (nunca coexisten: mientras hay prompt, la franja inferior es suya por completo).
     #[allow(unused_unsafe)]
-    unsafe fn draw_status(&mut self, ws: &Workspace, state: &EditorState, pal: &theme::Palette, frame: layout::Frame, merged: bool) {
+    unsafe fn draw_status(&mut self, ws: &Workspace, state: &EditorState, pal: &theme::Palette, frame: layout::Frame, merged: bool, view: &ViewState) {
         unsafe {
             let r = frame.status;
             if merged {
@@ -908,7 +943,7 @@ impl Renderer {
             }
 
             if matches!(ws.prompt, crate::Prompt::None) {
-                self.draw_status_normal(state, pal, r, merged);
+                self.draw_status_normal(state, pal, r, merged, view);
             } else {
                 self.draw_prompt(&ws.prompt, state, pal, r, merged);
             }
@@ -916,7 +951,7 @@ impl Renderer {
     }
 
     #[allow(unused_unsafe)]
-    unsafe fn draw_status_normal(&mut self, state: &EditorState, pal: &theme::Palette, r: Rect, merged: bool) {
+    unsafe fn draw_status_normal(&mut self, state: &EditorState, pal: &theme::Palette, r: Rect, merged: bool, view: &ViewState) {
         unsafe {
             let label_font = if merged { self.fonts.mono_12.clone() } else { self.fonts.ui_11.clone() };
             let label_font = &label_font;
@@ -953,10 +988,17 @@ impl Renderer {
                 let label = "CLICKME";
                 let w = self.measure(label, &self.fonts.mono_12) + 8.0;
                 let click_r = Rect::new(x, r.top, x + w, r.bottom);
+                if view.hover == Hit::Clickme {
+                    self.fill_round(click_r, 4.0, pal.accent_soft);
+                }
                 self.text(label, &self.fonts.mono_12, Rect::new(x + 4.0, r.top, x + w - 4.0, r.bottom), pal.accent);
                 self.hits.push((click_r, Hit::Clickme));
             } else if !merged {
-                self.text("Texto", label_font, Rect::new(x, r.top, x + 60.0, r.bottom), pal.text_2);
+                // El nombre del archivo, no el "Texto" genérico de la maqueta: en la
+                // barra de estado real de notty tiene más sentido decir qué archivo es.
+                let name = crate::doc_name(state.path.as_deref());
+                let w = self.measure(&name, label_font).min(r.width() * 0.4);
+                self.text(&name, label_font, Rect::new(x, r.top, x + w, r.bottom), pal.text_2);
             }
 
             // Derecha: los tres campos de `status_right`, o el desplazamiento en raw.
@@ -1072,25 +1114,33 @@ impl Renderer {
                 self.fill(Rect::new(caret_x, r.top + 4.0, caret_x + 1.0, r.bottom - 4.0), pal.text);
             }
 
-            // Derecha: la palabra de estado, y "Tab ↹" si hay sugerencias.
+            // Derecha: si el último intento falló, por qué (en rojo, sustituye a la
+            // palabra de estado y a "Tab ↹": no tiene sentido completar ni cerrar el
+            // prompt en silencio cuando Enter no pudo hacer lo que pedía).
             let sugs = p.suggestions();
             let mut xr = r.right - layout::STATUS_PAD_X;
-            if !sugs.is_empty() {
-                let tab_label = "Tab ↹";
-                let w = self.measure(tab_label, &self.fonts.ui_11_5);
+            if let Some(err) = &p.last_error {
+                let w = self.measure(err, &self.fonts.ui_11_5).min(r.width() * 0.6);
                 xr -= w;
-                self.text(tab_label, &self.fonts.ui_11_5, Rect::new(xr, r.top, xr + w, r.bottom), pal.text_3);
-                xr -= 10.0;
-            }
-            let word = p.hint_word();
-            if !word.is_empty() {
-                let wc = if p.is_invalid() { pal.danger } else { pal.text_3 };
-                let w = self.measure(word, &self.fonts.ui_11_5);
-                xr -= w;
-                self.text(word, &self.fonts.ui_11_5, Rect::new(xr, r.top, xr + w, r.bottom), wc);
+                self.text(err, &self.fonts.ui_11_5, Rect::new(xr, r.top, xr + w, r.bottom), pal.danger);
+            } else {
+                if !sugs.is_empty() {
+                    let tab_label = "Tab ↹";
+                    let w = self.measure(tab_label, &self.fonts.ui_11_5);
+                    xr -= w;
+                    self.text(tab_label, &self.fonts.ui_11_5, Rect::new(xr, r.top, xr + w, r.bottom), pal.text_3);
+                    xr -= 10.0;
+                }
+                let word = p.hint_word();
+                if !word.is_empty() {
+                    let wc = if p.is_invalid() { pal.danger } else { pal.text_3 };
+                    let w = self.measure(word, &self.fonts.ui_11_5);
+                    xr -= w;
+                    self.text(word, &self.fonts.ui_11_5, Rect::new(xr, r.top, xr + w, r.bottom), wc);
+                }
             }
 
-            if !sugs.is_empty() {
+            if p.last_error.is_none() && !sugs.is_empty() {
                 self.draw_suggestions(&sugs, p.selected, pal, r);
             }
         }
