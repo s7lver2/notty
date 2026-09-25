@@ -16,6 +16,10 @@ impl Workspace {
         self.prompt = crate::Prompt::None;
     }
 
+    pub fn open_conflict(&mut self) {
+        self.prompt = crate::Prompt::Conflict;
+    }
+
     /// Acceso simultáneo al prompt (mutable) y al documento activo (solo lectura):
     /// hace falta para que, por ejemplo, `SearchState::next` pueda mirar `Document`
     /// mientras avanza `current` dentro de `ws.prompt`, sin que el borrow checker se
@@ -210,5 +214,12 @@ mod tests {
         w.prompt = Prompt::Find(crate::search_prompt::SearchState::default());
         w.close_prompt();
         assert!(matches!(w.prompt, Prompt::None));
+    }
+
+    #[test]
+    fn open_conflict_sets_the_prompt() {
+        let mut w = Workspace::new();
+        w.open_conflict();
+        assert!(matches!(w.prompt, crate::Prompt::Conflict));
     }
 }

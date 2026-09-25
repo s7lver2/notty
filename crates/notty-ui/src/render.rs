@@ -1036,6 +1036,11 @@ impl Renderer {
                     let fx = x + w + 4.0;
                     self.text(line, &self.fonts.mono_12_5, Rect::new(fx, r.top, r.right - layout::STATUS_PAD_X, r.bottom), pal.text);
                 }
+                crate::Prompt::Conflict => {
+                    let msg = "El archivo cambió en disco. [M] guardar el mío   [D] usar el del disco   [Esc] cancelar";
+                    let x = r.left + layout::STATUS_PAD_X;
+                    self.text(msg, &self.fonts.ui_11_5, Rect::new(x, r.top, r.right - layout::STATUS_PAD_X, r.bottom), pal.danger);
+                }
                 crate::Prompt::None => {}
             }
         }

@@ -719,7 +719,7 @@ git commit -m "feat(ui): EditorState soporta temporales (borrador/volátil)"
 - Consumes: nada nuevo.
 - Produces: `Prompt` gana la variante `Conflict` (sin datos: el propio `ws.active()` ya tiene todo lo necesario — `path`, texto en memoria, y basta con releer el disco al resolver). `Workspace` gana `pub fn open_conflict(&mut self)` (`self.prompt = Prompt::Conflict`) — trivial, pero se deja como método para que `window.rs` no construya la variante a mano en varios sitios.
 
-- [ ] **Step 1: Escribir el test que falla**
+- [x] **Step 1: Escribir el test que falla**
 
 Añadir a `mod tests` en `crates/notty-ui/src/workspace.rs`:
 
@@ -732,12 +732,12 @@ Añadir a `mod tests` en `crates/notty-ui/src/workspace.rs`:
     }
 ```
 
-- [ ] **Step 2: Ejecutar y ver que falla**
+- [x] **Step 2: Ejecutar y ver que falla**
 
 Run: `cargo test -p notty-ui workspace conflict`
 Expected: FAIL de compilación, `no variant named Conflict`.
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 En `crates/notty-ui/src/prompt.rs`, añadir la variante:
 
@@ -763,12 +763,12 @@ En `crates/notty-ui/src/workspace.rs`:
     }
 ```
 
-- [ ] **Step 4: Ejecutar y ver que pasa**
+- [x] **Step 4: Ejecutar y ver que pasa**
 
 Run: `cargo test --workspace`
 Expected: PASS, +1 test.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/notty-ui
