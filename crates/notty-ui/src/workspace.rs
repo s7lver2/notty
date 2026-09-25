@@ -4,11 +4,16 @@ use crate::EditorState;
 pub struct Workspace {
     docs: Vec<EditorState>,
     active: usize,
+    pub prompt: crate::Prompt,
 }
 
 impl Workspace {
     pub fn new() -> Self {
-        Self { docs: vec![EditorState::new_empty()], active: 0 }
+        Self { docs: vec![EditorState::new_empty()], active: 0, prompt: crate::Prompt::None }
+    }
+
+    pub fn close_prompt(&mut self) {
+        self.prompt = crate::Prompt::None;
     }
 
     pub fn len(&self) -> usize {
@@ -75,6 +80,7 @@ impl Default for Workspace {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Prompt;
 
     #[test]
     fn starts_with_one_empty_doc() {
@@ -125,5 +131,18 @@ mod tests {
         let mut w = Workspace::new();
         w.activate(99);
         assert_eq!(w.active_index(), 0);
+    }
+
+    #[test]
+    fn starts_without_a_prompt() {
+        assert!(matches!(Workspace::new().prompt, Prompt::None));
+    }
+
+    #[test]
+    fn close_prompt_clears_it() {
+        let mut w = Workspace::new();
+        w.prompt = Prompt::Find(crate::search_prompt::SearchState::default());
+        w.close_prompt();
+        assert!(matches!(w.prompt, Prompt::None));
     }
 }
