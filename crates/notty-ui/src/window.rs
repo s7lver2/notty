@@ -1138,11 +1138,26 @@ fn handle_path_key(w: &mut WindowState, hwnd: HWND, vk: u32, mods: Modifiers) {
             }
         } // ArrowDown
         0x0D => commit_path_prompt(w, hwnd), // Enter
-        0x4F if mods.ctrl => {
-            // TODO(plan futuro): diálogo nativo de Windows
-        }
+        0x4F if mods.ctrl => open_native_dialog(w, hwnd),
         _ => {}
     }
+}
+
+/// `Ctrl+O` dentro de la línea de ruta: diálogo nativo de Windows en vez de escribir
+/// la ruta a mano. Si el usuario elige algo, se rellena el prompt y se acepta al
+/// instante, como si lo hubiera escrito y pulsado Enter.
+fn open_native_dialog(w: &mut WindowState, hwnd: HWND) {
+    let purpose = match &w.ws.prompt {
+        crate::Prompt::Path(p) => p.purpose,
+        _ => return,
+    };
+    let Some(path) = crate::native_dialog::pick_path(hwnd, purpose) else { return };
+    let Some(value) = path.to_str() else { return };
+    let ctx = path_ctx(w);
+    if let crate::Prompt::Path(p) = &mut w.ws.prompt {
+        p.type_text(value, &ctx);
+    }
+    commit_path_prompt(w, hwnd);
 }
 
 /// `Enter` sobre la línea de ruta: valida, crea carpetas que falten si hace falta y,

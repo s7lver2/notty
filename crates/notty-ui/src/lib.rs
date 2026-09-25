@@ -8,6 +8,7 @@ mod hex;
 pub mod layout;
 mod keymap;
 pub mod menu;
+pub mod native_dialog;
 mod path_prompt;
 mod prompt;
 mod raw_doc;
