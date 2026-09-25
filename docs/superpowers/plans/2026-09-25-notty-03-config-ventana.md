@@ -1063,7 +1063,7 @@ git commit -m "feat(ui): Workspace multi-documento, gutter y texto de la barra d
 - Consumes: `notty_config::UiConfig`, `Workspace`, `gutter_width`, `hints_text`.
 - Produces: `Renderer::paint` gana un parámetro `ui: &notty_config::UiConfig` y ahora también recibe el `Workspace` completo (no un único `EditorState`) para poder dibujar la tira de pestañas: `pub fn paint(&mut self, ws: &Workspace, ui: &UiConfig)`. Devuelve además `pub fn tab_rects(&self, ws: &Workspace) -> Vec<D2D_RECT_F>` (los rectángulos de cada pestaña dibujada la última vez, para que `window.rs` pueda hacer hit-testing del clic; se recalculan en cada `paint` y se guardan en el propio `Renderer`).
 
-- [ ] **Step 1: Añadir la pestaña, el menú y la barra de atajos al render**
+- [x] **Step 1: Añadir la pestaña, el menú y la barra de atajos al render**
 
 Modificar `crates/notty-ui/src/render.rs`:
 
@@ -1079,16 +1079,16 @@ Modificar `crates/notty-ui/src/render.rs`:
 
 Ajusta cualquier firma de `windows` que haga falta al compilar, manteniendo el comportamiento descrito.
 
-- [ ] **Step 2: Actualizar los llamadores existentes de `paint`**
+- [x] **Step 2: Actualizar los llamadores existentes de `paint`**
 
 En `crates/notty-ui/src/window.rs`, todo lo que hasta ahora llamaba a `renderer.paint(&state)` con un único `EditorState` pasa a usar un `Workspace` y a leer la config actual (ver Task 8 de este plan, que hace el resto de la integración de `window.rs`; en este Step 2 basta con dejarlo compilando con una config por defecto de marcador de posición mínima, por ejemplo `notty_config::UiConfig::default()`, que la Task 8 sustituye por la de verdad).
 
-- [ ] **Step 3: Comprobar que compila**
+- [x] **Step 3: Comprobar que compila**
 
 Run: `cargo build --workspace`
 Expected: compila (con los ajustes de firma que hayan hecho falta).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add crates/notty-ui

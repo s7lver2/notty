@@ -20,10 +20,13 @@ use crate::{EditorState, Modifiers, Renderer, Viewport};
 
 /// Estado ligado a una ventana concreta: se guarda en `GWLP_USERDATA` mientras vive.
 struct WindowState {
-    state: EditorState,
+    ws: crate::Workspace,
     renderer: Renderer,
     mouse_down: bool,
     selection_anchor: usize,
+    // Marcador de posición mínimo: la Task 6 de este plan sustituye esto por la
+    // `Config` real cargada de `config.toml`.
+    ui: notty_config::UiConfig,
 }
 
 fn point_from_lparam(lparam: LPARAM) -> (f32, f32) {
@@ -92,21 +95,28 @@ pub fn run(path: Option<&str>) -> Result<()> {
 
         enable_mica(hwnd);
 
-        let mut state = match path {
-            Some(p) => EditorState::from_opened(
+        let mut ws = crate::Workspace::new();
+        if let Some(p) = path {
+            *ws.active_mut() = EditorState::from_opened(
                 crate::open_as_document(std::path::Path::new(p)).expect("no se pudo abrir el archivo"),
-            ),
-            None => EditorState::new_empty(),
-        };
+            );
+        }
         let renderer = Renderer::new(hwnd)?;
 
         let mut client = RECT::default();
         let _ = GetClientRect(hwnd, &mut client);
         let height = (client.bottom - client.top).max(0) as f32;
-        state.viewport = Viewport::new(renderer.line_height(), (height - renderer.line_height()).max(0.0));
-        update_title(hwnd, &state);
+        ws.active_mut().viewport =
+            Viewport::new(renderer.line_height(), (height - renderer.line_height()).max(0.0));
+        update_title(hwnd, ws.active());
 
-        let window_state = Box::new(WindowState { state, renderer, mouse_down: false, selection_anchor: 0 });
+        let window_state = Box::new(WindowState {
+            ws,
+            renderer,
+            mouse_down: false,
+            selection_anchor: 0,
+            ui: notty_config::UiConfig::default(),
+        });
         let ptr = Box::into_raw(window_state);
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, ptr as isize);
 
@@ -171,26 +181,26 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
         let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState;
         match msg {
             WM_PAINT => {
-                if let Some(ws) = ptr.as_mut() {
-                    ws.renderer.paint(&ws.state);
+                if let Some(w) = ptr.as_mut() {
+                    w.renderer.paint(&w.ws, &w.ui);
                 }
                 let _ = ValidateRect(Some(hwnd), None);
                 LRESULT(0)
             }
             WM_SIZE => {
-                if let Some(ws) = ptr.as_mut() {
+                if let Some(w) = ptr.as_mut() {
                     let width = (lparam.0 as u32) & 0xFFFF;
                     let height = ((lparam.0 as u32) >> 16) & 0xFFFF;
-                    ws.renderer.resize(width, height);
-                    let line_height = ws.renderer.line_height();
+                    w.renderer.resize(width, height);
+                    let line_height = w.renderer.line_height();
                     let new_viewport = Viewport::new(line_height, (height as f32 - line_height).max(0.0));
-                    ws.state.viewport.visible_lines = new_viewport.visible_lines;
+                    w.ws.active_mut().viewport.visible_lines = new_viewport.visible_lines;
                     let _ = InvalidateRect(Some(hwnd), None, false);
                 }
                 LRESULT(0)
             }
             WM_KEYDOWN => {
-                if let Some(ws) = ptr.as_mut() {
+                if let Some(w) = ptr.as_mut() {
                     let vk = wparam.0 as u32;
                     let mods = Modifiers {
                         ctrl: (GetKeyState(VK_CONTROL.0 as i32) as u16 & 0x8000) != 0,
@@ -201,34 +211,34 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     match action {
                         crate::EditorAction::None => {}
                         crate::EditorAction::Copy | crate::EditorAction::Cut => {
-                            let sel = ws.state.doc.selection();
+                            let sel = w.ws.active_mut().doc.selection();
                             if !sel.is_empty() {
-                                let text = ws.state.doc.buffer().slice(sel.range());
+                                let text = w.ws.active_mut().doc.buffer().slice(sel.range());
                                 let _ = crate::clipboard::set_clipboard_text(hwnd, &text);
                                 if matches!(action, crate::EditorAction::Cut) {
-                                    ws.state.doc.backspace(std::time::Instant::now());
+                                    w.ws.active_mut().doc.backspace(std::time::Instant::now());
                                 }
                             }
-                            update_title(hwnd, &ws.state);
+                            update_title(hwnd, w.ws.active());
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                         crate::EditorAction::Paste => {
                             if let Ok(text) = crate::clipboard::get_clipboard_text(hwnd) {
                                 if !text.is_empty() {
-                                    ws.state.doc.insert(&text, std::time::Instant::now());
+                                    w.ws.active_mut().doc.insert(&text, std::time::Instant::now());
                                 }
                             }
-                            update_title(hwnd, &ws.state);
+                            update_title(hwnd, w.ws.active());
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                         crate::EditorAction::Save => {
-                            let _ = ws.state.save();
-                            update_title(hwnd, &ws.state);
+                            let _ = w.ws.active_mut().save();
+                            update_title(hwnd, w.ws.active());
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                         other => {
-                            ws.state.apply(other, std::time::Instant::now());
-                            update_title(hwnd, &ws.state);
+                            w.ws.active_mut().apply(other, std::time::Instant::now());
+                            update_title(hwnd, w.ws.active());
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                     }
@@ -236,49 +246,49 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 LRESULT(0)
             }
             WM_CHAR => {
-                if let Some(ws) = ptr.as_mut() {
+                if let Some(w) = ptr.as_mut() {
                     if let Some(ch) = char::from_u32(wparam.0 as u32) {
-                        ws.state.insert_char(ch, std::time::Instant::now());
-                        update_title(hwnd, &ws.state);
+                        w.ws.active_mut().insert_char(ch, std::time::Instant::now());
+                        update_title(hwnd, w.ws.active());
                         let _ = InvalidateRect(Some(hwnd), None, false);
                     }
                 }
                 LRESULT(0)
             }
             WM_LBUTTONDOWN => {
-                if let Some(ws) = ptr.as_mut() {
+                if let Some(w) = ptr.as_mut() {
                     let (x, y) = point_from_lparam(lparam);
-                    let idx = ws.renderer.char_index_at(&ws.state, x, y);
-                    ws.state.doc.set_cursor(idx);
-                    ws.selection_anchor = idx;
-                    ws.mouse_down = true;
+                    let idx = w.renderer.char_index_at(w.ws.active(), x, y);
+                    w.ws.active_mut().doc.set_cursor(idx);
+                    w.selection_anchor = idx;
+                    w.mouse_down = true;
                     SetCapture(hwnd);
                     let _ = InvalidateRect(Some(hwnd), None, false);
                 }
                 LRESULT(0)
             }
             WM_MOUSEMOVE => {
-                if let Some(ws) = ptr.as_mut() {
-                    if ws.mouse_down {
+                if let Some(w) = ptr.as_mut() {
+                    if w.mouse_down {
                         let (x, y) = point_from_lparam(lparam);
-                        let idx = ws.renderer.char_index_at(&ws.state, x, y);
-                        ws.state.doc.set_selection(ws.selection_anchor, idx);
+                        let idx = w.renderer.char_index_at(w.ws.active(), x, y);
+                        w.ws.active_mut().doc.set_selection(w.selection_anchor, idx);
                         let _ = InvalidateRect(Some(hwnd), None, false);
                     }
                 }
                 LRESULT(0)
             }
             WM_LBUTTONUP => {
-                if let Some(ws) = ptr.as_mut() {
-                    ws.mouse_down = false;
+                if let Some(w) = ptr.as_mut() {
+                    w.mouse_down = false;
                 }
                 let _ = ReleaseCapture();
                 LRESULT(0)
             }
             WM_MOUSEWHEEL => {
-                if let Some(ws) = ptr.as_mut() {
+                if let Some(w) = ptr.as_mut() {
                     let delta = ((wparam.0 >> 16) as i16) as i32;
-                    ws.state.scroll_by(-(delta / WHEEL_DELTA as i32) * 3);
+                    w.ws.active_mut().scroll_by(-(delta / WHEEL_DELTA as i32) * 3);
                     let _ = InvalidateRect(Some(hwnd), None, false);
                 }
                 LRESULT(0)
