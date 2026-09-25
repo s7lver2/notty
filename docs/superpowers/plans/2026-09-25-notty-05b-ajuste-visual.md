@@ -800,9 +800,9 @@ Compara con `ref/moderna-oscuro.png`, `ref/clickme.png`, `ref/vim-normal.png`, `
 **Files:**
 - Modify: `crates/notty-ui/src/window.rs`
 
-- [ ] **Step 1:** `ViewState.dark = theme::is_dark(cfg.ui.theme, system_uses_dark_mode())`. Maneja `WM_SETTINGCHANGE` con `lparam` = «ImmersiveColorSet»: vuelve a leer el registro, actualiza `DWMWA_USE_IMMERSIVE_DARK_MODE` y repinta. Al cambiar el tema desde Ajustes, lo mismo.
-- [ ] **Step 2:** Captura con tema claro (pon `theme = "light"` en `config.toml` de prueba, o cambia Windows a claro) y compárala con `ref/moderna-claro.png`.
-- [ ] **Step 3: Commit** `feat(ui): tema claro de la maqueta y cambio de tema en caliente`
+- [x] **Step 1:** `ViewState.dark = theme::is_dark(cfg.ui.theme, system_uses_dark_mode())`. Maneja `WM_SETTINGCHANGE` con `lparam` = «ImmersiveColorSet»: vuelve a leer el registro, actualiza `DWMWA_USE_IMMERSIVE_DARK_MODE` y repinta. Al cambiar el tema desde Ajustes, lo mismo.
+- [x] **Step 2:** Captura con tema claro (pon `theme = "light"` en `config.toml` de prueba, o cambia Windows a claro) y compárala con `ref/moderna-claro.png`.
+- [x] **Step 3: Commit** `feat(ui): tema claro de la maqueta y cambio de tema en caliente`
 
 ---
 

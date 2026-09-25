@@ -526,11 +526,14 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             }
                             notty_input::UiCommand::OpenSettings => {
                                 let cfg_for_settings = w.cfg.clone();
+                                let cfg_for_theme = w.cfg.clone();
                                 let hwnd_copy = hwnd;
                                 let _ = crate::settings_window::open(
                                     hwnd,
                                     cfg_for_settings,
                                     Box::new(move || {
+                                        let dark = crate::is_dark(cfg_for_theme.borrow().ui.theme, system_uses_dark_mode());
+                                        apply_dark_mode(hwnd_copy, dark);
                                         let _ = InvalidateRect(Some(hwnd_copy), None, false);
                                     }),
                                 );
@@ -882,11 +885,14 @@ fn run_menu_item(w: &mut WindowState, hwnd: HWND, menu_idx: usize, item_idx: usi
         }
         MenuCmd::Settings => {
             let cfg_for_settings = w.cfg.clone();
+            let cfg_for_theme = w.cfg.clone();
             let hwnd_copy = hwnd;
             let _ = crate::settings_window::open(
                 hwnd,
                 cfg_for_settings,
                 Box::new(move || unsafe {
+                    let dark = crate::is_dark(cfg_for_theme.borrow().ui.theme, system_uses_dark_mode());
+                    apply_dark_mode(hwnd_copy, dark);
                     let _ = InvalidateRect(Some(hwnd_copy), None, false);
                 }),
             );
