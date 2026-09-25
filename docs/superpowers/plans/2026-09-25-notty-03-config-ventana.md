@@ -1194,7 +1194,7 @@ git commit -m "feat(ui): Workspace, config al arrancar y comandos de interfaz en
 - Consumes: `cfg.ui.files` (`Files::Tabs`/`Files::Buffers`).
 - Produces: cuando `cfg.ui.files == Files::Buffers`, la tira de pestañas nunca se dibuja (ya lo cubre la condición de la Task 5, `ui.files == Files::Tabs`) y el cambio de documento activo se hace solo con `Ctrl+Tab`/`Ctrl+Shift+Tab` (ya implementado en la Task 6): no hace falta código nuevo de lógica, solo la comprobación manual de que las tres combinaciones (preset × modo de archivos) se ven como en la maqueta.
 
-- [ ] **Step 1: Comprobación manual de los tres presets**
+- [x] **Step 1: Comprobación manual de los tres presets**
 
 Run: `cargo run --bin notty -- /tmp/notas.txt` con, cada vez, un `config.toml` distinto en `%APPDATA%\notty\config.toml` (créalo a mano para esta comprobación):
 
@@ -1220,7 +1220,7 @@ files = "buffers"
 
 Expected (manual): sin pestañas (con un solo documento abierto no se verían de todas formas por ser `Auto`; abre un segundo con `Ctrl+N` y comprueba que, al ser `Buffers`, tampoco aparecen pestañas aunque haya dos documentos), sin menú, sin barra de atajos.
 
-- [ ] **Step 2: Commit (solo si hiciste algún ajuste durante la comprobación)**
+- [x] **Step 2: Commit (solo si hiciste algún ajuste durante la comprobación)**
 
 ```bash
 git add -A
