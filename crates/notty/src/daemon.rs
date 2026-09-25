@@ -43,13 +43,15 @@ pub fn run() -> Result<()> {
         let _ = RegisterHotKey(Some(hwnd), ID_HOTKEY_TEMP, windows::Win32::UI::Input::KeyboardAndMouse::HOT_KEY_MODIFIERS(temp_mods), temp_vk);
         let _ = RegisterHotKey(Some(hwnd), ID_HOTKEY_PERM, windows::Win32::UI::Input::KeyboardAndMouse::HOT_KEY_MODIFIERS(perm_mods), perm_vk);
 
-        let mut nid = NOTIFYICONDATAW::default();
-        nid.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
-        nid.hWnd = hwnd;
-        nid.uID = 1;
-        nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
-        nid.uCallbackMessage = WM_APP_TRAYICON;
-        nid.hIcon = LoadIconW(None, IDI_APPLICATION).unwrap_or_default();
+        let mut nid = NOTIFYICONDATAW {
+            cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
+            hWnd: hwnd,
+            uID: 1,
+            uFlags: NIF_ICON | NIF_MESSAGE | NIF_TIP,
+            uCallbackMessage: WM_APP_TRAYICON,
+            hIcon: LoadIconW(None, IDI_APPLICATION).unwrap_or_default(),
+            ..Default::default()
+        };
         let tip = w!("notty");
         nid.szTip[..tip.as_wide().len()].copy_from_slice(tip.as_wide());
         let _ = Shell_NotifyIconW(NIM_ADD, &nid);

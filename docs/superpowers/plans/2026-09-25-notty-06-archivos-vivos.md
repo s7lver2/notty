@@ -1416,7 +1416,7 @@ git commit -m "feat(ui): Ajustes de Archivos/Atajo global y vim_always al crear 
 
 **Files:** ninguno nuevo; solo verificación.
 
-- [ ] **Step 1: Tests y lints de todo el workspace**
+- [x] **Step 1: Tests y lints de todo el workspace**
 
 Run: `cargo test --workspace`
 Expected: PASS. Cuenta los tests reales con el propio `cargo test`.
@@ -1424,12 +1424,12 @@ Expected: PASS. Cuenta los tests reales con el propio `cargo test`.
 Run: `cargo clippy --workspace --all-targets -- -D warnings`
 Expected: sin avisos. Corregir cualquier aviso en el archivo que lo señale y repetir hasta que quede limpio.
 
-- [ ] **Step 2: Build release**
+- [x] **Step 2: Build release**
 
 Run: `cargo build --release --workspace`
 Expected: compila sin errores.
 
-- [ ] **Step 3: Commit (si hubo cambios de la revisión)**
+- [x] **Step 3: Commit (si hubo cambios de la revisión)**
 
 ```bash
 git add -A
