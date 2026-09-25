@@ -53,7 +53,7 @@
 
 Los valores son la conversión exacta OKLCH→sRGB de los tokens de la maqueta (tono de acento 250), hecha con la fórmula de Björn Ottosson. No los «ajustes a ojo».
 
-- [ ] **Step 1: Escribe `theme.rs`**
+- [x] **Step 1: Escribe `theme.rs`**
 
 ```rust
 //! Paleta de la maqueta (`docs/mockups/notty-ui.html`, bloques `:root[data-theme=...]`),
@@ -192,8 +192,8 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2:** `cargo test -p notty-ui theme` → 4 tests pasan.
-- [ ] **Step 3: Commit** `feat(ui): paleta de la maqueta en theme.rs`
+- [x] **Step 2:** `cargo test -p notty-ui theme` → 4 tests pasan.
+- [x] **Step 3: Commit** `feat(ui): paleta de la maqueta en theme.rs`
 
 ---
 
@@ -205,7 +205,7 @@ mod tests {
 
 Todas las constantes salen del CSS de la maqueta; al lado de cada una va el selector del que sale, para poder comprobarlo.
 
-- [ ] **Step 1: Escribe `layout.rs`**
+- [x] **Step 1: Escribe `layout.rs`**
 
 ```rust
 //! Geometría de la ventana principal en DIPs (= px CSS de la maqueta).
@@ -484,9 +484,9 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2:** `cargo test -p notty-ui layout` → 9 tests pasan.
-- [ ] **Step 3:** Borra `crates/notty-ui/src/gutter.rs` (lo sustituye `layout::gutter_width`), quita su `mod`/`pub use` de `lib.rs` y cambia las llamadas a `crate::gutter_width` por `crate::layout::gutter_width`. `cargo test --workspace` pasa (3 tests menos, los del gutter viejo).
-- [ ] **Step 4: Commit** `feat(ui): medidas de la maqueta en layout.rs`
+- [x] **Step 2:** `cargo test -p notty-ui layout` → 9 tests pasan. (Se corrigió `gutter_width`: el margen era `TEXT_PAD_L` una vez, no `*2`, para cuadrar con el propio test del plan y el comentario "a partir de 5 dígitos".)
+- [x] **Step 3:** Borra `crates/notty-ui/src/gutter.rs` (lo sustituye `layout::gutter_width`), quita su `mod`/`pub use` de `lib.rs` y cambia las llamadas a `crate::gutter_width` por `crate::layout::gutter_width`. `cargo test --workspace` pasa (3 tests menos, los del gutter viejo).
+- [x] **Step 4: Commit** `feat(ui): medidas de la maqueta en layout.rs`
 
 ---
 

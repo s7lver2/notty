@@ -378,7 +378,7 @@ impl Renderer {
             }
 
             let gutter_w = if !is_raw && ui.line_numbers {
-                crate::gutter_width(total_lines, self.digit_width())
+                crate::layout::gutter_width(total_lines, self.digit_width())
             } else {
                 0.0
             };
