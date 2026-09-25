@@ -3,15 +3,21 @@
 pub mod clipboard;
 mod doc_io;
 pub mod editor;
+mod gutter;
+mod hints;
 mod keymap;
 pub mod render;
 mod status;
 mod viewport;
 pub mod window;
+pub mod workspace;
 
 pub use doc_io::{OpenedDoc, open_as_document, save_document};
 pub use editor::EditorState;
+pub use gutter::gutter_width;
+pub use hints::hints_text;
 pub use keymap::{EditorAction, Modifiers, action_for_vk};
 pub use render::Renderer;
 pub use status::status_line;
 pub use viewport::Viewport;
+pub use workspace::Workspace;

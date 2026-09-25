@@ -786,7 +786,7 @@ git commit -m "feat(config): cargar y guardar config.toml de forma atómica"
   - `pub fn gutter_width(total_lines: usize, digit_width_px: f32) -> f32`: ancho en píxeles necesario para mostrar el número de línea más largo, más un margen fijo de `12.0`.
   - `pub fn hints_text(vim: bool, raw: bool) -> &'static str`: la línea de la barra de atajos. Sin vim ni raw: `"^S Guardar   ^F Buscar   ^H Reemplazar   ^O Abrir   ^Alt+V Vim"`. Con `raw = true`: `"^S Guardar   ^Shift+H Ver como texto   ←→↑↓ Moverse"`. Con `vim = true` (y `raw = false`): `"i Insertar   hjkl Moverse   /Buscar   :w Guardar   ^Alt+V Salir de vim"`.
 
-- [ ] **Step 1: Escribir los tests que fallan**
+- [x] **Step 1: Escribir los tests que fallan**
 
 `crates/notty-ui/src/workspace.rs`:
 
@@ -902,12 +902,12 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Ejecutar y ver que falla**
+- [x] **Step 2: Ejecutar y ver que falla**
 
 Run: `cargo test -p notty-ui workspace gutter hints`
 Expected: FAIL de compilación, `cannot find type Workspace` (y las otras dos funciones).
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 Añadir **encima** del módulo de tests en `crates/notty-ui/src/workspace.rs`:
 
@@ -1039,12 +1039,12 @@ pub use viewport::Viewport;
 pub use workspace::Workspace;
 ```
 
-- [ ] **Step 4: Ejecutar y ver que pasa**
+- [x] **Step 4: Ejecutar y ver que pasa**
 
 Run: `cargo test --workspace`
 Expected: PASS, 126 tests (111 anteriores + 15 de esta tarea).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/notty-ui
