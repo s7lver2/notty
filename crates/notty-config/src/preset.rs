@@ -1,7 +1,10 @@
 use crate::{MenuBar, Preset, TabsPosition, UiConfig};
 
-/// Aplica las piezas fijas de un preset. No toca `theme`, `line_numbers` ni `files`:
-/// son independientes del preset, tal como describe la spec.
+/// Aplica las piezas fijas de un preset. No toca `theme` ni `files`: son
+/// independientes del preset, tal como describe la spec. La maqueta define
+/// Moderna y Clásica con números de línea y sin línea de comandos fusionada;
+/// Zen sin números de línea y con la línea de comandos fusionada (estado y
+/// prompts en una sola franja).
 pub fn apply_preset(ui: &mut UiConfig, preset: Preset) {
     ui.preset = preset;
     match preset {
@@ -10,18 +13,24 @@ pub fn apply_preset(ui: &mut UiConfig, preset: Preset) {
             ui.menubar = MenuBar::Hidden;
             ui.hints_bar = true;
             ui.status_bar = true;
+            ui.line_numbers = true;
+            ui.merged_command_line = false;
         }
         Preset::Clasica => {
             ui.tabs_position = TabsPosition::Below;
             ui.menubar = MenuBar::Visible;
             ui.hints_bar = false;
             ui.status_bar = true;
+            ui.line_numbers = true;
+            ui.merged_command_line = false;
         }
         Preset::Zen => {
             ui.tabs_position = TabsPosition::Auto;
             ui.menubar = MenuBar::Hidden;
             ui.hints_bar = false;
             ui.status_bar = true;
+            ui.line_numbers = false;
+            ui.merged_command_line = true;
         }
     }
 }
@@ -38,6 +47,8 @@ mod tests {
         assert_eq!(ui.tabs_position, TabsPosition::Title);
         assert_eq!(ui.menubar, MenuBar::Hidden);
         assert!(ui.hints_bar);
+        assert!(ui.line_numbers);
+        assert!(!ui.merged_command_line);
     }
 
     #[test]
@@ -47,6 +58,8 @@ mod tests {
         assert_eq!(ui.tabs_position, TabsPosition::Below);
         assert_eq!(ui.menubar, MenuBar::Visible);
         assert!(!ui.hints_bar);
+        assert!(ui.line_numbers);
+        assert!(!ui.merged_command_line);
     }
 
     #[test]
@@ -56,14 +69,15 @@ mod tests {
         assert_eq!(ui.tabs_position, TabsPosition::Auto);
         assert_eq!(ui.menubar, MenuBar::Hidden);
         assert!(!ui.hints_bar);
+        assert!(!ui.line_numbers);
+        assert!(ui.merged_command_line);
     }
 
     #[test]
-    fn applying_a_preset_does_not_touch_theme_or_line_numbers() {
-        let mut ui = UiConfig { theme: crate::Theme::Dark, line_numbers: false, ..UiConfig::default() };
+    fn applying_a_preset_does_not_touch_theme() {
+        let mut ui = UiConfig { theme: crate::Theme::Dark, ..UiConfig::default() };
         apply_preset(&mut ui, Preset::Clasica);
         assert_eq!(ui.theme, crate::Theme::Dark);
-        assert!(!ui.line_numbers);
     }
 
     #[test]

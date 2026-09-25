@@ -614,10 +614,10 @@ mod tests {
 
 La maqueta define los presets así (línea 362): Moderna y Clásica con números de línea y sin línea fusionada; **Zen sin números de línea y con la línea de comandos fusionada** (estado y prompts en una sola franja de 26 px, fondo `--cmd`, mono 12 px).
 
-- [ ] **Step 1:** Añade `pub merged_command_line: bool` a `UiConfig` (default `false`, `#[serde(default)]` ya cubre los `config.toml` viejos).
-- [ ] **Step 2:** En `apply_preset`: Moderna y Clásica ponen `line_numbers = true` y `merged_command_line = false`; Zen pone `line_numbers = false` y `merged_command_line = true`. Actualiza el comentario de la función (ya no deja `line_numbers` fuera). Añade al test de Zen `assert!(!ui.line_numbers); assert!(ui.merged_command_line);` y a los otros dos lo contrario.
-- [ ] **Step 3:** `cargo test -p notty-config` pasa.
-- [ ] **Step 4: Commit** `feat(config): Zen sin números y con línea de comandos fusionada, como la maqueta`
+- [x] **Step 1:** Añade `pub merged_command_line: bool` a `UiConfig` (default `false`, `#[serde(default)]` ya cubre los `config.toml` viejos).
+- [x] **Step 2:** En `apply_preset`: Moderna y Clásica ponen `line_numbers = true` y `merged_command_line = false`; Zen pone `line_numbers = false` y `merged_command_line = true`. Actualiza el comentario de la función (ya no deja `line_numbers` fuera). Añade al test de Zen `assert!(!ui.line_numbers); assert!(ui.merged_command_line);` y a los otros dos lo contrario. (El test `applying_a_preset_does_not_touch_theme_or_line_numbers` pasó a `applying_a_preset_does_not_touch_theme`, sin la parte de `line_numbers`, porque ahora sí lo toca.)
+- [x] **Step 3:** `cargo test -p notty-config` pasa.
+- [x] **Step 4: Commit** `feat(config): Zen sin números y con línea de comandos fusionada, como la maqueta`
 
 ---
 

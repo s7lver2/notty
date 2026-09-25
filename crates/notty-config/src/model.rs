@@ -57,6 +57,7 @@ pub struct UiConfig {
     pub hints_bar: bool,
     pub status_bar: bool,
     pub vim_always: bool,
+    pub merged_command_line: bool,
 }
 
 impl Default for UiConfig {
@@ -71,6 +72,7 @@ impl Default for UiConfig {
             hints_bar: true,
             status_bar: true,
             vim_always: false,
+            merged_command_line: false,
         };
         let preset = ui.preset;
         crate::apply_preset(&mut ui, preset);
