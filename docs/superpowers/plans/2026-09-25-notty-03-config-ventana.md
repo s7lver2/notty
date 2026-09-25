@@ -1460,7 +1460,7 @@ git commit -m "feat(ui): ventana de Ajustes con controles Win32 nativos"
 - Consumes: `settings_window::open`, `notty_config::LoadResult`.
 - Produces: `run` pasa a aceptar `notty_config::LoadResult` en vez de `Config` directamente (para poder mostrar el aviso de config rota); `Ctrl+,` (`UiCommand::OpenSettings`) abre la ventana de Ajustes sobre la principal.
 
-- [ ] **Step 1: Cambiar la firma de entrada para poder avisar de config rota**
+- [x] **Step 1: Cambiar la firma de entrada para poder avisar de config rota**
 
 En `crates/notty-ui/src/window.rs`, cambiar `pub fn run(path: Option<&str>, cfg: Config)` por `pub fn run(path: Option<&str>, load: notty_config::LoadResult)`, extrayendo dentro la `Config` y, si es la variante `Defaulted(_, msg)`, guardando `msg` para mostrarlo como primer mensaje de la barra de estado nada más arrancar (reutiliza el mecanismo de aviso ya usado para otros mensajes transitorios de la barra de estado del Plan 2, o simplemente antepón `format!("config.toml roto: {msg}")` al título de la ventana si no existe todavía un mecanismo de mensaje temporal — lo que compile más simple).
 
@@ -1474,11 +1474,11 @@ fn main() -> windows::core::Result<()> {
 }
 ```
 
-- [ ] **Step 2: Envolver `Config` en `Rc<RefCell<_>>` y compartirla con Ajustes**
+- [x] **Step 2: Envolver `Config` en `Rc<RefCell<_>>` y compartirla con Ajustes**
 
 En `window.rs`, la variable `cfg` pasa a ser `let cfg = Rc::new(RefCell::new(cfg));`. Cada lectura existente de `cfg.ui.*` para pintar pasa a `cfg.borrow().ui`.
 
-- [ ] **Step 3: Abrir Ajustes con Ctrl+,**
+- [x] **Step 3: Abrir Ajustes con Ctrl+,**
 
 En el `match cmd` de `UiCommand` (Task 6, Step 3), sustituir el comentario `/* se conecta en la Task 9 */` por:
 
@@ -1498,7 +1498,7 @@ notty_input::UiCommand::OpenSettings => {
 
 (El closure solo pide repintar; como `cfg` ya es el `Rc<RefCell<_>>` compartido, `renderer.paint(&ws, &cfg.borrow().ui)` en `WM_PAINT` ya lee el valor actualizado sin más cambios.)
 
-- [ ] **Step 4: Compilar y comprobar manualmente**
+- [x] **Step 4: Compilar y comprobar manualmente**
 
 Run: `cargo build --workspace`
 Expected: compila.
@@ -1508,7 +1508,7 @@ Expected (manual): `Ctrl+,` abre una ventana "Ajustes · notty" con los radios y
 
 Probar también con un `config.toml` roto a propósito (`echo "roto [[[" > "%APPDATA%\notty\config.toml"`): notty arranca igualmente con los valores por defecto y el archivo roto sigue en disco sin tocar.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/notty crates/notty-ui

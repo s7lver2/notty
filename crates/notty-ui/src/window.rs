@@ -16,6 +16,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{PCWSTR, Result, w};
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use crate::{EditorState, Modifiers, Renderer, Viewport};
 
 /// Estado ligado a una ventana concreta: se guarda en `GWLP_USERDATA` mientras vive.
@@ -24,7 +27,7 @@ struct WindowState {
     renderer: Renderer,
     mouse_down: bool,
     selection_anchor: usize,
-    cfg: notty_config::Config,
+    cfg: Rc<RefCell<notty_config::Config>>,
     ui_keymap: std::collections::HashMap<(u32, notty_input::Modifiers), notty_input::UiCommand>,
     /// Solo se usa cuando `cfg.ui.menubar == MenuBar::Alt`: si el menú está desplegado.
     menu_visible: bool,
@@ -34,7 +37,7 @@ impl WindowState {
     /// La config a pasar al renderer: si el menú es `Alt`, se sustituye por
     /// `Visible`/`Hidden` según `menu_visible` sin tocar la config en disco.
     fn render_ui(&self) -> notty_config::UiConfig {
-        let mut ui = self.cfg.ui;
+        let mut ui = self.cfg.borrow().ui;
         if ui.menubar == notty_config::MenuBar::Alt {
             ui.menubar =
                 if self.menu_visible { notty_config::MenuBar::Visible } else { notty_config::MenuBar::Hidden };
@@ -71,12 +74,19 @@ unsafe fn update_title(hwnd: HWND, state: &EditorState) {
 }
 
 /// Abre la ventana principal de notty y bloquea hasta que se cierra.
-/// `path` es la ruta pasada por línea de comandos, si la hay; `cfg` es la
-/// configuración ya cargada de `config.toml` (o los valores por defecto).
-pub fn run(path: Option<&str>, cfg: notty_config::Config) -> Result<()> {
-    let title = match path {
-        Some(p) => format!("{p} · notty"),
-        None => "sin título · notty".to_string(),
+/// `path` es la ruta pasada por línea de comandos, si la hay; `load` es el resultado
+/// de cargar `config.toml` (que puede traer un aviso si el archivo estaba roto).
+pub fn run(path: Option<&str>, load: notty_config::LoadResult) -> Result<()> {
+    let (cfg, broken_msg) = match load {
+        notty_config::LoadResult::Loaded(cfg) | notty_config::LoadResult::Missing(cfg) => (cfg, None),
+        notty_config::LoadResult::Defaulted(cfg, msg) => (cfg, Some(msg)),
+    };
+
+    let title = match (path, &broken_msg) {
+        (Some(p), Some(msg)) => format!("config.toml roto: {msg} — {p} · notty"),
+        (Some(p), None) => format!("{p} · notty"),
+        (None, Some(msg)) => format!("config.toml roto: {msg} · notty"),
+        (None, None) => "sin título · notty".to_string(),
     };
 
     unsafe {
@@ -130,6 +140,7 @@ pub fn run(path: Option<&str>, cfg: notty_config::Config) -> Result<()> {
             notty_input::apply_overrides(&mut m, &cfg);
             m
         };
+        let cfg = Rc::new(RefCell::new(cfg));
 
         let window_state = Box::new(WindowState {
             ws,
@@ -241,7 +252,17 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             notty_input::UiCommand::CloseTab => {
                                 w.ws.close_active();
                             }
-                            notty_input::UiCommand::OpenSettings => { /* se conecta en la Task 9 */ }
+                            notty_input::UiCommand::OpenSettings => {
+                                let cfg_for_settings = w.cfg.clone();
+                                let hwnd_copy = hwnd;
+                                let _ = crate::settings_window::open(
+                                    hwnd,
+                                    cfg_for_settings,
+                                    Box::new(move || {
+                                        let _ = InvalidateRect(Some(hwnd_copy), None, false);
+                                    }),
+                                );
+                            }
                         }
                         update_title(hwnd, w.ws.active());
                         let _ = InvalidateRect(Some(hwnd), None, false);
@@ -346,7 +367,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             WM_SYSKEYDOWN => {
                 if let Some(w) = ptr.as_mut() {
                     let vk = wparam.0 as u32;
-                    if vk == VK_MENU.0 as u32 && w.cfg.ui.menubar == notty_config::MenuBar::Alt {
+                    if vk == VK_MENU.0 as u32 && w.cfg.borrow().ui.menubar == notty_config::MenuBar::Alt {
                         w.menu_visible = !w.menu_visible;
                         let _ = InvalidateRect(Some(hwnd), None, false);
                         return LRESULT(0);
