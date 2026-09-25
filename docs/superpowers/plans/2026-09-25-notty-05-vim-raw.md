@@ -875,7 +875,7 @@ git commit -m "feat(ui): RawDoc — vista hex de solo lectura con copia editable
   - `pub fn hex_rows(doc: &RawDoc) -> Vec<String>`: una fila por cada bloque de 16 bytes de `doc` (la última puede ser más corta).
   - `pub fn hex_char(c: char) -> Option<u8>`: `'0'..='9'` → 0-9, `'a'..='f'`/`'A'..='F'` → 10-15, cualquier otra cosa `None` (para interpretar lo que el usuario teclea al escribir un byte).
 
-- [ ] **Step 1: Escribir los tests que fallan**
+- [x] **Step 1: Escribir los tests que fallan**
 
 `crates/notty-ui/src/hex.rs`:
 
@@ -926,12 +926,12 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Ejecutar y ver que falla**
+- [x] **Step 2: Ejecutar y ver que falla**
 
 Run: `cargo test -p notty-ui hex`
 Expected: FAIL de compilación, `cannot find function hex_row`.
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 Añadir **encima** del módulo de tests en `crates/notty-ui/src/hex.rs`:
 
@@ -972,12 +972,12 @@ pub fn hex_char(c: char) -> Option<u8> {
 
 (el test `hex_rows_splits_into_blocks_of_sixteen` llama directamente a `hex_rows_from_bytes`, que no es `pub`; como está en el mismo archivo, el `mod tests` interno sí puede verla vía `use super::*`. Borra la `struct Fake(Vec<u8>);` del test, que no se usa: era solo para ilustrar la idea en el enunciado y no debe quedar en el código final.)
 
-- [ ] **Step 4: Ejecutar y ver que pasa**
+- [x] **Step 4: Ejecutar y ver que pasa**
 
 Run: `cargo test --workspace`
 Expected: PASS, +5 tests sobre los de la Task 4.
 
-- [ ] **Step 5: Exportar el módulo**
+- [x] **Step 5: Exportar el módulo**
 
 `crates/notty-ui/src/lib.rs` añade:
 
@@ -987,7 +987,7 @@ mod hex;
 pub use hex::{hex_char, hex_row, hex_rows};
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/notty-ui
