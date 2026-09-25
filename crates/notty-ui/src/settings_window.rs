@@ -89,12 +89,15 @@ pub fn open(
     unsafe {
         let instance = GetModuleHandleW(None)?;
         let class_name = w!("NottySettingsClass");
+        let icon = crate::window::app_icon(instance.into());
         let wc = WNDCLASSEXW {
             cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
             style: CS_DROPSHADOW,
             lpfnWndProc: Some(wndproc),
             hInstance: instance.into(),
             lpszClassName: class_name,
+            hIcon: icon.unwrap_or_default(),
+            hIconSm: icon.unwrap_or_default(),
             hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
             ..Default::default()
         };

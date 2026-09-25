@@ -370,6 +370,15 @@ impl Renderer {
         }
     }
 
+    /// Círculo relleno centrado en `(cx, cy)` de radio `radius` (el punto del icono).
+    pub(crate) fn fill_circle(&self, cx: f32, cy: f32, radius: f32, c: Rgba) {
+        unsafe {
+            self.brush.SetColor(&color(c));
+            let ellipse = D2D1_ELLIPSE { point: Vector2 { X: cx, Y: cy }, radiusX: radius, radiusY: radius };
+            self.target.FillEllipse(&ellipse, &self.brush);
+        }
+    }
+
     #[allow(dead_code)]
     pub(crate) fn stroke_round_rect(&self, r: Rect, radius: f32, width: f32, c: Rgba) {
         if r.is_empty() {
@@ -670,18 +679,18 @@ impl Renderer {
         unsafe {
             self.fill(frame.titlebar, pal.chrome);
 
-            // Icono de la app: rectángulo redondeado + tres líneas, en los primeros 36px.
+            // Icono de la app ("trazo + punto": docs/mockups/notty_icon_candidates,
+            // opción A), en los primeros 36px. Mismo trazo grueso con extremos
+            // redondeados y punto que assets/notty.ico, a escala de 16px.
             let icon_x = (layout::APPICON_W - layout::APPICON_SIZE) / 2.0;
             let icon_y = (layout::TITLEBAR_H - layout::APPICON_SIZE) / 2.0;
-            self.stroke_round_rect(
-                Rect::new(icon_x + 2.5, icon_y + 1.5, icon_x + 2.5 + 11.0, icon_y + 1.5 + 13.0),
-                2.0,
-                1.4,
+            self.stroke_line(
+                icon_x + 4.5, icon_y + 10.8,
+                icon_x + 9.6, icon_y + 5.8,
+                2.2,
                 pal.accent,
             );
-            self.stroke_line(icon_x + 5.0, icon_y + 5.5, icon_x + 11.0, icon_y + 5.5, 1.3, pal.text_2);
-            self.stroke_line(icon_x + 5.0, icon_y + 8.0, icon_x + 11.0, icon_y + 8.0, 1.3, pal.text_2);
-            self.stroke_line(icon_x + 5.0, icon_y + 10.5, icon_x + 8.5, icon_y + 10.5, 1.3, pal.text_2);
+            self.fill_circle(icon_x + 11.5, icon_y + 4.3, 1.7, pal.accent);
 
             let bands = Self::resolve_bands(ui, ws.len(), view.menu_bar_visible);
             if bands.tabs_in_title {
@@ -701,6 +710,11 @@ impl Renderer {
             self.draw_caption_button(view, pal, frame.caption_min, Hit::Min, false);
             self.draw_caption_button(view, pal, frame.caption_max, Hit::Max, view.maximized);
             self.draw_caption_button(view, pal, frame.caption_close, Hit::Close, false);
+
+            // Línea de separación bajo la barra de título, como en las apps nativas de
+            // Windows 11 (Ajustes, Explorador...): la distingue del resto de la ventana
+            // sin depender de que haya pestañas o menú justo debajo.
+            self.stroke_line(0.0, frame.titlebar.bottom, frame.titlebar.width(), frame.titlebar.bottom, 1.0, pal.line);
         }
     }
 

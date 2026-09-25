@@ -4,8 +4,8 @@ use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Shell::{NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NOTIFYICONDATAW, Shell_NotifyIconW};
 use windows::Win32::UI::Input::KeyboardAndMouse::RegisterHotKey;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, IDI_APPLICATION, LoadIconW, MSG,
-    RegisterClassExW, WM_DESTROY, WM_HOTKEY, WNDCLASSEXW,
+    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, MSG, RegisterClassExW, WM_DESTROY, WM_HOTKEY,
+    WNDCLASSEXW,
 };
 use windows::core::{Result, w};
 
@@ -28,11 +28,14 @@ pub fn run() -> Result<()> {
     unsafe {
         let instance = windows::Win32::System::LibraryLoader::GetModuleHandleW(None)?;
         let class_name = w!("NottyDaemonClass");
+        let icon = notty_ui::window::app_icon(instance.into());
         let wc = WNDCLASSEXW {
             cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
             lpfnWndProc: Some(wndproc),
             hInstance: instance.into(),
             lpszClassName: class_name,
+            hIcon: icon.unwrap_or_default(),
+            hIconSm: icon.unwrap_or_default(),
             ..Default::default()
         };
         RegisterClassExW(&wc);
@@ -49,7 +52,7 @@ pub fn run() -> Result<()> {
             uID: 1,
             uFlags: NIF_ICON | NIF_MESSAGE | NIF_TIP,
             uCallbackMessage: WM_APP_TRAYICON,
-            hIcon: LoadIconW(None, IDI_APPLICATION).unwrap_or_default(),
+            hIcon: icon.unwrap_or_default(),
             ..Default::default()
         };
         let tip = w!("notty");

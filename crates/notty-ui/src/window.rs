@@ -16,14 +16,14 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DispatchMessageW, GWLP_USERDATA, GetMessageW,
-    GetWindowLongPtrW, HTCAPTION, HTCLIENT, HTMAXBUTTON, HTTOP, IDC_ARROW, IDC_IBEAM, IsZoomed, KillTimer,
-    LoadCursorW, MSG, NCCALCSIZE_PARAMS, PostQuitMessage, RegisterClassExW, SM_CXPADDEDBORDER, SM_CYFRAME,
-    SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
-    SetCursor, SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow, TranslateMessage,
-    WHEEL_DELTA, WM_ACTIVATE, WM_CHAR, WM_DESTROY, WM_DPICHANGED, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP,
-    WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCALCSIZE, WM_NCHITTEST, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_NCMOUSELEAVE,
-    WM_NCMOUSEMOVE, WM_PAINT, WM_SETCURSOR, WM_SETTINGCHANGE, WM_SIZE, WM_SYSKEYDOWN, WM_TIMER, WNDCLASSEXW,
-    WS_EX_APPWINDOW, WS_OVERLAPPEDWINDOW,
+    GetWindowLongPtrW, HICON, HTCAPTION, HTCLIENT, HTMAXBUTTON, HTTOP, IDC_ARROW, IDC_IBEAM, IsZoomed, KillTimer,
+    LoadCursorW, LoadIconW, MSG, NCCALCSIZE_PARAMS, PostQuitMessage, RegisterClassExW, SM_CXPADDEDBORDER,
+    SM_CYFRAME, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOSIZE,
+    SWP_NOZORDER, SetCursor, SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow,
+    TranslateMessage, WHEEL_DELTA, WM_ACTIVATE, WM_CHAR, WM_DESTROY, WM_DPICHANGED, WM_KEYDOWN, WM_LBUTTONDOWN,
+    WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCALCSIZE, WM_NCHITTEST, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP,
+    WM_NCMOUSELEAVE, WM_NCMOUSEMOVE, WM_PAINT, WM_SETCURSOR, WM_SETTINGCHANGE, WM_SIZE, WM_SYSKEYDOWN, WM_TIMER,
+    WNDCLASSEXW, WS_EX_APPWINDOW, WS_OVERLAPPEDWINDOW,
 };
 use windows::core::{PCWSTR, Result, w};
 
@@ -123,6 +123,19 @@ fn point_from_lparam(lparam: LPARAM) -> (f32, f32) {
 
 fn to_wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+/// El icono propio de notty (`assets/notty.ico`, empotrado en el `.exe` como recurso 1
+/// por `crates/notty/build.rs`), para la barra de título, Alt+Tab y la bandeja. `None`
+/// si por lo que sea no se pudo cargar (no debería pasar con el recurso ya empotrado);
+/// en ese caso Windows se queda con el icono por defecto, no es un error fatal.
+///
+/// # Safety
+/// `instance` debe ser un módulo cargado válido (el de `GetModuleHandleW(None)`, como
+/// en todos los llamadores de esta función).
+#[allow(clippy::manual_dangling_ptr)] // MAKEINTRESOURCE(1): un entero disfrazado de puntero, nunca se desreferencia.
+pub unsafe fn app_icon(instance: windows::Win32::Foundation::HINSTANCE) -> Option<HICON> {
+    unsafe { LoadIconW(Some(instance), PCWSTR(1usize as *const u16)).ok() }
 }
 
 /// Título de la ventana: `"<ruta o 'sin título'>{ ' •' si hay cambios sin guardar} · notty"`.
@@ -388,12 +401,15 @@ fn run_inner(
 
         let instance = GetModuleHandleW(None)?;
         let class_name = w!("NottyWindowClass");
+        let icon = app_icon(instance.into());
 
         let wc = WNDCLASSEXW {
             cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
             lpfnWndProc: Some(wndproc),
             hInstance: instance.into(),
             lpszClassName: class_name,
+            hIcon: icon.unwrap_or_default(),
+            hIconSm: icon.unwrap_or_default(),
             // Sin esto Windows no toca el cursor al entrar en la ventana: se queda con
             // el que hubiera antes (a veces uno de arrastre o de redimensionar de otra
             // ventana), lo que se ve como "cursor raro" al seleccionar texto.
