@@ -621,7 +621,7 @@ git commit -m "feat(input): parser de teclas y comandos de interfaz"
   - `pub fn load(path: &Path) -> LoadResult`.
   - `pub fn save(cfg: &Config, path: &Path) -> std::io::Result<()>` (serializa con `toml::to_string_pretty` y usa `notty_io::atomic_write`; nunca se llama si `load` devolvió `Defaulted`, salvo que el usuario guarde explícitamente desde Ajustes, que es justo cuando SÍ se debe sobrescribir).
 
-- [ ] **Step 1: Escribir los tests que fallan**
+- [x] **Step 1: Escribir los tests que fallan**
 
 Sustituir el contenido de `crates/notty-config/src/storage.rs` (que hoy solo tiene el comentario provisional) por:
 
@@ -699,12 +699,12 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Ejecutar y ver que falla**
+- [x] **Step 2: Ejecutar y ver que falla**
 
 Run: `cargo test -p notty-config storage`
 Expected: FAIL de compilación, `cannot find function load`.
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 Añadir **encima** del módulo de tests en `crates/notty-config/src/storage.rs`:
 
@@ -756,12 +756,12 @@ pub fn save(cfg: &Config, path: &Path) -> std::io::Result<()> {
 }
 ```
 
-- [ ] **Step 4: Ejecutar y ver que pasa**
+- [x] **Step 4: Ejecutar y ver que pasa**
 
 Run: `cargo test --workspace`
 Expected: PASS, 111 tests (105 anteriores + 6 de esta tarea).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/notty-config
