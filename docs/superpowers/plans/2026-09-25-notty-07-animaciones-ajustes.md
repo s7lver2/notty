@@ -36,7 +36,7 @@ Todo lo demás (caret, selección de texto, scroll del documento, redimensionar,
 - Create: `crates/notty-ui/src/anim.rs`
 - Modify: `crates/notty-ui/src/lib.rs` (`mod anim; pub use anim::{Anim, ease_out_cubic};`)
 
-- [ ] **Step 1: Escribir los tests que fallan**
+- [x] **Step 1: Escribir los tests que fallan**
 
 ```rust
 #[cfg(test)]
@@ -94,12 +94,12 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Ejecutar y ver que falla**
+- [x] **Step 2: Ejecutar y ver que falla**
 
 Run: `cargo test -p notty-ui anim`
 Expected: FAIL de compilación, `cannot find type Anim`.
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 ```rust
 //! Interpolación con el tiempo para las animaciones cortas de la interfaz (menús,
@@ -155,12 +155,12 @@ impl Anim {
 }
 ```
 
-- [ ] **Step 4: Ejecutar y ver que pasa**
+- [x] **Step 4: Ejecutar y ver que pasa**
 
 Run: `cargo test --workspace`
 Expected: PASS, +6 tests.
 
-- [ ] **Step 5: Commit** `feat(ui): anim.rs, interpolación con easing para las animaciones cortas`
+- [x] **Step 5: Commit** `feat(ui): anim.rs, interpolación con easing para las animaciones cortas`
 
 ---
 

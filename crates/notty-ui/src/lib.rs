@@ -1,5 +1,6 @@
 //! notty-ui: ventana Win32, render Direct2D/DirectWrite y lógica de edición en pantalla.
 
+mod anim;
 pub mod chrome_text;
 pub mod clipboard;
 mod doc_io;
@@ -23,6 +24,7 @@ mod vim_cmd;
 pub mod window;
 pub mod workspace;
 
+pub use anim::{Anim, ease_out_cubic};
 pub use chrome_text::*;
 pub use doc_io::{OpenedDoc, open_as_document, save_document};
 pub use editor::EditorState;
