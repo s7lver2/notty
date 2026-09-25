@@ -648,7 +648,7 @@ git commit -m "feat(ui): parser de comandos vim (:w, :q, :wq, :%s)"
   - `RawDoc::set_byte(&mut self, i: usize, value: u8) -> bool`: si `edit_buf` es `Some` y `i < len`, escribe y marca `dirty`; devuelve si se pudo escribir.
   - `RawDoc::save(&mut self) -> std::io::Result<()>`: si no hay `edit_buf`, no hace nada (`Ok(())`); si lo hay, **primero** sustituye `self.view` por una vista vacía en memoria (soltando así el `Mmap` del archivo original) y **después** llama a `notty_io::atomic_write(&self.path, edit_buf)`, y limpia `dirty`.
 
-- [ ] **Step 1: Escribir los tests que fallan**
+- [x] **Step 1: Escribir los tests que fallan**
 
 `crates/notty-ui/src/raw_doc.rs`:
 
@@ -743,7 +743,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Ejecutar y ver que falla**
+- [x] **Step 2: Ejecutar y ver que falla**
 
 Añadir `mod raw_doc;` a `crates/notty-ui/src/lib.rs` para que compile el archivo:
 
@@ -754,7 +754,7 @@ mod raw_doc;
 Run: `cargo test -p notty-ui raw_doc`
 Expected: FAIL de compilación, `cannot find function open_raw_doc`.
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 Añadir **encima** del módulo de tests en `crates/notty-ui/src/raw_doc.rs`:
 
@@ -838,12 +838,12 @@ impl RawDoc {
 
 `RawBytes` necesita ser `Clone`-friendly para `.to_vec()`: comprobar que `notty_io::RawBytes` implementa `Deref<Target = [u8]>` (ya lo hace desde el Plan 1), lo que da `.to_vec()` gratis vía el `Deref` a `[u8]`. Si `RawBytes::Owned(Vec::new())` no es directamente construible por ser sus variantes privadas, exportar en `notty-io` un constructor `pub fn empty() -> RawBytes { RawBytes::Owned(Vec::new()) }` y usarlo aquí en su lugar (ajusta `notty-io/src/open.rs` si hace falta).
 
-- [ ] **Step 4: Ejecutar y ver que pasa**
+- [x] **Step 4: Ejecutar y ver que pasa**
 
 Run: `cargo test --workspace`
 Expected: PASS, +7 tests sobre los de la Task 3.
 
-- [ ] **Step 5: Exportar el módulo**
+- [x] **Step 5: Exportar el módulo**
 
 `crates/notty-ui/src/lib.rs`: cambiar `mod raw_doc;` (Step 2) por:
 
@@ -853,7 +853,7 @@ pub use raw_doc::{RawDoc, open_raw_doc};
 
 (mantén `mod raw_doc;` implícito en el propio `pub use`, no hace falta declararlo dos veces).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/notty-io crates/notty-ui
