@@ -830,10 +830,10 @@ Compara con `ref/ajustes.png` (y abre la maqueta en el navegador → «Ajustes»
 
 ### Task 12: Repaso final contra todas las referencias
 
-- [ ] **Step 1:** `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo build --release --workspace`: todo limpio.
-- [ ] **Step 2:** Captura la app en **cada** escenario de `docs/mockups/ref/` que la app ya soporta (todos menos los que dependen de dos archivos abiertos a la vez; para esos, abre un segundo archivo con `^o`) y compáralas una a una con la referencia. Arregla lo que no coincida. Guarda las capturas finales en `docs/mockups/app/<escenario>.png` para que el usuario pueda revisarlas.
-- [ ] **Step 3:** Prueba también con el escalado de Windows al 125 % o 150 % si puedes (o simula `dpi = 144` forzándolo temporalmente): nada borroso, nada descolocado.
-- [ ] **Step 4: Commit** `chore(ui): repaso visual contra la maqueta` con, en el cuerpo del mensaje, la lista de escenarios comparados y cualquier diferencia que quede y por qué.
+- [x] **Step 1:** `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo build --release --workspace`: todo limpio.
+- [x] **Step 2:** Captura la app en **cada** escenario de `docs/mockups/ref/` que la app ya soporta (todos menos los que dependen de dos archivos abiertos a la vez; para esos, abre un segundo archivo con `^o`) y compáralas una a una con la referencia. Arregla lo que no coincida. Guarda las capturas finales en `docs/mockups/app/<escenario>.png` para que el usuario pueda revisarlas.
+- [x] **Step 3:** Prueba también con el escalado de Windows al 125 % o 150 % si puedes (o simula `dpi = 144` forzándolo temporalmente): nada borroso, nada descolocado.
+- [x] **Step 4: Commit** `chore(ui): repaso visual contra la maqueta` con, en el cuerpo del mensaje, la lista de escenarios comparados y cualquier diferencia que quede y por qué.
 
 ---
 

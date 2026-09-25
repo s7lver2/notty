@@ -968,7 +968,7 @@ impl Renderer {
             let mut xr = r.right - layout::STATUS_PAD_X;
             for (i, field) in fields.iter().enumerate().rev() {
                 let w = self.measure(field, label_font);
-                if merged && i > 0 {
+                if merged && i + 1 < fields.len() {
                     let sep = "· ";
                     let sw = self.measure(sep, label_font);
                     xr -= sw;
