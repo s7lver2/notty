@@ -9,5 +9,6 @@ name = "notty"
 path = "src/main.rs"
 
 [dependencies]
+notty-config = { path = "../notty-config" }
 notty-ui = { path = "../notty-ui" }
 windows = { version = "0.62.2", features = ["Win32_Foundation"] }

@@ -5,13 +5,13 @@ use windows::Win32::Graphics::Dwm::{
 use windows::Win32::Graphics::Gdi::{InvalidateRect, ValidateRect};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetKeyState, ReleaseCapture, SetCapture, VK_CONTROL, VK_SHIFT,
+    GetKeyState, ReleaseCapture, SetCapture, VK_CONTROL, VK_MENU, VK_SHIFT,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DispatchMessageW, GWLP_USERDATA, GetClientRect,
     GetMessageW, GetWindowLongPtrW, MSG, PostQuitMessage, RegisterClassExW, SW_SHOW, SetWindowLongPtrW,
     SetWindowTextW, ShowWindow, TranslateMessage, WHEEL_DELTA, WM_CHAR, WM_DESTROY, WM_KEYDOWN,
-    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_PAINT, WM_SIZE, WNDCLASSEXW,
+    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_PAINT, WM_SIZE, WM_SYSKEYDOWN, WNDCLASSEXW,
     WS_EX_APPWINDOW, WS_OVERLAPPEDWINDOW,
 };
 use windows::core::{PCWSTR, Result, w};
@@ -24,9 +24,23 @@ struct WindowState {
     renderer: Renderer,
     mouse_down: bool,
     selection_anchor: usize,
-    // Marcador de posición mínimo: la Task 6 de este plan sustituye esto por la
-    // `Config` real cargada de `config.toml`.
-    ui: notty_config::UiConfig,
+    cfg: notty_config::Config,
+    ui_keymap: std::collections::HashMap<(u32, notty_input::Modifiers), notty_input::UiCommand>,
+    /// Solo se usa cuando `cfg.ui.menubar == MenuBar::Alt`: si el menú está desplegado.
+    menu_visible: bool,
+}
+
+impl WindowState {
+    /// La config a pasar al renderer: si el menú es `Alt`, se sustituye por
+    /// `Visible`/`Hidden` según `menu_visible` sin tocar la config en disco.
+    fn render_ui(&self) -> notty_config::UiConfig {
+        let mut ui = self.cfg.ui;
+        if ui.menubar == notty_config::MenuBar::Alt {
+            ui.menubar =
+                if self.menu_visible { notty_config::MenuBar::Visible } else { notty_config::MenuBar::Hidden };
+        }
+        ui
+    }
 }
 
 fn point_from_lparam(lparam: LPARAM) -> (f32, f32) {
@@ -57,8 +71,9 @@ unsafe fn update_title(hwnd: HWND, state: &EditorState) {
 }
 
 /// Abre la ventana principal de notty y bloquea hasta que se cierra.
-/// `path` es la ruta pasada por línea de comandos, si la hay.
-pub fn run(path: Option<&str>) -> Result<()> {
+/// `path` es la ruta pasada por línea de comandos, si la hay; `cfg` es la
+/// configuración ya cargada de `config.toml` (o los valores por defecto).
+pub fn run(path: Option<&str>, cfg: notty_config::Config) -> Result<()> {
     let title = match path {
         Some(p) => format!("{p} · notty"),
         None => "sin título · notty".to_string(),
@@ -110,12 +125,20 @@ pub fn run(path: Option<&str>) -> Result<()> {
             Viewport::new(renderer.line_height(), (height - renderer.line_height()).max(0.0));
         update_title(hwnd, ws.active());
 
+        let ui_keymap = {
+            let mut m = notty_input::default_ui_keymap();
+            notty_input::apply_overrides(&mut m, &cfg);
+            m
+        };
+
         let window_state = Box::new(WindowState {
             ws,
             renderer,
             mouse_down: false,
             selection_anchor: 0,
-            ui: notty_config::UiConfig::default(),
+            cfg,
+            ui_keymap,
+            menu_visible: false,
         });
         let ptr = Box::into_raw(window_state);
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, ptr as isize);
@@ -182,7 +205,8 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
         match msg {
             WM_PAINT => {
                 if let Some(w) = ptr.as_mut() {
-                    w.renderer.paint(&w.ws, &w.ui);
+                    let ui = w.render_ui();
+                    w.renderer.paint(&w.ws, &ui);
                 }
                 let _ = ValidateRect(Some(hwnd), None);
                 LRESULT(0)
@@ -202,11 +226,27 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             WM_KEYDOWN => {
                 if let Some(w) = ptr.as_mut() {
                     let vk = wparam.0 as u32;
+                    let alt_down = (GetKeyState(VK_MENU.0 as i32) as u16 & 0x8000) != 0;
                     let mods = Modifiers {
                         ctrl: (GetKeyState(VK_CONTROL.0 as i32) as u16 & 0x8000) != 0,
                         shift: (GetKeyState(VK_SHIFT.0 as i32) as u16 & 0x8000) != 0,
                         alt: false,
                     };
+                    let ui_mods = notty_input::Modifiers { ctrl: mods.ctrl, shift: mods.shift, alt: alt_down };
+                    if let Some(cmd) = w.ui_keymap.get(&(vk, ui_mods)).copied() {
+                        match cmd {
+                            notty_input::UiCommand::NewTab => w.ws.open(crate::EditorState::new_empty()),
+                            notty_input::UiCommand::NextTab => w.ws.next(),
+                            notty_input::UiCommand::PrevTab => w.ws.prev(),
+                            notty_input::UiCommand::CloseTab => {
+                                w.ws.close_active();
+                            }
+                            notty_input::UiCommand::OpenSettings => { /* se conecta en la Task 9 */ }
+                        }
+                        update_title(hwnd, w.ws.active());
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                        return LRESULT(0);
+                    }
                     let action = crate::action_for_vk(vk, mods);
                     match action {
                         crate::EditorAction::None => {}
@@ -258,12 +298,22 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             WM_LBUTTONDOWN => {
                 if let Some(w) = ptr.as_mut() {
                     let (x, y) = point_from_lparam(lparam);
-                    let idx = w.renderer.char_index_at(w.ws.active(), x, y);
-                    w.ws.active_mut().doc.set_cursor(idx);
-                    w.selection_anchor = idx;
-                    w.mouse_down = true;
-                    SetCapture(hwnd);
-                    let _ = InvalidateRect(Some(hwnd), None, false);
+                    let clicked_tab = w
+                        .renderer
+                        .tab_rects()
+                        .iter()
+                        .position(|&(l, t, r, b)| x >= l && x < r && y >= t && y < b);
+                    if let Some(i) = clicked_tab {
+                        w.ws.activate(i);
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                    } else {
+                        let idx = w.renderer.char_index_at(w.ws.active(), x, y);
+                        w.ws.active_mut().doc.set_cursor(idx);
+                        w.selection_anchor = idx;
+                        w.mouse_down = true;
+                        SetCapture(hwnd);
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                    }
                 }
                 LRESULT(0)
             }
@@ -292,6 +342,17 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     let _ = InvalidateRect(Some(hwnd), None, false);
                 }
                 LRESULT(0)
+            }
+            WM_SYSKEYDOWN => {
+                if let Some(w) = ptr.as_mut() {
+                    let vk = wparam.0 as u32;
+                    if vk == VK_MENU.0 as u32 && w.cfg.ui.menubar == notty_config::MenuBar::Alt {
+                        w.menu_visible = !w.menu_visible;
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                        return LRESULT(0);
+                    }
+                }
+                DefWindowProcW(hwnd, msg, wparam, lparam)
             }
             WM_DESTROY => {
                 PostQuitMessage(0);

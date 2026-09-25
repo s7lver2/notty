@@ -1107,7 +1107,7 @@ git commit -m "feat(ui): render de pestañas, menú, barra de atajos y números 
 - Consumes: `notty_config::{load, default_path, Config}`, `notty_input::{default_ui_keymap, apply_overrides, UiCommand}`, `Workspace`, `Renderer::paint(ws, ui)`, `Renderer::tab_rects`.
 - Produces: `pub fn run(initial_path: Option<&str>, cfg: notty_config::Config) -> windows::core::Result<()>` (nueva firma; `main.rs` carga la config antes de llamar). La ventana guarda ahora `Workspace`, `notty_config::Config` y el `HashMap` de `notty-input` en su estado por ventana (mismo mecanismo que ya guardaba `EditorState`/`Renderer` desde el Plan 2).
 
-- [ ] **Step 1: Cargar la configuración en `main.rs`**
+- [x] **Step 1: Cargar la configuración en `main.rs`**
 
 `crates/notty/src/main.rs`:
 
@@ -1130,7 +1130,7 @@ fn main() -> windows::core::Result<()> {
 notty-config = { path = "../notty-config" }
 ```
 
-- [ ] **Step 2: Sustituir `EditorState` por `Workspace` en `window.rs`**
+- [x] **Step 2: Sustituir `EditorState` por `Workspace` en `window.rs`**
 
 Cambios en `crates/notty-ui/src/window.rs`:
 
@@ -1141,12 +1141,12 @@ Cambios en `crates/notty-ui/src/window.rs`:
 5. `WM_KEYDOWN`: antes de traducir con `notty_ui::action_for_vk`, comprobar primero `ui_keymap.get(&(vk, notty_input::Modifiers { ctrl: mods.ctrl, shift: mods.shift, alt: mods.alt }))` (construir el `notty_input::Modifiers` a partir del mismo `mods: notty_ui::Modifiers` que ya se calculaba en el Plan 2). Si hay un `UiCommand`, manejarlo (ver Step 3); si no, seguir como hasta ahora con `EditorAction` sobre `ws.active_mut()`.
 6. Todo lo que en el Plan 2 leía o mutaba `state` (guardar, portapapeles, ratón, `WM_CHAR`...) pasa a leer/mutar `ws.active_mut()`; recalcular el título de la ventana a partir de `ws.active()`.
 
-- [ ] **Step 2: Ejecutar los tests existentes**
+- [x] **Step 2: Ejecutar los tests existentes**
 
 Run: `cargo test --workspace`
 Expected: PASS (los cambios de esta tarea son solo de integración en `window.rs`/`main.rs`, que no tienen tests automáticos propios; deben seguir pasando los 126 tests anteriores sin cambios).
 
-- [ ] **Step 3: Manejar los `UiCommand`**
+- [x] **Step 3: Manejar los `UiCommand`**
 
 Dentro del `match` de `WM_KEYDOWN` en `window.rs`, tras resolver un `UiCommand`:
 
@@ -1160,15 +1160,15 @@ match cmd {
 }
 ```
 
-- [ ] **Step 4: Hit-testing de clic en pestañas**
+- [x] **Step 4: Hit-testing de clic en pestañas**
 
 En el manejador de `WM_LBUTTONDOWN`, antes de tratar el clic como "mover el caret en el texto", comprobar si `(x, y)` cae dentro de alguno de `renderer.tab_rects()`; si es así, `ws.activate(i)` y `InvalidateRect`, sin propagar el clic al editor.
 
-- [ ] **Step 5: Menú que aparece con Alt**
+- [x] **Step 5: Menú que aparece con Alt**
 
 Si `cfg.ui.menubar == notty_config::MenuBar::Alt`, guardar un `bool` `menu_visible` en el estado de la ventana (inicialmente `false`), alternarlo en `WM_SYSKEYDOWN`/`WM_KEYDOWN` cuando `vk == VK_MENU` (0x12) sin otros modificadores, y pasar a `renderer.paint` una copia de `cfg.ui` con `menubar` forzado a `Visible`/`Hidden` según ese `bool` (el propio `cfg.ui.menubar` en disco se queda como `Alt`; solo se ajusta la copia usada para pintar).
 
-- [ ] **Step 6: Compilar y comprobar manualmente**
+- [x] **Step 6: Compilar y comprobar manualmente**
 
 Run: `cargo build --workspace`
 Expected: compila.
@@ -1176,7 +1176,7 @@ Expected: compila.
 Run: `cargo run --bin notty -- /tmp/notas.txt` (o el archivo de prueba del Plan 2)
 Expected (manual): la ventana arranca con el preset Moderna (pestañas en la barra de título, sin menú, con barra de atajos abajo). `Ctrl+N` abre una pestaña nueva vacía; `Ctrl+Tab`/`Ctrl+Shift+Tab` cambian de pestaña; `Ctrl+W` cierra la activa; clic en una pestaña la activa.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add crates/notty crates/notty-ui
