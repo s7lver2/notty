@@ -88,6 +88,10 @@ struct State {
     /// fila dentro de la sección activa: `(animación, estado 'on' de destino)`. Se
     /// limpia entera al cambiar de sección (Hit::Nav).
     toggle_anims: HashMap<usize, (crate::Anim, bool)>,
+    /// Animación en curso del desplegable (`Select`) que se acaba de abrir (fundido +
+    /// desplazamiento, mismo tratamiento que el menú/sugerencias de la ventana
+    /// principal, ver Task 3 del plan). `None` en reposo.
+    select_open_anim: Option<crate::Anim>,
     /// Si el `SetTimer` de animación (`ID_ANIM_TIMER`) está corriendo.
     anim_timer_running: bool,
 }
@@ -191,6 +195,7 @@ pub fn open(
             animations_enabled,
             open_anim: Some(crate::Anim::new_maybe(Instant::now(), Duration::from_millis(150), animations_enabled)),
             toggle_anims: HashMap::new(),
+            select_open_anim: None,
             anim_timer_running: false,
         });
         let ptr = Box::into_raw(state);
@@ -304,7 +309,11 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             st.open_anim = None;
                         }
                         st.toggle_anims.retain(|_, (a, _)| !a.is_done(now));
-                        let still_animating = st.open_anim.is_some() || !st.toggle_anims.is_empty();
+                        if st.select_open_anim.is_some_and(|a| a.is_done(now)) {
+                            st.select_open_anim = None;
+                        }
+                        let still_animating =
+                            st.open_anim.is_some() || !st.toggle_anims.is_empty() || st.select_open_anim.is_some();
                         if !still_animating {
                             let _ = KillTimer(Some(hwnd), ID_ANIM_TIMER);
                             st.anim_timer_running = false;
@@ -377,6 +386,11 @@ fn handle_click(hwnd: HWND, st: &mut State, x: f32, y: f32) {
         }
         Hit::SelectBox(row) => {
             st.open_select = if st.open_select == Some(row) { None } else { Some(row) };
+            if st.open_select.is_some() {
+                st.select_open_anim =
+                    Some(crate::Anim::new_maybe(Instant::now(), Duration::from_millis(120), st.animations_enabled));
+                ensure_anim_timer(st, hwnd);
+            }
             unsafe {
                 let _ = InvalidateRect(Some(hwnd), None, false);
             }
@@ -628,19 +642,37 @@ fn paint(st: &mut State) {
     }
 
     if let Some((row_idx, box_r, options)) = open_select_geom {
+        // Fundido + 4px de desplazamiento al abrirse, mismo tratamiento que el menú y
+        // las sugerencias de la ventana principal (Task 3 del plan de animaciones).
+        let st_t = st.select_open_anim.map(|a| a.value(Instant::now(), 0.0, 1.0)).unwrap_or(1.0);
+        let dy = (1.0 - st_t) * 4.0;
+        let draw_y = |y: f32| y - dy;
+
         let row_h = 26.0;
         let dd_h = row_h * options.len() as f32 + 8.0;
+        // Posición final (sin desplazar): la usada para el hit-testing, que no anima.
         let dd = Rect::new(box_r.left, box_r.bottom + 2.0, box_r.right, box_r.bottom + 2.0 + dd_h);
-        r.fill_round(Rect::new(dd.left - 2.0, dd.top - 2.0, dd.right + 2.0, dd.bottom + 2.0), 10.0, pal.shadow);
-        r.fill_round(dd, 8.0, pal.chrome_hi);
-        r.stroke_round_rect(dd, 8.0, 1.0, pal.shadow_ring);
+        let draw_dd = Rect::new(dd.left, draw_y(dd.top), dd.right, draw_y(dd.bottom));
+        r.fill_round(
+            Rect::new(draw_dd.left - 2.0, draw_dd.top - 2.0, draw_dd.right + 2.0, draw_dd.bottom + 2.0),
+            10.0,
+            pal.shadow.faded(st_t),
+        );
+        r.fill_round(draw_dd, 8.0, pal.chrome_hi.faded(st_t));
+        r.stroke_round_rect(draw_dd, 8.0, 1.0, pal.shadow_ring.faded(st_t));
         let mut oy = dd.top + 4.0;
         for (j, (label, _)) in options.iter().enumerate() {
             let or_ = Rect::new(dd.left + 4.0, oy, dd.right - 4.0, oy + row_h);
+            let draw_or = Rect::new(draw_dd.left + 4.0, draw_y(oy), draw_dd.right - 4.0, draw_y(oy + row_h));
             if st.hover == Hit::SelectOption(j) {
-                r.fill_round(or_, 4.0, pal.hover);
+                r.fill_round(draw_or, 4.0, pal.hover.faded(st_t));
             }
-            r.text(label, &r.fonts().mono_12, Rect::new(or_.left + 8.0, or_.top, or_.right - 8.0, or_.bottom), pal.text);
+            r.text(
+                label,
+                &r.fonts().mono_12,
+                Rect::new(draw_or.left + 8.0, draw_or.top, draw_or.right - 8.0, draw_or.bottom),
+                pal.text.faded(st_t),
+            );
             st.hits.push((or_, Hit::SelectOption(j)));
             oy += row_h;
         }
