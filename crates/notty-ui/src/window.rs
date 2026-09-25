@@ -1117,7 +1117,12 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             WM_MOUSEWHEEL => {
                 if let Some(w) = ptr.as_mut() {
                     let delta = ((wparam.0 >> 16) as i16) as i32;
-                    w.ws.active_mut().scroll_by(-(delta / WHEEL_DELTA as i32) * 3);
+                    let notches = delta / WHEEL_DELTA as i32;
+                    if let crate::Prompt::Path(p) = &mut w.ws.prompt {
+                        p.scroll_by(-notches);
+                    } else {
+                        w.ws.active_mut().scroll_by(-notches * 3);
+                    }
                     let _ = InvalidateRect(Some(hwnd), None, false);
                 }
                 LRESULT(0)

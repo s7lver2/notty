@@ -4,10 +4,22 @@ pub enum Purpose {
     Save,
 }
 
+/// Filas visibles a la vez en la caja de sugerencias; con más candidatos que esto
+/// (típico al filtrar con comodines, `*.py`) se navega con el scroll o las flechas.
+pub const VISIBLE_SUGGESTIONS: usize = 5;
+/// Cuántos candidatos se piden como máximo a `notty_io::suggestions`. Antes eran 5
+/// (igual que lo visible): un comodín como `*.py` con más de 5 aciertos escondía el
+/// resto sin ninguna forma de llegar a ellos.
+const FETCH_MAX: usize = 50;
+
 pub struct PathPromptState {
     pub value: String,
     pub purpose: Purpose,
     pub selected: usize,
+    /// Primer candidato visible en la caja (el resto de `VISIBLE_SUGGESTIONS - 1`
+    /// siguen). El scroll del ratón lo mueve directamente; moverse con flechas o Tab
+    /// lo arrastra lo mínimo para que `selected` se mantenga visible.
+    pub scroll: usize,
     /// Último segmento tecleado por el usuario antes de que `accept()` lo completara
     /// con una sugerencia. Se conserva para que pulsar `Tab` otra vez (sin volver a
     /// teclear) siga comparando candidatos contra lo que el usuario escribió de verdad,
@@ -25,18 +37,51 @@ impl PathPromptState {
     /// para que las sugerencias aparezcan al instante sin tener que teclear nada.
     pub fn new(purpose: Purpose, initial: String) -> Self {
         let value = if initial.is_empty() { r"C:\".to_string() } else { initial };
-        Self { value, purpose, selected: 0, pending_prefix: None, last_error: None }
+        Self { value, purpose, selected: 0, scroll: 0, pending_prefix: None, last_error: None }
     }
 
     pub fn type_text(&mut self, raw: &str, ctx: &notty_io::PathContext) {
         self.value = notty_io::normalize(raw, ctx);
         self.selected = 0;
+        self.scroll = 0;
         self.pending_prefix = None;
         self.last_error = None;
     }
 
     pub fn suggestions(&self) -> Vec<notty_io::Entry> {
-        notty_io::suggestions(&self.value, 5)
+        notty_io::suggestions(&self.value, FETCH_MAX)
+    }
+
+    /// El tramo de `VISIBLE_SUGGESTIONS` candidatos que toca dibujar, ya recortado a
+    /// partir de `scroll`, junto con el total real (para el indicador "N más").
+    pub fn visible_suggestions(&self) -> (Vec<notty_io::Entry>, usize) {
+        let all = self.suggestions();
+        let total = all.len();
+        let start = self.scroll.min(total.saturating_sub(VISIBLE_SUGGESTIONS.min(total)));
+        let end = (start + VISIBLE_SUGGESTIONS).min(total);
+        (all.into_iter().skip(start).take(end - start).collect(), total)
+    }
+
+    /// Scroll del ratón sobre la caja de sugerencias: mueve la ventana visible sin
+    /// tocar `selected` (como una lista normal de Explorador).
+    pub fn scroll_by(&mut self, delta: i32) {
+        let total = self.suggestions().len();
+        if total <= VISIBLE_SUGGESTIONS {
+            self.scroll = 0;
+            return;
+        }
+        let max_scroll = total - VISIBLE_SUGGESTIONS;
+        self.scroll = (self.scroll as i64 + delta as i64).clamp(0, max_scroll as i64) as usize;
+    }
+
+    /// Arrastra `scroll` lo mínimo para que `selected` quede dentro de la ventana
+    /// visible, tras moverla con flechas o Tab.
+    fn ensure_selected_visible(&mut self) {
+        if self.selected < self.scroll {
+            self.scroll = self.selected;
+        } else if self.selected >= self.scroll + VISIBLE_SUGGESTIONS {
+            self.scroll = self.selected + 1 - VISIBLE_SUGGESTIONS;
+        }
     }
 
     pub fn hint(&self) -> notty_io::Hint {
@@ -86,6 +131,7 @@ impl PathPromptState {
             return;
         }
         self.selected = ((self.selected as i64 + delta as i64).rem_euclid(n as i64)) as usize;
+        self.ensure_selected_visible();
     }
 
     pub fn accept(&mut self) {
@@ -108,7 +154,7 @@ impl PathPromptState {
             }
         };
         let typed = format!("{base}{last}");
-        let sugs = notty_io::suggestions(&typed, 5);
+        let sugs = notty_io::suggestions(&typed, FETCH_MAX);
         if sugs.is_empty() {
             return;
         }
@@ -116,6 +162,7 @@ impl PathPromptState {
         if (advancing || exact_match) && sugs.len() > 1 {
             self.selected = (self.selected + 1) % sugs.len();
         }
+        self.ensure_selected_visible();
         let chosen = &sugs[self.selected.min(sugs.len() - 1)];
         self.pending_prefix = Some(last);
         self.value = format!("{base}{}{}", chosen.name, if chosen.is_dir { "\\" } else { "" });
@@ -157,6 +204,44 @@ mod tests {
     fn non_empty_initial_value_is_kept_as_is() {
         let p = PathPromptState::new(Purpose::Save, r"D:\notas.txt".to_string());
         assert_eq!(p.value, r"D:\notas.txt");
+    }
+
+    #[test]
+    fn wheel_scroll_moves_the_window_without_touching_selection() {
+        let dir = tempfile::tempdir().unwrap();
+        for i in 0..8 {
+            std::fs::write(dir.path().join(format!("f{i}.py")), "x").unwrap();
+        }
+        let mut p = PathPromptState::new(Purpose::Open, String::new());
+        p.type_text(&format!("{}\\*.py", dir.path().display()), &ctx(dir.path()));
+        let (_, total) = p.visible_suggestions();
+        assert_eq!(total, 8);
+        assert_eq!(p.scroll, 0);
+        p.scroll_by(1);
+        assert_eq!(p.scroll, 1);
+        assert_eq!(p.selected, 0); // el scroll no mueve la selección
+        p.scroll_by(100);
+        assert_eq!(p.scroll, 8 - VISIBLE_SUGGESTIONS); // se clampa al final de la lista
+        p.scroll_by(-100);
+        assert_eq!(p.scroll, 0);
+    }
+
+    #[test]
+    fn moving_selection_past_the_window_scrolls_to_follow_it() {
+        let dir = tempfile::tempdir().unwrap();
+        for i in 0..8 {
+            std::fs::write(dir.path().join(format!("f{i}.py")), "x").unwrap();
+        }
+        let mut p = PathPromptState::new(Purpose::Open, String::new());
+        p.type_text(&format!("{}\\*.py", dir.path().display()), &ctx(dir.path()));
+        for _ in 0..VISIBLE_SUGGESTIONS {
+            p.move_selection(1);
+        }
+        assert_eq!(p.selected, VISIBLE_SUGGESTIONS);
+        assert!(p.scroll > 0, "scroll debería haber seguido a la selección");
+        let (visible, _) = p.visible_suggestions();
+        assert!(p.selected < p.scroll + visible.len());
+        assert!(p.selected >= p.scroll);
     }
 
     #[test]

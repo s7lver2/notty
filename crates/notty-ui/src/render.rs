@@ -1131,14 +1131,14 @@ impl Renderer {
             // Derecha: si el último intento falló, por qué (en rojo, sustituye a la
             // palabra de estado y a "Tab ↹": no tiene sentido completar ni cerrar el
             // prompt en silencio cuando Enter no pudo hacer lo que pedía).
-            let sugs = p.suggestions();
+            let (visible_sugs, total_sugs) = p.visible_suggestions();
             let mut xr = r.right - layout::STATUS_PAD_X;
             if let Some(err) = &p.last_error {
                 let w = self.measure(err, &self.fonts.ui_11_5).min(r.width() * 0.6);
                 xr -= w;
                 self.text(err, &self.fonts.ui_11_5, Rect::new(xr, r.top, xr + w, r.bottom), pal.danger);
             } else {
-                if !sugs.is_empty() {
+                if total_sugs > 0 {
                     let tab_label = "Tab ↹";
                     let w = self.measure(tab_label, &self.fonts.ui_11_5);
                     xr -= w;
@@ -1154,31 +1154,46 @@ impl Renderer {
                 }
             }
 
-            if p.last_error.is_none() && !sugs.is_empty() {
-                self.draw_suggestions(&sugs, p.selected, pal, r);
+            if p.last_error.is_none() && !visible_sugs.is_empty() {
+                self.draw_suggestions(&visible_sugs, p.scroll, p.selected, total_sugs, pal, r);
             }
         }
     }
 
-    /// Lista de sugerencias de ruta (`.psuggest`), hasta 5 filas, justo encima de la
-    /// barra de estado. Aproxima la sombra difusa de la maqueta con un borde de 1 px
-    /// en `shadow_ring` en vez de los 4 anillos concéntricos exactos (desviación menor
-    /// por tiempo: el resultado es legible y del color correcto, pero menos difuso).
-    #[allow(unused_unsafe)]
-    unsafe fn draw_suggestions(&mut self, sugs: &[notty_io::Entry], selected: usize, pal: &theme::Palette, status: Rect) {
+    /// Lista de sugerencias de ruta (`.psuggest`), hasta `VISIBLE_SUGGESTIONS` filas a
+    /// la vez, justo encima de la barra de estado; `scroll` es el índice absoluto del
+    /// primer `entry` visible (para que los clics y el resaltado apunten al candidato
+    /// real dentro de la lista completa, no a la posición dentro de la ventana visible).
+    /// Con más candidatos que caben, un contador "3/12" avisa de que hay más y que se
+    /// puede seguir con el scroll. Aproxima la sombra difusa de la maqueta con un borde
+    /// de 1 px en `shadow_ring` en vez de los 4 anillos concéntricos exactos (desviación
+    /// menor por tiempo: el resultado es legible y del color correcto, pero menos difuso).
+    #[allow(unused_unsafe, clippy::too_many_arguments)]
+    unsafe fn draw_suggestions(
+        &mut self,
+        sugs: &[notty_io::Entry],
+        scroll: usize,
+        selected: usize,
+        total: usize,
+        pal: &theme::Palette,
+        status: Rect,
+    ) {
         unsafe {
             let row_h = 24.0;
+            let has_more = total > sugs.len();
+            let counter_h = if has_more { 20.0 } else { 0.0 };
             let longest = sugs.iter().map(|e| self.measure(&e.name, &self.fonts.mono_12)).fold(0.0f32, f32::max);
             let width = (longest + 16.0 + 16.0).clamp(220.0, 360.0);
-            let height = row_h * sugs.len() as f32 + layout::POPUP_PAD * 2.0;
+            let height = row_h * sugs.len() as f32 + counter_h + layout::POPUP_PAD * 2.0;
             let box_r = Rect::new(12.0, status.top - 2.0 - height, 12.0 + width, status.top - 2.0);
 
             self.fill_round(Rect::new(box_r.left - 2.0, box_r.top - 2.0, box_r.right + 2.0, box_r.bottom + 2.0), layout::POPUP_RADIUS + 2.0, pal.shadow);
             self.fill_round(box_r, layout::POPUP_RADIUS, pal.chrome_hi);
             self.stroke_round_rect(box_r, layout::POPUP_RADIUS, 1.0, pal.shadow_ring);
 
-            for (i, entry) in sugs.iter().enumerate() {
-                let row_top = box_r.top + layout::POPUP_PAD + row_h * i as f32;
+            for (rel, entry) in sugs.iter().enumerate() {
+                let i = scroll + rel;
+                let row_top = box_r.top + layout::POPUP_PAD + row_h * rel as f32;
                 let row = Rect::new(box_r.left + layout::POPUP_PAD, row_top, box_r.right - layout::POPUP_PAD, row_top + row_h);
                 if i == selected {
                     self.fill_round(row, 5.0, pal.accent_soft);
@@ -1187,6 +1202,19 @@ impl Renderer {
                 let c = if i == selected { pal.accent } else if entry.is_dir { pal.text } else { pal.text_2 };
                 self.text(&label, &self.fonts.mono_12, Rect::new(row.left + 8.0, row.top, row.right - 8.0, row.bottom), c);
                 self.hits.push((row, Hit::Suggestion(i)));
+            }
+
+            if has_more {
+                // "3-7 de 42": qué tramo de la lista completa se está viendo, para que
+                // quede claro que hay más candidatos y que el scroll los revela.
+                let counter_top = box_r.top + layout::POPUP_PAD + row_h * sugs.len() as f32;
+                let label = format!("{}-{} de {}", scroll + 1, scroll + sugs.len(), total);
+                self.text(
+                    &label,
+                    &self.fonts.ui_11_5,
+                    Rect::new(box_r.left + layout::POPUP_PAD + 8.0, counter_top, box_r.right - layout::POPUP_PAD, counter_top + counter_h),
+                    pal.text_3,
+                );
             }
         }
     }

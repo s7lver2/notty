@@ -71,17 +71,45 @@ fn split_last(typed: &str) -> (&str, &str) {
     }
 }
 
+/// `true` si `last` es un patrón (`*.py`, `notas?.txt`) en vez de un prefijo literal.
+pub fn is_glob(last: &str) -> bool {
+    last.contains('*') || last.contains('?')
+}
+
+/// Coincidencia de comodines estilo shell: `*` = cualquier secuencia (incluida
+/// vacía), `?` = un carácter cualquiera. Insensible a mayúsculas/minúsculas (se
+/// espera que `pattern`/`text` ya vengan en minúsculas, como hace `suggestions`).
+/// Por carácter (no por byte), para no romper nombres con acentos.
+fn glob_match(pattern: &[char], text: &[char]) -> bool {
+    match (pattern.first(), text.first()) {
+        (None, None) => true,
+        (Some('*'), _) => glob_match(&pattern[1..], text) || (!text.is_empty() && glob_match(pattern, &text[1..])),
+        (Some('?'), Some(_)) => glob_match(&pattern[1..], &text[1..]),
+        (Some(p), Some(t)) if p == t => glob_match(&pattern[1..], &text[1..]),
+        _ => false,
+    }
+}
+
 pub fn suggestions(typed: &str, max: usize) -> Vec<Entry> {
     let (parent, last) = split_last(typed);
     if last.is_empty() {
         return Vec::new();
     }
     let Ok(read) = std::fs::read_dir(parent) else { return Vec::new() };
+    let last_lower = last.to_lowercase();
+    let glob = is_glob(&last_lower);
+    let pattern: Vec<char> = last_lower.chars().collect();
     let mut entries: Vec<Entry> = read
         .flatten()
         .filter_map(|e| {
             let name = e.file_name().to_string_lossy().into_owned();
-            name.to_lowercase().starts_with(&last.to_lowercase()).then(|| {
+            let name_lower = name.to_lowercase();
+            let matches = if glob {
+                glob_match(&pattern, &name_lower.chars().collect::<Vec<_>>())
+            } else {
+                name_lower.starts_with(&last_lower)
+            };
+            matches.then(|| {
                 let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
                 Entry { name, is_dir }
             })
@@ -188,6 +216,45 @@ mod tests {
         let s = suggestions(&typed, 5);
         assert_eq!(s.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), vec!["proyectos", "proyectos-viejos"]);
         assert!(s.iter().all(|e| e.is_dir));
+    }
+
+    #[test]
+    fn wildcard_star_matches_by_extension() {
+        let dir = setup();
+        std::fs::write(dir.path().join("a.py"), "x").unwrap();
+        std::fs::write(dir.path().join("b.py"), "x").unwrap();
+        std::fs::write(dir.path().join("c.txt"), "x").unwrap();
+        let typed = dir.path().join("*.py").to_string_lossy().to_string();
+        let s = suggestions(&typed, 10);
+        assert_eq!(s.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), vec!["a.py", "b.py"]);
+    }
+
+    #[test]
+    fn wildcard_question_mark_matches_one_char() {
+        let dir = setup();
+        std::fs::write(dir.path().join("v1.txt"), "x").unwrap();
+        std::fs::write(dir.path().join("v2.txt"), "x").unwrap();
+        std::fs::write(dir.path().join("v10.txt"), "x").unwrap();
+        let typed = dir.path().join("v?.txt").to_string_lossy().to_string();
+        let s = suggestions(&typed, 10);
+        assert_eq!(s.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), vec!["v1.txt", "v2.txt"]);
+    }
+
+    #[test]
+    fn wildcard_without_star_still_needs_exact_match() {
+        let dir = setup();
+        // "pro?" son exactamente 4 caracteres: ni "proyectos" (9) ni
+        // "proyectos-viejos" encajan, aunque ambos empiecen por "pro".
+        let typed = dir.path().join("pro?").to_string_lossy().to_string();
+        let s = suggestions(&typed, 10);
+        assert!(s.is_empty());
+    }
+
+    #[test]
+    fn is_glob_detects_wildcards() {
+        assert!(is_glob("*.py"));
+        assert!(is_glob("v?.txt"));
+        assert!(!is_glob("proyectos"));
     }
 
     #[test]
