@@ -21,6 +21,16 @@ const FONT_SIZE: f32 = 16.0;
 const BG: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.09, g: 0.09, b: 0.10, a: 1.0 };
 const FG: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.92, g: 0.92, b: 0.93, a: 1.0 };
 const SEL: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.30, g: 0.45, b: 0.85, a: 0.35 };
+/// Texto fantasma de la línea de ruta: la sugerencia que falta por escribir.
+const GHOST: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.55, g: 0.55, b: 0.58, a: 1.0 };
+/// `--danger` del tema, aproximado para modo oscuro: ruta con caracteres inválidos.
+const DANGER: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.85, g: 0.35, b: 0.35, a: 1.0 };
+/// Resaltado de coincidencias de búsqueda que no son la actual.
+const MATCH: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.95, g: 0.75, b: 0.20, a: 0.30 };
+/// Resaltado de la coincidencia actual de búsqueda: más marcado que el resto.
+const MATCH_CURRENT: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.95, g: 0.75, b: 0.20, a: 0.65 };
+/// `Aa`/`ab`/`.*` cuando la opción correspondiente está activada.
+const TOGGLE_ON: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.45, g: 0.65, b: 0.95, a: 1.0 };
 const PADDING_X: f32 = 8.0;
 const PADDING_TOP: f32 = 8.0;
 const CARET_WIDTH: f32 = 2.0;
@@ -40,6 +50,11 @@ pub struct Renderer {
     fg_brush: ID2D1SolidColorBrush,
     caret_brush: ID2D1SolidColorBrush,
     sel_brush: ID2D1SolidColorBrush,
+    ghost_brush: ID2D1SolidColorBrush,
+    danger_brush: ID2D1SolidColorBrush,
+    match_brush: ID2D1SolidColorBrush,
+    match_current_brush: ID2D1SolidColorBrush,
+    toggle_brush: ID2D1SolidColorBrush,
     line_height: f32,
     tab_rects: Vec<(f32, f32, f32, f32)>,
 }
@@ -78,6 +93,26 @@ impl Renderer {
                 &SEL,
                 Some(&D2D1_BRUSH_PROPERTIES { opacity: 1.0, transform: Matrix3x2::identity() }),
             )?;
+            let ghost_brush = target.CreateSolidColorBrush(
+                &GHOST,
+                Some(&D2D1_BRUSH_PROPERTIES { opacity: 1.0, transform: Matrix3x2::identity() }),
+            )?;
+            let danger_brush = target.CreateSolidColorBrush(
+                &DANGER,
+                Some(&D2D1_BRUSH_PROPERTIES { opacity: 1.0, transform: Matrix3x2::identity() }),
+            )?;
+            let match_brush = target.CreateSolidColorBrush(
+                &MATCH,
+                Some(&D2D1_BRUSH_PROPERTIES { opacity: 1.0, transform: Matrix3x2::identity() }),
+            )?;
+            let match_current_brush = target.CreateSolidColorBrush(
+                &MATCH_CURRENT,
+                Some(&D2D1_BRUSH_PROPERTIES { opacity: 1.0, transform: Matrix3x2::identity() }),
+            )?;
+            let toggle_brush = target.CreateSolidColorBrush(
+                &TOGGLE_ON,
+                Some(&D2D1_BRUSH_PROPERTIES { opacity: 1.0, transform: Matrix3x2::identity() }),
+            )?;
             let line_height = FONT_SIZE * 1.35;
             Ok(Self {
                 _d2d: d2d,
@@ -87,6 +122,11 @@ impl Renderer {
                 fg_brush,
                 caret_brush,
                 sel_brush,
+                ghost_brush,
+                danger_brush,
+                match_brush,
+                match_current_brush,
+                toggle_brush,
                 line_height,
                 tab_rects: Vec::new(),
             })
@@ -119,6 +159,10 @@ impl Renderer {
     }
 
     fn draw_text_line(&self, text: &str, x: f32, y: f32, max_width: f32) {
+        self.draw_text_line_with(text, x, y, max_width, &self.fg_brush);
+    }
+
+    fn draw_text_line_with(&self, text: &str, x: f32, y: f32, max_width: f32, brush: &ID2D1SolidColorBrush) {
         let wide: Vec<u16> = text.encode_utf16().collect();
         if wide.is_empty() {
             return;
@@ -127,14 +171,29 @@ impl Renderer {
             if let Ok(layout) =
                 self._dwrite.CreateTextLayout(&wide, &self.text_format, max_width, self.line_height)
             {
-                self.target.DrawTextLayout(
-                    Vector2 { X: x, Y: y },
-                    &layout,
-                    &self.fg_brush,
-                    D2D1_DRAW_TEXT_OPTIONS_NONE,
-                );
+                self.target.DrawTextLayout(Vector2 { X: x, Y: y }, &layout, brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
             }
         }
+    }
+
+    /// Ancho aproximado de `text` con la fuente actual (para colocar el texto fantasma
+    /// justo detrás de lo ya tecleado, o para posicionar los indicadores de búsqueda).
+    fn text_width(&self, text: &str) -> f32 {
+        let wide: Vec<u16> = text.encode_utf16().collect();
+        if wide.is_empty() {
+            return 0.0;
+        }
+        unsafe {
+            if let Ok(layout) =
+                self._dwrite.CreateTextLayout(&wide, &self.text_format, f32::MAX, self.line_height)
+            {
+                let mut metrics = Default::default();
+                if layout.GetMetrics(&mut metrics).is_ok() {
+                    return metrics.width;
+                }
+            }
+        }
+        0.0
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -187,6 +246,15 @@ impl Renderer {
         let sel = state.doc.selection();
         let sel_range = sel.range();
         let head = sel.head;
+
+        // Coincidencias de la búsqueda activa (si la hay), para resaltarlas al dibujar
+        // las líneas visibles. `current` es su índice dentro de `search_matches`.
+        let (search_matches, search_current): (Vec<std::ops::Range<usize>>, Option<usize>) = match &ws.prompt {
+            crate::Prompt::Find(s) | crate::Prompt::Replace(s) => {
+                (s.matches(&state.doc).unwrap_or_default(), Some(s.current))
+            }
+            _ => (Vec::new(), None),
+        };
 
         let show_tabs = ui.files == Files::Tabs
             && ui.tabs_position != notty_config::TabsPosition::Hidden
@@ -291,6 +359,32 @@ impl Renderer {
                     self.target.FillRectangle(&rect, &self.sel_brush);
                 }
 
+                // Resaltado de las coincidencias de búsqueda que caen en esta línea; se
+                // pinta antes del texto para que este quede legible por encima.
+                for (mi, m) in search_matches.iter().enumerate() {
+                    if m.start >= full_end || m.end <= start {
+                        continue;
+                    }
+                    let clamp_start = m.start.max(start);
+                    let clamp_end = m.end.min(text_end);
+                    if clamp_end <= clamp_start {
+                        continue;
+                    }
+                    let x0 = layout
+                        .as_ref()
+                        .map(|l| hit_test_x(l, &text, clamp_start - start, text_pad))
+                        .unwrap_or(text_pad);
+                    let x1 = layout
+                        .as_ref()
+                        .map(|l| hit_test_x(l, &text, clamp_end - start, text_pad))
+                        .unwrap_or(text_pad);
+                    let brush =
+                        if Some(mi) == search_current { &self.match_current_brush } else { &self.match_brush };
+                    let rect =
+                        D2D_RECT_F { left: x0, top: y, right: x1.max(x0 + 2.0), bottom: y + self.line_height };
+                    self.target.FillRectangle(&rect, brush);
+                }
+
                 if let Some(layout) = &layout {
                     self.target.DrawTextLayout(
                         Vector2 { X: text_pad, Y: y },
@@ -322,30 +416,108 @@ impl Renderer {
                 self.draw_text_line(crate::hints_text(false, false), PADDING_X, hints_top, size.width - PADDING_X);
             }
 
-            // Barra de estado: franja inferior con la posición del caret, codificación y EOL,
-            // alineada a la esquina inferior derecha.
-            let status = crate::status_line(&state.doc, state.encoding, state.eol);
             let status_top = size.height - self.line_height;
-            let status_wide: Vec<u16> = status.encode_utf16().collect();
-            if !status_wide.is_empty() {
-                if let Ok(layout) = self._dwrite.CreateTextLayout(
-                    &status_wide,
-                    &self.text_format,
-                    (size.width - PADDING_X).max(0.0),
-                    self.line_height,
-                ) {
-                    let _ = layout.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
-                    self.target.DrawTextLayout(
-                        Vector2 { X: 0.0, Y: status_top },
-                        &layout,
-                        &self.fg_brush,
-                        D2D1_DRAW_TEXT_OPTIONS_NONE,
-                    );
+
+            if matches!(ws.prompt, crate::Prompt::None) {
+                // Barra de estado normal: posición del caret, codificación y EOL,
+                // alineada a la esquina inferior derecha.
+                let status = crate::status_line(&state.doc, state.encoding, state.eol);
+                let status_wide: Vec<u16> = status.encode_utf16().collect();
+                if !status_wide.is_empty() {
+                    if let Ok(layout) = self._dwrite.CreateTextLayout(
+                        &status_wide,
+                        &self.text_format,
+                        (size.width - PADDING_X).max(0.0),
+                        self.line_height,
+                    ) {
+                        let _ = layout.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
+                        self.target.DrawTextLayout(
+                            Vector2 { X: 0.0, Y: status_top },
+                            &layout,
+                            &self.fg_brush,
+                            D2D1_DRAW_TEXT_OPTIONS_NONE,
+                        );
+                    }
                 }
+            } else {
+                // La barra de estado normal y el prompt nunca coexisten: mientras hay un
+                // prompt activo, la franja inferior es suya por completo.
+                self.draw_prompt(&ws.prompt, &state.doc, size.width, status_top);
             }
 
             let _ = self.target.EndDraw(None, None);
         }
+    }
+
+    /// Dibuja la línea de prompt (ruta, o buscar/reemplazar) en la franja que normalmente
+    /// ocupa la barra de estado, sustituyéndola por completo mientras esté activo.
+    fn draw_prompt(&self, prompt: &crate::Prompt, doc: &notty_core::Document, width: f32, top: f32) {
+        match prompt {
+            crate::Prompt::Path(p) => self.draw_path_prompt(p, width, top),
+            crate::Prompt::Find(s) => self.draw_search_prompt(s, doc, width, top, "buscar"),
+            crate::Prompt::Replace(s) => self.draw_search_prompt(s, doc, width, top, "reemplazar"),
+            crate::Prompt::None => {}
+        }
+    }
+
+    fn draw_path_prompt(&self, p: &crate::PathPromptState, width: f32, top: f32) {
+        let value_brush = if p.is_invalid() { &self.danger_brush } else { &self.fg_brush };
+        self.draw_text_line_with(&p.value, PADDING_X, top, width - PADDING_X, value_brush);
+
+        let ghost = p.ghost();
+        if !ghost.is_empty() {
+            let value_w = self.text_width(&p.value);
+            self.draw_text_line_with(&ghost, PADDING_X + value_w, top, width - PADDING_X - value_w, &self.ghost_brush);
+        }
+
+        // Caja de sugerencias, hasta 5 filas, justo encima de la barra de prompt; la
+        // fila `selected` queda resaltada con el mismo pincel que la pestaña activa.
+        let sugs = p.suggestions();
+        if !sugs.is_empty() {
+            let row_h = self.line_height;
+            let box_top = top - row_h * sugs.len() as f32;
+            unsafe {
+                for (i, entry) in sugs.iter().enumerate() {
+                    let row_top = box_top + row_h * i as f32;
+                    let rect = D2D_RECT_F { left: 0.0, top: row_top, right: width, bottom: row_top + row_h };
+                    if i == p.selected.min(sugs.len() - 1) {
+                        self.target.FillRectangle(&rect, &self.sel_brush);
+                    }
+                    let label = if entry.is_dir { format!("{}\\", entry.name) } else { entry.name.clone() };
+                    self.draw_text_line_with(&label, PADDING_X, row_top, width - PADDING_X, &self.fg_brush);
+                }
+            }
+        }
+    }
+
+    fn draw_search_prompt(
+        &self,
+        s: &crate::SearchState,
+        doc: &notty_core::Document,
+        width: f32,
+        top: f32,
+        verb: &str,
+    ) {
+        let mut line = format!("{verb}: {}", s.query);
+        if verb == "reemplazar" {
+            line.push_str(&format!("   →   por: {}", s.replacement));
+        }
+
+        // Indicadores `Aa`/`ab`/`.*` y el contador, alineados por la derecha; se calculan
+        // primero para saber cuánto ancho les queda al texto de la izquierda.
+        let count = s.count_label(doc);
+        let toggles = [("Aa", s.opts.case_sensitive), ("ab", s.opts.whole_word), (".*", s.opts.regex)];
+        let count_w = self.text_width(&count);
+        let mut x = (width - PADDING_X - count_w).max(PADDING_X);
+        self.draw_text_line_with(&count, x, top, count_w + 4.0, &self.fg_brush);
+        for (label, active) in toggles.iter().rev() {
+            let w = self.text_width(label) + 14.0;
+            x -= w;
+            let brush = if *active { &self.toggle_brush } else { &self.fg_brush };
+            self.draw_text_line_with(label, x, top, w, brush);
+        }
+
+        self.draw_text_line_with(&line, PADDING_X, top, (x - PADDING_X).max(0.0), &self.fg_brush);
     }
 }
 
