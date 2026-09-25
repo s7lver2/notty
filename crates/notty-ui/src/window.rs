@@ -122,9 +122,20 @@ pub fn run(path: Option<&str>, load: notty_config::LoadResult) -> Result<()> {
 
         let mut ws = crate::Workspace::new();
         if let Some(p) = path {
-            *ws.active_mut() = EditorState::from_opened(
-                crate::open_as_document(std::path::Path::new(p)).expect("no se pudo abrir el archivo"),
-            );
+            let p = std::path::Path::new(p);
+            match crate::open_as_document(p) {
+                Ok(opened) => *ws.active_mut() = EditorState::from_opened(opened),
+                Err(_) => {
+                    // No es texto (o no se pudo decodificar): se abre directamente en vista
+                    // raw, como pide la Task 7 de este plan.
+                    let mut state = EditorState::new_empty();
+                    state.path = Some(p.to_path_buf());
+                    if let Ok(raw) = crate::open_raw_doc(p) {
+                        state.raw = Some(raw);
+                    }
+                    *ws.active_mut() = state;
+                }
+            }
         }
         let renderer = Renderer::new(hwnd)?;
 

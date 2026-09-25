@@ -1102,7 +1102,7 @@ git commit -m "feat(ui): enruta el teclado a vim y a la vista raw"
 - Consumes: `EditorState.vim`, `EditorState.raw`, `hex_rows`, `Prompt::VimCmdline` (si la añadiste en la Task 6).
 - Produces: `Renderer::paint` dibuja, cuando `state.raw.is_some()`, la cuadrícula hexadecimal en vez del texto normal (una `IDWriteTextLayout` monoespaciada por fila de `hex_rows(raw)`, con el byte seleccionado resaltado con `sel_brush` y los bytes modificados (`raw.is_editing()` y distintos del valor original — si no guardas el original por separado, basta con resaltar todos los bytes mientras `is_editing()` sea `true` y aún no se haya guardado) en el color de acento); en la barra de estado, un icono de lápiz (dibuja un pequeño trazo con `FillRectangle`/`DrawLine`, no hace falta un glifo real) que aparece atenuado/deshabilitado si `!raw.writable_fs()` y resaltado si `raw.is_editing()`. Cuando `state.vim.is_some()`, la barra de estado muestra `"-- NORMAL --"` o `"-- INSERT --"` (o `"-- VISUAL --"`) según `state.vim.as_ref().unwrap().mode`, en el color de acento, a la izquierda de donde antes iba `status_line`.
 
-- [ ] **Step 1: Implementar**
+- [x] **Step 1: Implementar**
 
 Modifica `Renderer::paint`:
 
@@ -1113,7 +1113,7 @@ Modifica `Renderer::paint`:
 
 Ajusta cualquier firma de `windows` que haga falta al compilar.
 
-- [ ] **Step 2: Compilar y comprobar manualmente**
+- [x] **Step 2: Compilar y comprobar manualmente**
 
 Run: `cargo build --workspace`
 Expected: compila.
@@ -1126,7 +1126,7 @@ Expected (manual): se abre directamente en vista raw (por no ser texto), con off
 Run: `cargo run --bin notty -- /tmp/notas.txt` y pulsar `Ctrl+Alt+V`.
 Expected (manual): la barra de estado muestra `-- NORMAL --`; `i` cambia a `-- INSERT --` y se puede escribir normalmente; `Esc` vuelve a `-- NORMAL --`; `hjkl`, `dd`, `x`, `gg`/`G`, `u` funcionan como en vim; `:w` guarda y `:q` (en esta primera versión, sin gestión de "cerrar ventana si es la última", puede simplemente cerrar la pestaña activa reutilizando `ws.close_active()`).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add crates/notty-ui

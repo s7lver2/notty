@@ -245,6 +245,76 @@ impl Renderer {
         }
     }
 
+    /// Dibuja las filas de la cuadrícula hexadecimal visibles (`range`), resaltando el
+    /// byte seleccionado (`state.raw_cursor`) sobre la parte hex y la parte ascii.
+    fn paint_raw_rows(
+        &self,
+        rows: &[String],
+        range: std::ops::Range<usize>,
+        state: &EditorState,
+        text_pad: f32,
+        y: &mut f32,
+        bottom: f32,
+    ) {
+        const PREFIX_LEN: usize = 11; // "XXXXXXXX   " (8 dígitos de offset + 3 espacios)
+        const HEX_FIELD_LEN: usize = 16 * 3 + 1; // 16 × "XX " + el espacio doble tras el 8º byte
+        let ascii_start = PREFIX_LEN + HEX_FIELD_LEN + 1;
+
+        let is_editing = state.raw.as_ref().is_some_and(|r| r.is_editing());
+        let selected_row = state.raw_cursor / 16;
+        let selected_col = state.raw_cursor % 16;
+
+        for row_idx in range {
+            let Some(row_text) = rows.get(row_idx) else { break };
+            let wide: Vec<u16> = row_text.encode_utf16().collect();
+            let layout = if wide.is_empty() {
+                None
+            } else {
+                unsafe { self._dwrite.CreateTextLayout(&wide, &self.text_format, f32::MAX, self.line_height).ok() }
+            };
+
+            if row_idx == selected_row {
+                if let Some(l) = layout.as_ref() {
+                    let hex_off = PREFIX_LEN + selected_col * 3 + if selected_col >= 8 { 1 } else { 0 };
+                    let brush = if is_editing { &self.toggle_brush } else { &self.sel_brush };
+                    unsafe {
+                        let x0 = hit_test_x(l, row_text, hex_off, text_pad);
+                        let x1 = hit_test_x(l, row_text, hex_off + 2, text_pad);
+                        let rect =
+                            D2D_RECT_F { left: x0, top: *y, right: x1.max(x0 + 2.0), bottom: *y + self.line_height };
+                        self.target.FillRectangle(&rect, brush);
+
+                        let ax0 = hit_test_x(l, row_text, ascii_start + selected_col, text_pad);
+                        let ax1 = hit_test_x(l, row_text, ascii_start + selected_col + 1, text_pad);
+                        let arect = D2D_RECT_F {
+                            left: ax0,
+                            top: *y,
+                            right: ax1.max(ax0 + 2.0),
+                            bottom: *y + self.line_height,
+                        };
+                        self.target.FillRectangle(&arect, brush);
+                    }
+                }
+            }
+
+            if let Some(l) = &layout {
+                unsafe {
+                    self.target.DrawTextLayout(
+                        Vector2 { X: text_pad, Y: *y },
+                        l,
+                        &self.fg_brush,
+                        D2D1_DRAW_TEXT_OPTIONS_NONE,
+                    );
+                }
+            }
+
+            *y += self.line_height;
+            if *y > bottom {
+                break;
+            }
+        }
+    }
+
     /// Dibuja fondo + las líneas visibles del documento activo de `ws`, con selección
     /// y caret, además de las franjas de pestañas/menú/atajos/gutter según `ui`.
     pub fn paint(&mut self, ws: &Workspace, ui: &UiConfig) {
@@ -252,7 +322,10 @@ impl Renderer {
         self.pencil_rect = None;
         let state = ws.active();
         let buf = state.doc.buffer();
-        let total_lines = buf.len_lines();
+        let is_raw = state.raw.is_some();
+        // En vista raw cada "línea" a efectos de scroll/paginado es una fila de 16 bytes.
+        let raw_rows: Option<Vec<String>> = state.raw.as_ref().map(crate::hex_rows);
+        let total_lines = raw_rows.as_ref().map_or_else(|| buf.len_lines(), |r| r.len().max(1));
         let range = state.viewport.range(total_lines);
         let sel = state.doc.selection();
         let sel_range = sel.range();
@@ -304,7 +377,7 @@ impl Renderer {
                 top += self.line_height;
             }
 
-            let gutter_w = if ui.line_numbers {
+            let gutter_w = if !is_raw && ui.line_numbers {
                 crate::gutter_width(total_lines, self.digit_width())
             } else {
                 0.0
@@ -317,6 +390,10 @@ impl Renderer {
 
             let text_pad = PADDING_X + gutter_w;
             let mut y = top + PADDING_TOP;
+
+            if let Some(rows) = &raw_rows {
+                self.paint_raw_rows(rows, range.clone(), state, text_pad, &mut y, size.height - bottom_reserved);
+            } else {
             for line in range {
                 let start = buf.line_start(line);
                 let full_end = if line + 1 < total_lines { buf.line_start(line + 1) } else { buf.len_chars() };
@@ -421,6 +498,7 @@ impl Renderer {
                     break;
                 }
             }
+            }
 
             if show_hints {
                 let hints_top = size.height - bottom_reserved;
@@ -428,6 +506,33 @@ impl Renderer {
             }
 
             let status_top = size.height - self.line_height;
+
+            if let Some(vim) = &state.vim {
+                let label = match vim.mode {
+                    crate::VimMode::Normal => "-- NORMAL --",
+                    crate::VimMode::Insert => "-- INSERT --",
+                    crate::VimMode::Visual => "-- VISUAL --",
+                };
+                self.draw_text_line_with(label, PADDING_X, status_top, 200.0, &self.toggle_brush);
+            }
+
+            if let Some(raw) = state.raw.as_ref() {
+                // Icono de lápiz: un simple cuadrado (no hace falta un glifo real), atenuado
+                // si el archivo no admite escritura y resaltado mientras se está editando.
+                let icon = 14.0f32;
+                let px = size.width - PADDING_X - icon;
+                let py = status_top + (self.line_height - icon) / 2.0;
+                let rect = D2D_RECT_F { left: px, top: py, right: px + icon, bottom: py + icon };
+                let brush = if raw.is_editing() {
+                    &self.toggle_brush
+                } else if raw.writable_fs() {
+                    &self.fg_brush
+                } else {
+                    &self.ghost_brush
+                };
+                self.target.FillRectangle(&rect, brush);
+                self.pencil_rect = Some((rect.left, rect.top, rect.right, rect.bottom));
+            }
 
             if matches!(ws.prompt, crate::Prompt::None) {
                 // Barra de estado normal: posición del caret, codificación y EOL,
