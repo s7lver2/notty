@@ -81,6 +81,9 @@ struct WindowState {
     /// desplazamiento). `None` en reposo. Se limpia sola cuando `is_done`, no hace
     /// falta borrarla al cerrar el menú (al cerrarse ya no se dibuja).
     popup_open_anim: Option<crate::Anim>,
+    /// Animación en curso del fundido de fondo de la pestaña activa al cambiar de
+    /// pestaña. `None` en reposo.
+    tab_switch_anim: Option<crate::Anim>,
     /// Si el `SetTimer` de animación (`ID_ANIM_TIMER`) está corriendo.
     anim_timer_running: bool,
 }
@@ -110,6 +113,7 @@ impl WindowState {
             menu_bar_visible: self.menu_bar_visible(),
             open_menu: self.open_menu,
             popup_open: self.popup_open_anim.map(|a| a.value(std::time::Instant::now(), 0.0, 1.0)),
+            tab_switch: self.tab_switch_anim.map(|a| a.value(std::time::Instant::now(), 0.0, 1.0)),
         }
     }
 
@@ -145,6 +149,13 @@ fn ensure_anim_timer(w: &mut WindowState, hwnd: HWND) {
 fn start_popup_anim(w: &mut WindowState, hwnd: HWND) {
     w.popup_open_anim =
         Some(crate::Anim::new_maybe(std::time::Instant::now(), std::time::Duration::from_millis(120), w.animations_enabled));
+    ensure_anim_timer(w, hwnd);
+}
+
+/// Arranca (o reinicia) la animación de fundido de fondo de la pestaña activa.
+fn start_tab_switch_anim(w: &mut WindowState, hwnd: HWND) {
+    w.tab_switch_anim =
+        Some(crate::Anim::new_maybe(std::time::Instant::now(), std::time::Duration::from_millis(100), w.animations_enabled));
     ensure_anim_timer(w, hwnd);
 }
 
@@ -550,6 +561,7 @@ fn run_inner(
             ipc_rx,
             animations_enabled: system_animations_enabled(),
             popup_open_anim: None,
+            tab_switch_anim: None,
             anim_timer_running: false,
         });
         let ptr = Box::into_raw(window_state);
@@ -869,8 +881,14 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                                     &cfg,
                                 ));
                             }
-                            notty_input::UiCommand::NextTab => w.ws.next(),
-                            notty_input::UiCommand::PrevTab => w.ws.prev(),
+                            notty_input::UiCommand::NextTab => {
+                                w.ws.next();
+                                start_tab_switch_anim(w, hwnd);
+                            }
+                            notty_input::UiCommand::PrevTab => {
+                                w.ws.prev();
+                                start_tab_switch_anim(w, hwnd);
+                            }
                             notty_input::UiCommand::CloseTab => {
                                 w.ws.close_active();
                             }
@@ -1057,6 +1075,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         }
                         crate::Hit::Tab(i) => {
                             w.ws.activate(i);
+                            start_tab_switch_anim(w, hwnd);
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                         crate::Hit::TabClose(i) => {
@@ -1216,9 +1235,14 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 if wparam.0 == ID_ANIM_TIMER {
                     if let Some(w) = ptr.as_mut() {
                         let now = std::time::Instant::now();
-                        let still_animating = w.popup_open_anim.as_ref().is_some_and(|a| !a.is_done(now));
-                        if !still_animating {
+                        if w.popup_open_anim.is_some_and(|a| a.is_done(now)) {
                             w.popup_open_anim = None;
+                        }
+                        if w.tab_switch_anim.is_some_and(|a| a.is_done(now)) {
+                            w.tab_switch_anim = None;
+                        }
+                        let still_animating = w.popup_open_anim.is_some() || w.tab_switch_anim.is_some();
+                        if !still_animating {
                             let _ = KillTimer(Some(hwnd), ID_ANIM_TIMER);
                             w.anim_timer_running = false;
                         }

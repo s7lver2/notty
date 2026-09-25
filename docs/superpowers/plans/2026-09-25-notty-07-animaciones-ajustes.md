@@ -292,10 +292,10 @@ En `draw_dropdown` (menú de la barra) y en `draw_suggestions` (línea de ruta):
 - Modify: `crates/notty-ui/src/window.rs`
 - Modify: `crates/notty-ui/src/render.rs`
 
-- [ ] **Step 1:** Añade `tab_switch_anim: Option<crate::Anim>` a `WindowState`. Donde ya se cambia `ws.activate(i)` / `ws.next()` / `ws.prev()` (clic en pestaña, `Ctrl+Tab`, `Ctrl+Shift+Tab`), arranca la animación igual que en la Task 3 (`Duration::from_millis(100)`) y llama a `ensure_anim_timer`. Añade su comprobación de `is_done` junto a la de `popup_open_anim` en el `WM_TIMER` de la Task 3 (un único temporizador sirve para todas las animaciones: el `WM_TIMER` sigue corriendo mientras *cualquiera* de los campos de animación esté activo, y se para solo cuando *todos* han terminado).
-- [ ] **Step 2:** En `draw_tabs_row` (`render.rs`), añade `tab_switch: Option<f32>` a `ViewState` igual que `popup_open`. Al pintar la pestaña activa, en vez de `pal.surface` a opacidad plena desde el primer frame, interpola su alpha de fondo desde 0 hasta la de `pal.surface` con el progreso de `tab_switch` (si es `None` o ya vale `1.0`, se pinta igual que ahora, sin coste extra).
-- [ ] **Step 3:** Compilar, capturar el estado final tras cambiar de pestaña (debe verse idéntico a antes de este plan).
-- [ ] **Step 4: Commit** `feat(ui): la pestaña activa funde su fondo al cambiar en vez de aparecer de golpe`
+- [x] **Step 1:** Añade `tab_switch_anim: Option<crate::Anim>` a `WindowState`. Donde ya se cambia `ws.activate(i)` / `ws.next()` / `ws.prev()` (clic en pestaña, `Ctrl+Tab`, `Ctrl+Shift+Tab`), arranca la animación igual que en la Task 3 (`Duration::from_millis(100)`) y llama a `ensure_anim_timer`. Añade su comprobación de `is_done` junto a la de `popup_open_anim` en el `WM_TIMER` de la Task 3 (un único temporizador sirve para todas las animaciones: el `WM_TIMER` sigue corriendo mientras *cualquiera* de los campos de animación esté activo, y se para solo cuando *todos* han terminado).
+- [x] **Step 2:** En `draw_tabs_row` (`render.rs`), añade `tab_switch: Option<f32>` a `ViewState` igual que `popup_open`. Al pintar la pestaña activa, en vez de `pal.surface` a opacidad plena desde el primer frame, interpola su alpha de fondo desde 0 hasta la de `pal.surface` con el progreso de `tab_switch` (si es `None` o ya vale `1.0`, se pinta igual que ahora, sin coste extra).
+- [x] **Step 3:** Compilar, capturar el estado final tras cambiar de pestaña (debe verse idéntico a antes de este plan).
+- [x] **Step 4: Commit** `feat(ui): la pestaña activa funde su fondo al cambiar en vez de aparecer de golpe`
 
 ---
 

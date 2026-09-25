@@ -89,6 +89,9 @@ pub struct ViewState {
     /// caja de sugerencias, si hay uno en curso. `None` en reposo (dibuja igual que
     /// siempre, sin coste extra).
     pub popup_open: Option<f32>,
+    /// Progreso (`0.0..=1.0`) del fundido del fondo de la pestaña activa al cambiar,
+    /// si hay uno en curso. `None` en reposo (se pinta igual que siempre).
+    pub tab_switch: Option<f32>,
 }
 
 /// Los formatos de texto fijos que usa la maqueta, creados una vez en `Renderer::new`.
@@ -880,8 +883,12 @@ impl Renderer {
                 let active = i == ws.active_index();
                 let hovered_tab = view.hover == Hit::Tab(i) || view.hover == Hit::TabClose(i);
                 if active {
-                    self.fill_round(t.rect, layout::TAB_RADIUS, pal.surface);
-                    self.fill(Rect::new(t.rect.left, t.rect.bottom - layout::TAB_RADIUS, t.rect.right, t.rect.bottom), pal.surface);
+                    // La pestaña activa funde su fondo desde transparente en vez de
+                    // aparecer de golpe al cambiar (Task 4 del plan de animaciones);
+                    // `t == None`/`1.0` pinta exactamente igual que antes.
+                    let bg = pal.surface.faded(view.tab_switch.unwrap_or(1.0));
+                    self.fill_round(t.rect, layout::TAB_RADIUS, bg);
+                    self.fill(Rect::new(t.rect.left, t.rect.bottom - layout::TAB_RADIUS, t.rect.right, t.rect.bottom), bg);
                 } else if hovered_tab {
                     self.fill_round(t.rect, layout::TAB_RADIUS, pal.hover);
                     self.fill(Rect::new(t.rect.left, t.rect.bottom - layout::TAB_RADIUS, t.rect.right, t.rect.bottom), pal.hover);
