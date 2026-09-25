@@ -70,6 +70,9 @@ struct WindowState {
     /// no llegó a arrancar (no debería pasar en la instancia con ventana, pero se trata
     /// como "nadie más pide abrir nada" en vez de entrar en pánico).
     ipc_rx: Option<std::sync::mpsc::Receiver<notty_ipc::Message>>,
+    /// Si las animaciones del sistema están activadas (Accesibilidad → Efectos
+    /// visuales); calculado una vez al arrancar, ver `system_animations_enabled`.
+    animations_enabled: bool,
 }
 
 impl WindowState {
@@ -515,6 +518,7 @@ fn run_inner(
             open_menu: None,
             recovery,
             ipc_rx,
+            animations_enabled: system_animations_enabled(),
         });
         let ptr = Box::into_raw(window_state);
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, ptr as isize);
@@ -602,6 +606,22 @@ pub(crate) fn system_uses_dark_mode() -> bool {
             Some(&mut size),
         );
         ok.is_ok() && data == 0
+    }
+}
+
+/// Si el usuario desactivó las animaciones del sistema (Accesibilidad → Efectos
+/// visuales), las de notty también se saltan. Se consulta una vez al arrancar la
+/// ventana y se guarda en `WindowState`; no hace falta escuchar cambios en caliente.
+fn system_animations_enabled() -> bool {
+    unsafe {
+        let mut enabled = windows::core::BOOL(1);
+        let ok = windows::Win32::UI::WindowsAndMessaging::SystemParametersInfoW(
+            windows::Win32::UI::WindowsAndMessaging::SPI_GETCLIENTAREAANIMATION,
+            0,
+            Some(&mut enabled as *mut _ as *mut core::ffi::c_void),
+            Default::default(),
+        );
+        ok.is_err() || enabled.as_bool()
     }
 }
 

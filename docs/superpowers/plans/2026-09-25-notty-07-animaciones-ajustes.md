@@ -169,7 +169,7 @@ Expected: PASS, +6 tests.
 **Files:**
 - Modify: `crates/notty-ui/src/window.rs`
 
-- [ ] **Step 1:** Añade una función que consulte `SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &mut BOOL, 0)` (constantes en `windows::Win32::UI::WindowsAndMessaging`; si la constante exacta no existe con ese nombre en `windows` 0.62.2, usa su valor numérico `0x1042` con `SystemParametersInfoW` genérico — documenta cuál de las dos rutas usaste). Si la llamada falla, asume `true` (animar por defecto; no es un caso que deba silenciar la interfaz).
+- [x] **Step 1:** Añade una función que consulte `SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &mut BOOL, 0)` (constantes en `windows::Win32::UI::WindowsAndMessaging`; si la constante exacta no existe con ese nombre en `windows` 0.62.2, usa su valor numérico `0x1042` con `SystemParametersInfoW` genérico — documenta cuál de las dos rutas usaste). Si la llamada falla, asume `true` (animar por defecto; no es un caso que deba silenciar la interfaz).
 
 ```rust
 /// Si el usuario desactivó las animaciones del sistema (Accesibilidad → Efectos
@@ -189,9 +189,9 @@ fn system_animations_enabled() -> bool {
 }
 ```
 
-- [ ] **Step 2:** Guarda el resultado en `WindowState.animations_enabled: bool`, calculado una vez en `run()` al crear el estado.
-- [ ] **Step 3:** Compila (`cargo build --workspace`). No hay test automático razonable para esto (depende de configuración real de Windows); verifícalo leyendo el código, no hace falta probarlo a mano.
-- [ ] **Step 4: Commit** `feat(ui): respeta si el usuario desactivó las animaciones del sistema`
+- [x] **Step 2:** Guarda el resultado en `WindowState.animations_enabled: bool`, calculado una vez en `run()` al crear el estado.
+- [x] **Step 3:** Compila (`cargo build --workspace`). No hay test automático razonable para esto (depende de configuración real de Windows); verifícalo leyendo el código, no hace falta probarlo a mano.
+- [x] **Step 4: Commit** `feat(ui): respeta si el usuario desactivó las animaciones del sistema`
 
 ---
 
