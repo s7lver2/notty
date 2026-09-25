@@ -1,0 +1,12 @@
+Lista de la compra
+- leche
+- pan de centeno
+- café
+
+Llamar a Juan antes de las 6.
+Preguntarle a Juan por la furgoneta del sábado.
+
+Ideas para notty
+- abrir cualquier archivo: texto o raw
+- temporales con un atajo global
+- buscar con Ctrl+F, reemplazar con Ctrl+H

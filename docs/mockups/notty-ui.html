@@ -1146,6 +1146,23 @@ function applyTheme() {
 function render() { renderChrome(); renderHints(); renderStatus(); if (doc().kind === 'raw') renderHex(); renderBackdrop(); }
 applyTheme(); renderRig(); render(); loadEditor();
 ta.focus(); ta.setSelectionRange(0, 0);
+
+/* ================= capturas de referencia: ?shot=<escenario> ================= */
+const Q = new URLSearchParams(location.search);
+if (Q.has('shot')) {
+  $('.rig').hidden = true; document.body.style.gridTemplateColumns = '1fr'; win.style.height = '600px';
+  if (Q.get('preset')) setSetting('preset', Q.get('preset'));
+  if (Q.get('theme')) setSetting('theme', Q.get('theme'));
+  const shot = Q.get('shot');
+  if (shot === 'open' || shot === 'save') { openPrompt('path', { purpose: shot, value: '' }); S.prompt.value = normPath(Q.get('value') || ''); render(); }
+  else if (shot === 'find' || shot === 'replace') { openPrompt(shot); S.find.q = Q.get('q') || ''; S.find.rep = Q.get('rep') || ''; render(); syncEditor(); }
+  else if (shot === 'vim') { S.vim = true; S.vmode = Q.get('mode') || 'NORMAL'; render(); }
+  else if (shot === 'bin' || shot === 'binro') { scenario(shot); hexSel = 0; render(); }
+  else if (shot === 'dirty') { doc().dirty = true; render(); }
+  else if (shot !== 'default') scenario(shot);
+  render(); if (S.settings) renderSettings();
+  $('#pin')?.blur(); ta.blur();
+}
 </script>
 </body>
 </html>
