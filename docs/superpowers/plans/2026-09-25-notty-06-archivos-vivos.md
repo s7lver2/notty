@@ -523,7 +523,7 @@ git commit -m "feat(io): detecta si un archivo cambió en disco desde que se abr
   - `pub fn encode(msg: &Message) -> Vec<u8>`: una línea UTF-8 terminada en `\n`: `"OPEN <ruta>\n"`, `"NEW_TEMP\n"` o `"NEW_PERMANENT\n"`.
   - `pub fn decode(bytes: &[u8]) -> Option<Message>`: la operación inversa; `None` si no reconoce el formato.
 
-- [ ] **Step 1: Crear el crate y los tests que fallan**
+- [x] **Step 1: Crear el crate y los tests que fallan**
 
 `crates/notty-ipc/Cargo.toml`:
 
@@ -571,12 +571,12 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Ejecutar y ver que falla**
+- [x] **Step 2: Ejecutar y ver que falla**
 
 Run: `cargo test -p notty-ipc`
 Expected: FAIL de compilación, `cannot find type Message`.
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 Añadir **encima** del módulo de tests en `crates/notty-ipc/src/lib.rs`:
 
@@ -614,12 +614,12 @@ pub fn decode(bytes: &[u8]) -> Option<Message> {
 }
 ```
 
-- [ ] **Step 4: Ejecutar y ver que pasa**
+- [x] **Step 4: Ejecutar y ver que pasa**
 
 Run: `cargo test --workspace`
 Expected: PASS, +5 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Cargo.lock crates/notty-ipc
