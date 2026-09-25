@@ -418,7 +418,7 @@ git commit -m "feat(io): rutas de borradores y volcado/lectura de recuperación"
 - Consumes: `std::fs::metadata`.
 - Produces: `pub fn mtime(path: &Path) -> std::io::Result<std::time::SystemTime>` y `pub fn changed_since(path: &Path, since: std::time::SystemTime) -> bool` (`true` si `mtime(path)` es estrictamente posterior a `since`, o si `mtime` falla porque el archivo ya no existe — un archivo borrado también cuenta como "cambiado").
 
-- [ ] **Step 1: Escribir los tests que fallan**
+- [x] **Step 1: Escribir los tests que fallan**
 
 `crates/notty-io/src/watch.rs`:
 
@@ -459,14 +459,14 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Ejecutar y ver que falla**
+- [x] **Step 2: Ejecutar y ver que falla**
 
 Añadir `mod watch;` a `crates/notty-io/src/lib.rs`.
 
 Run: `cargo test -p notty-io watch`
 Expected: FAIL de compilación, `cannot find function mtime`.
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 Añadir **encima** del módulo de tests en `crates/notty-io/src/watch.rs`:
 
@@ -486,12 +486,12 @@ pub fn changed_since(path: &Path, since: SystemTime) -> bool {
 }
 ```
 
-- [ ] **Step 4: Ejecutar y ver que pasa**
+- [x] **Step 4: Ejecutar y ver que pasa**
 
 Run: `cargo test --workspace`
 Expected: PASS, +3 tests.
 
-- [ ] **Step 5: Exportar**
+- [x] **Step 5: Exportar**
 
 `crates/notty-io/src/lib.rs` añade:
 
@@ -499,7 +499,7 @@ Expected: PASS, +3 tests.
 pub use watch::{changed_since, mtime};
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/notty-io
