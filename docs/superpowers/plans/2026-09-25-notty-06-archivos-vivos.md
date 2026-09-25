@@ -1241,32 +1241,149 @@ git commit -m "feat(daemon): bandeja, atajos globales y acceso directo .lnk alte
 
 ### Task 10: Ajustes — secciones Archivos y Atajo global, y `vim_always` al crear documentos
 
+> **Nota de contexto (Plan 5b ya hecho):** cuando se escribió esta tarea, la ventana de
+> Ajustes todavía se dibujaba con controles nativos de Win32 (`radio`/`checkbox` +
+> `apply_control`, un patrón por `ID_*`). El Plan 5b (ajuste visual) la reescribió por
+> completo: ahora es una ventana propia dibujada con Direct2D (como el resto de la app),
+> cuyo contenido sale de un modelo puro y testeable en `crates/notty-ui/src/settings_model.rs`
+> (`SECTIONS`/`Row`/`SettingKey`/`SettingValue`/`apply`) — `settings_window.rs` solo dibuja
+> lo que ese modelo describe y hace hit-testing genérico por tipo de `Row`, sin nada
+> específico de cada ajuste. Esta versión de la Task 10 está adaptada a esa arquitectura
+> real; ignora cualquier mención a `ID_*`/`radio`/`checkbox`/`apply_control` de la
+> descripción original, que ya no existen.
+
 **Files:**
-- Modify: `crates/notty-ui/src/settings_window.rs`
+- Modify: `crates/notty-ui/src/settings_model.rs`
 - Modify: `crates/notty-ui/src/window.rs`
 
 **Interfaces:**
 - Consumes: `cfg.files`, `cfg.hotkey`.
-- Produces: la ventana de Ajustes (Planes 3 y 5) gana dos secciones más: radios de `temp_mode` (Borrador/Volátil), casilla de `autosave`, y (documentado como fuera de alcance de controles de texto libre en este plan — ver nota) los radios de `hotkey.mechanism` (Segundo plano/Acceso directo) y casilla `start_with_windows`. Además, `window.rs` pasa a leer `cfg.borrow().ui.vim_always` al crear cualquier `EditorState` nuevo (pestaña nueva, documento abierto) para arrancarlo ya con `vim: Some(VimState::default())` si está activado.
+- Produces: `SECTIONS` gana dos secciones más, **Archivos** y **Atajo global**, con las mismas filas que ya describía el Plan 5b como diferidas a este plan: `temp_mode` (Borrador/Volátil) y `autosave` en Archivos; `hotkey.mechanism` (Segundo plano/Acceso directo) y `start_with_windows` en Atajo global. `default_extension` y `large_file_mb` (campos de texto libre en la maqueta) **no** se añaden aquí — `Row` no tiene todavía una variante de campo de texto editable, y merece su propio ciclo TDD en el Plan 7 en vez de improvisarse. Quedan con sus valores por defecto (`.txt`, `50`), editables solo a mano en `config.toml`. Además, `window.rs` pasa a leer `cfg.borrow().ui.vim_always` al crear cualquier `EditorState` nuevo (pestaña nueva, documento abierto, mensaje del pipe, flags `--new-temp`/`--new-permanent`) para arrancarlo ya con `vim: Some(VimState::default())` si está activado.
 
-- [ ] **Step 1: Añadir los controles a Ajustes**
+- [ ] **Step 1: Escribir los tests que fallan**
 
-En `crates/notty-ui/src/settings_window.rs`, añadir ids nuevos:
+Añadir a `mod tests` en `crates/notty-ui/src/settings_model.rs`:
 
 ```rust
-const ID_TEMP_DRAFT: usize = 140;
-const ID_TEMP_VOLATILE: usize = 141;
-const ID_AUTOSAVE: usize = 142;
-const ID_HOTKEY_DAEMON: usize = 150;
-const ID_HOTKEY_LNK: usize = 151;
-const ID_START_WITH_WINDOWS: usize = 152;
+    #[test]
+    fn archivos_and_atajo_global_sections_exist() {
+        let names: Vec<&str> = SECTIONS.iter().map(|s| s.name).collect();
+        assert_eq!(names, ["Apariencia", "Ventana", "Teclado", "Archivos", "Atajo global"]);
+    }
+
+    #[test]
+    fn applying_temp_mode_and_autosave_touches_files_not_ui_preset() {
+        let mut cfg = Config::default();
+        let preset_before = cfg.ui.preset;
+        apply(&mut cfg, SettingKey::TempMode, SettingValue::TempMode(notty_config::TempMode::Volatile));
+        apply(&mut cfg, SettingKey::Autosave, SettingValue::Bool(true));
+        assert_eq!(cfg.files.temp_mode, notty_config::TempMode::Volatile);
+        assert!(cfg.files.autosave);
+        // Archivos/Atajo global no son piezas de un preset de Apariencia: no lo tocan.
+        assert_eq!(cfg.ui.preset, preset_before);
+    }
+
+    #[test]
+    fn applying_hotkey_settings_touches_hotkey_not_ui() {
+        let mut cfg = Config::default();
+        apply(&mut cfg, SettingKey::HotkeyMechanism, SettingValue::HotkeyMechanism(notty_config::HotkeyMechanism::Lnk));
+        apply(&mut cfg, SettingKey::StartWithWindows, SettingValue::Bool(false));
+        assert_eq!(cfg.hotkey.mechanism, notty_config::HotkeyMechanism::Lnk);
+        assert!(!cfg.hotkey.start_with_windows);
+    }
 ```
 
-Y las llamadas a `radio`/`checkbox` correspondientes (mismo patrón que ya usan preset/tema/pestañas desde el Plan 3), en dos grupos nuevos por debajo de los ya existentes, con sus etiquetas en español ("Archivos temporales: Borrador"/"Volátil", "Autoguardado", "Atajo global: Segundo plano"/"Acceso directo", "Iniciar con Windows"). En `apply_control`, los brazos correspondientes actualizan `cfg.files.temp_mode`, `cfg.files.autosave`, `cfg.hotkey.mechanism`, `cfg.hotkey.start_with_windows` y guardan con `notty_config::save` igual que el resto.
+- [ ] **Step 2: Ejecutar y ver que falla**
 
-Nota de alcance: `default_extension` y `large_file_mb` (campos de texto libre en la maqueta) **no** se añaden en esta tarea — un campo de texto Win32 editable (`ES_AUTOHSCROLL`) que valide su contenido al perder el foco es un patrón distinto al de radios/casillas ya usado, y merece su propio ciclo TDD en el plan de pulido general (Plan 7) en vez de improvisarse aquí. Quedan con sus valores por defecto (`.txt`, `50`) editables solo a mano en `config.toml`.
+Run: `cargo test -p notty-ui settings_model`
+Expected: FAIL de compilación, `no variant named TempMode` (o similar).
 
-- [ ] **Step 2: `vim_always` al crear documentos**
+- [ ] **Step 3: Implementar**
+
+En `crates/notty-ui/src/settings_model.rs`:
+
+1. Importar `notty_config::{FilesConfig, HotkeyConfig, HotkeyMechanism, TempMode}` (los que hagan falta) junto al resto de `use`.
+2. Añadir a `SettingKey`: `TempMode, Autosave, HotkeyMechanism, StartWithWindows`.
+3. Añadir a `SettingValue`: `TempMode(TempMode), HotkeyMechanism(HotkeyMechanism)` (`Bool` ya sirve para `Autosave`/`StartWithWindows`).
+4. Dos constantes de filas nuevas, con los mismos textos que ya traía la versión original de esta tarea:
+
+```rust
+const ARCHIVOS: &[Row] = &[
+    Row::Seg {
+        title: "Archivos temporales",
+        desc: "Borrador: se guarda solo y se borra al cerrar si no le das ruta. Volátil: nunca toca el disco.",
+        key: SettingKey::TempMode,
+        options: &[
+            ("Borrador", SettingValue::TempMode(TempMode::Draft)),
+            ("Volátil", SettingValue::TempMode(TempMode::Volatile)),
+        ],
+    },
+    Row::Toggle {
+        title: "Autoguardado",
+        desc: "Guarda sola tras dejar de escribir. Solo si el archivo ya tiene ruta.",
+        key: SettingKey::Autosave,
+    },
+];
+
+const ATAJO_GLOBAL: &[Row] = &[
+    Row::Seg {
+        title: "Cómo se escucha el atajo",
+        desc: "Segundo plano: ~1 MB de RAM, cualquier combinación, instantáneo. Acceso directo: nada residente, solo Ctrl+Alt+letra.",
+        key: SettingKey::HotkeyMechanism,
+        options: &[
+            ("Segundo plano", SettingValue::HotkeyMechanism(HotkeyMechanism::Daemon)),
+            ("Acceso directo", SettingValue::HotkeyMechanism(HotkeyMechanism::Lnk)),
+        ],
+    },
+    Row::Kbd { title: "Nuevo temporal", keys: "Win+Alt+N" },
+    Row::Kbd { title: "Nuevo permanente", keys: "Win+Alt+Shift+N" },
+    Row::Toggle { title: "Iniciar con Windows", desc: "", key: SettingKey::StartWithWindows },
+];
+```
+
+5. Añadir ambas a `SECTIONS`:
+
+```rust
+pub const SECTIONS: &[Section] = &[
+    Section { id: "apariencia", name: "Apariencia", rows: APARIENCIA },
+    Section { id: "ventana", name: "Ventana", rows: VENTANA },
+    Section { id: "teclado", name: "Teclado", rows: TECLADO },
+    Section { id: "archivos", name: "Archivos", rows: ARCHIVOS },
+    Section { id: "atajo_global", name: "Atajo global", rows: ATAJO_GLOBAL },
+];
+```
+
+6. En `apply`, los cuatro ajustes nuevos van en su propio `match` que actualiza `cfg.files`/`cfg.hotkey` y **no** toca `cfg.ui.preset` (a diferencia del resto, que sí lo marca `Custom` al final): sepáralos del `match` existente con un `return` propio, por ejemplo:
+
+```rust
+pub fn apply(cfg: &mut Config, key: SettingKey, value: SettingValue) {
+    if let (SettingKey::Preset, SettingValue::Preset(p)) = (key, value) {
+        notty_config::apply_preset(&mut cfg.ui, p);
+        return;
+    }
+    match (key, value) {
+        (SettingKey::TempMode, SettingValue::TempMode(m)) => { cfg.files.temp_mode = m; return; }
+        (SettingKey::Autosave, SettingValue::Bool(b)) => { cfg.files.autosave = b; return; }
+        (SettingKey::HotkeyMechanism, SettingValue::HotkeyMechanism(m)) => { cfg.hotkey.mechanism = m; return; }
+        (SettingKey::StartWithWindows, SettingValue::Bool(b)) => { cfg.hotkey.start_with_windows = b; return; }
+        _ => {}
+    }
+    match (key, value) {
+        // ... el resto de brazos ya existentes (Theme, LineNumbers, Files, ...) ...
+        _ => return, // combinación key/value que no tiene sentido: no hace nada
+    }
+    cfg.ui.preset = Preset::Custom;
+}
+```
+
+Guarda también con `notty_config::save` en el mismo sitio donde `settings_window.rs` ya lo hace tras cualquier `apply` (no cambia: sigue siendo un único punto para todos los ajustes).
+
+- [ ] **Step 4: Ejecutar y ver que pasa**
+
+Run: `cargo test --workspace`
+Expected: PASS, +2 tests (y el test `three_sections_matching_config_today` ya existente hay que actualizarlo/renombrarlo para las 5 secciones, o queda cubierto por el nuevo `archivos_and_atajo_global_sections_exist` — elimina el duplicado si hace falta).
+
+- [ ] **Step 5: `vim_always` al crear documentos**
 
 En `crates/notty-ui/src/window.rs`, en cada sitio donde se construye un `EditorState::new_empty()`/`new_temp(..)`/`from_opened(..)` para añadirlo al `Workspace` (el `Ctrl+N` de `UiCommand::NewTab`, la apertura por ruta, la recepción de `Message::OpenPath` de la Task 8, los flags `--new-temp`/`--new-permanent` de la Task 9), envolver la creación así:
 
@@ -1281,12 +1398,12 @@ fn maybe_vim(mut st: crate::EditorState, cfg: &notty_config::Config) -> crate::E
 
 y llamar a `maybe_vim(EditorState::new_empty(), &cfg.borrow())` (o el constructor que toque) en cada uno de esos puntos en vez de usar el `EditorState` a secas.
 
-- [ ] **Step 3: Compilar**
+- [ ] **Step 6: Compilar**
 
 Run: `cargo build --workspace`
 Expected: compila.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add crates/notty-ui
