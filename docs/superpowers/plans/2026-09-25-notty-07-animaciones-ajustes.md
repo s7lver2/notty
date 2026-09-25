@@ -341,11 +341,11 @@ Bug de pulido encontrado al revisar `draw` del desplegable abierto (`Row::Select
 
 Pulido general, sin lógica nueva: compara `docs/mockups/ref/ajustes.png` contra una captura fresca de la ventana real (`tools/shot-app.ps1`, o mejor: como esta ventana no está cubierta por el CLI de `notty.exe` directamente, ábrela con `^,` desde una ventana principal ya abierta) y corrige lo que no encaje.
 
-- [ ] **Step 1:** Segmentado (`Row::Seg`, p.ej. Preset/Tema): comprueba que la opción marcada tiene fondo `pal.surface` + borde de 1px `pal.line` (no solo texto en negrita) y que el hover de una opción no marcada usa `pal.hover`, como la maqueta (`.seg button[aria-pressed="true"]`). Corrige si alguno de los dos estados falta o usa un color distinto.
-- [ ] **Step 2:** Fila de navegación de la izquierda (Apariencia/Ventana/Teclado/Archivos/Atajo global): confirma que la sección activa lleva la barra de acento de 3px a la izquierda (`::before` de la maqueta) y que el resto tiene suficiente espacio de hover sin overlap entre filas.
-- [ ] **Step 3:** Botones de texto tipo enlace (`Row::Link`, "Editar el archivo"/"Abrir [keys]"): confirma que tienen algún estado de hover (subrayado o cambio de color), no solo el color de acento estático — la maqueta los subraya al pasar el ratón (`.snav .foot a:hover{text-decoration:underline}`).
-- [ ] **Step 4:** Compilar, capturar cada sección de Ajustes una vez y comparar con `ajustes.png`.
-- [ ] **Step 5: Commit** `chore(ui): repaso visual de segmentados, navegación y enlaces en Ajustes`
+- [x] **Step 1:** Segmentado (`Row::Seg`, p.ej. Preset/Tema): comprueba que la opción marcada tiene fondo `pal.surface` + borde de 1px `pal.line` (no solo texto en negrita) y que el hover de una opción no marcada usa `pal.hover`, como la maqueta (`.seg button[aria-pressed="true"]`). Corrige si alguno de los dos estados falta o usa un color distinto.
+- [x] **Step 2:** Fila de navegación de la izquierda (Apariencia/Ventana/Teclado/Archivos/Atajo global): confirma que la sección activa lleva la barra de acento de 3px a la izquierda (`::before` de la maqueta) y que el resto tiene suficiente espacio de hover sin overlap entre filas.
+- [x] **Step 3:** Botones de texto tipo enlace (`Row::Link`, "Editar el archivo"/"Abrir [keys]"): confirma que tienen algún estado de hover (subrayado o cambio de color), no solo el color de acento estático — la maqueta los subraya al pasar el ratón (`.snav .foot a:hover{text-decoration:underline}`).
+- [x] **Step 4:** Compilar, capturar cada sección de Ajustes una vez y comparar con `ajustes.png`.
+- [x] **Step 5: Commit** `chore(ui): repaso visual de segmentados, navegación y enlaces en Ajustes`
 
 ---
 

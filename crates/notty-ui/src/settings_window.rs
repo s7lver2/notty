@@ -553,6 +553,13 @@ fn paint(st: &mut State) {
     r.text(".", &r.fonts().ui_11_5, Rect::new(foot.left + prefix_w + bold_w, foot.top, foot.right, foot.top + 18.0), pal.text_3);
     let link_r = Rect::new(foot.left, foot.top + 18.0, foot.right, foot.top + 36.0);
     r.text("Editar el archivo", &r.fonts().ui_11_5, link_r, pal.accent);
+    if st.hover == Hit::EditConfig {
+        // La maqueta subraya estos enlaces al pasar el ratón (`.snav .foot a:hover`),
+        // en vez de dejar el color de acento como único estado (Task 7 del plan).
+        let lw = r.measure("Editar el archivo", &r.fonts().ui_11_5);
+        let uy = link_r.bottom - 3.0;
+        r.stroke_line(link_r.left, uy, link_r.left + lw, uy, 1.0, pal.accent);
+    }
     st.hits.push((link_r, Hit::EditConfig));
 
     // Panel de la sección activa.
@@ -636,6 +643,11 @@ fn paint(st: &mut State) {
                 let lw = r.measure(label, &r.fonts().ui_13);
                 let lr = Rect::new(rr.right - 12.0 - lw, rr.top, rr.right - 12.0, rr.bottom);
                 r.text(label, &r.fonts().ui_13, lr, pal.accent);
+                if st.hover == Hit::OpenKeys {
+                    // Mismo subrayado al pasar el ratón que el pie de la navegación.
+                    let uy = (lr.top + lr.bottom) / 2.0 + 8.0;
+                    r.stroke_line(lr.left, uy, lr.right, uy, 1.0, pal.accent);
+                }
                 st.hits.push((rr, Hit::OpenKeys));
                 ry += rr.height() + 3.0;
             }
