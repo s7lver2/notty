@@ -41,6 +41,10 @@ const ID_AUTOSAVE_TIMER: usize = 1;
 /// de autoguardado para que abrir un archivo desde una segunda invocación de `notty`
 /// se note casi al instante.
 const ID_IPC_TIMER: usize = 2;
+/// Id del `SetTimer` de animación (60Hz): repinta mientras haya alguna animación en
+/// curso (menú/sugerencias al abrir, cambio de pestaña...) y se para en cuanto la
+/// última termina.
+const ID_ANIM_TIMER: usize = 3;
 
 /// Snapshot de documentos sucios (nombre, texto, sucio) leído por el `panic hook` para
 /// volcar a `notty_io::recovery_dir()`. Vive en memoria estática (`Box::leak`) para que
@@ -73,6 +77,12 @@ struct WindowState {
     /// Si las animaciones del sistema están activadas (Accesibilidad → Efectos
     /// visuales); calculado una vez al arrancar, ver `system_animations_enabled`.
     animations_enabled: bool,
+    /// Animación en curso del menú/sugerencias que se acaba de abrir (fundido +
+    /// desplazamiento). `None` en reposo. Se limpia sola cuando `is_done`, no hace
+    /// falta borrarla al cerrar el menú (al cerrarse ya no se dibuja).
+    popup_open_anim: Option<crate::Anim>,
+    /// Si el `SetTimer` de animación (`ID_ANIM_TIMER`) está corriendo.
+    anim_timer_running: bool,
 }
 
 impl WindowState {
@@ -99,6 +109,7 @@ impl WindowState {
             active_window: self.active_window,
             menu_bar_visible: self.menu_bar_visible(),
             open_menu: self.open_menu,
+            popup_open: self.popup_open_anim.map(|a| a.value(std::time::Instant::now(), 0.0, 1.0)),
         }
     }
 
@@ -116,6 +127,25 @@ impl WindowState {
         let total = self.ws.active().doc.buffer().len_lines();
         self.renderer.body_and_gutter(&ui, self.ws.len(), self.menu_bar_visible(), total, self.ws.active().raw.is_some())
     }
+}
+
+/// Arranca el temporizador de animación (60Hz) si no estaba ya corriendo. Se llama
+/// cada vez que arranca una animación nueva.
+fn ensure_anim_timer(w: &mut WindowState, hwnd: HWND) {
+    if !w.anim_timer_running {
+        unsafe {
+            let _ = SetTimer(Some(hwnd), ID_ANIM_TIMER, 16, None);
+        }
+        w.anim_timer_running = true;
+    }
+}
+
+/// Arranca (o reinicia) la animación de fundido+desplazamiento del menú/sugerencias
+/// que se acaba de abrir.
+fn start_popup_anim(w: &mut WindowState, hwnd: HWND) {
+    w.popup_open_anim =
+        Some(crate::Anim::new_maybe(std::time::Instant::now(), std::time::Duration::from_millis(120), w.animations_enabled));
+    ensure_anim_timer(w, hwnd);
 }
 
 fn point_from_lparam(lparam: LPARAM) -> (f32, f32) {
@@ -519,6 +549,8 @@ fn run_inner(
             recovery,
             ipc_rx,
             animations_enabled: system_animations_enabled(),
+            popup_open_anim: None,
+            anim_timer_running: false,
         });
         let ptr = Box::into_raw(window_state);
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, ptr as isize);
@@ -913,6 +945,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         crate::EditorAction::OpenPathPrompt => {
                             let initial = w.ws.active().path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
                             w.ws.prompt = crate::Prompt::Path(crate::PathPromptState::new(crate::Purpose::Open, initial));
+                            start_popup_anim(w, hwnd);
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                         crate::EditorAction::Find => {
@@ -925,6 +958,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         }
                         crate::EditorAction::Save if w.ws.active().path.is_none() => {
                             w.ws.prompt = crate::Prompt::Path(crate::PathPromptState::new(crate::Purpose::Save, String::new()));
+                            start_popup_anim(w, hwnd);
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                         crate::EditorAction::FindNext | crate::EditorAction::FindPrev => {
@@ -994,6 +1028,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         }
                         crate::Hit::Clickme => {
                             w.ws.prompt = crate::Prompt::Path(crate::PathPromptState::new(crate::Purpose::Save, String::new()));
+                            start_popup_anim(w, hwnd);
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                         crate::Hit::Settings => open_settings(w, hwnd),
@@ -1035,6 +1070,9 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         }
                         crate::Hit::Menu(i) => {
                             w.open_menu = if w.open_menu == Some(i) { None } else { Some(i) };
+                            if w.open_menu.is_some() {
+                                start_popup_anim(w, hwnd);
+                            }
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                         crate::Hit::MenuItem(j) => {
@@ -1175,11 +1213,25 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     }
                     return LRESULT(0);
                 }
+                if wparam.0 == ID_ANIM_TIMER {
+                    if let Some(w) = ptr.as_mut() {
+                        let now = std::time::Instant::now();
+                        let still_animating = w.popup_open_anim.as_ref().is_some_and(|a| !a.is_done(now));
+                        if !still_animating {
+                            w.popup_open_anim = None;
+                            let _ = KillTimer(Some(hwnd), ID_ANIM_TIMER);
+                            w.anim_timer_running = false;
+                        }
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                    }
+                    return LRESULT(0);
+                }
                 DefWindowProcW(hwnd, msg, wparam, lparam)
             }
             WM_DESTROY => {
                 let _ = KillTimer(Some(hwnd), ID_AUTOSAVE_TIMER);
                 let _ = KillTimer(Some(hwnd), ID_IPC_TIMER);
+                let _ = KillTimer(Some(hwnd), ID_ANIM_TIMER);
                 PostQuitMessage(0);
                 LRESULT(0)
             }
@@ -1234,16 +1286,19 @@ fn run_menu_item(w: &mut WindowState, hwnd: HWND, menu_idx: usize, item_idx: usi
         MenuCmd::Open => {
             let initial = w.ws.active().path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
             w.ws.prompt = crate::Prompt::Path(crate::PathPromptState::new(crate::Purpose::Open, initial));
+            start_popup_anim(w, hwnd);
         }
         MenuCmd::Save => {
             if w.ws.active().path.is_none() {
                 w.ws.prompt = crate::Prompt::Path(crate::PathPromptState::new(crate::Purpose::Save, String::new()));
+                start_popup_anim(w, hwnd);
             } else {
                 try_save(w);
             }
         }
         MenuCmd::SaveAs => {
             w.ws.prompt = crate::Prompt::Path(crate::PathPromptState::new(crate::Purpose::Save, String::new()));
+            start_popup_anim(w, hwnd);
         }
         MenuCmd::Settings => open_settings(w, hwnd),
         MenuCmd::CloseTab => {

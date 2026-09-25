@@ -202,7 +202,7 @@ fn system_animations_enabled() -> bool {
 - Modify: `crates/notty-ui/src/render.rs` (usa el progreso de la animación al dibujar)
 - Modify: `crates/notty-ui/src/theme.rs` (helper de alpha)
 
-- [ ] **Step 1: Helper de alpha en `theme.rs`**
+- [x] **Step 1: Helper de alpha en `theme.rs`**
 
 ```rust
 impl Rgba {
@@ -216,7 +216,7 @@ impl Rgba {
 
 Test en `theme.rs`: `faded(0.5)` sobre `Rgba(1.0,1.0,1.0,1.0)` da alpha `0.5`; `faded(1.0)` no cambia nada.
 
-- [ ] **Step 2: Estado de la animación del menú/sugerencias en `WindowState`**
+- [x] **Step 2: Estado de la animación del menú/sugerencias en `WindowState`**
 
 Añade a `WindowState`:
 
@@ -236,7 +236,7 @@ w.popup_open_anim = Some(crate::Anim::new_maybe(std::time::Instant::now(), std::
 ensure_anim_timer(w, hwnd);
 ```
 
-- [ ] **Step 3: Temporizador de animación**
+- [x] **Step 3: Temporizador de animación**
 
 Constante nueva junto a `ID_AUTOSAVE_TIMER`/`ID_IPC_TIMER`:
 
@@ -272,17 +272,17 @@ En el manejador de `WM_TIMER` ya existente (donde se comprueba `ID_AUTOSAVE_TIME
 
 Añade `anim_timer_running: bool` a `WindowState` (arranca en `false`).
 
-- [ ] **Step 4: Usarlo al dibujar**
+- [x] **Step 4: Usarlo al dibujar**
 
 `Renderer::paint`/`ViewState` necesita saber el progreso actual: añade `pub popup_open: Option<f32>` a `ViewState` (el valor de `w.popup_open_anim.map(|a| a.value(Instant::now(), 0.0, 1.0))`, calculado en `view_state()` donde ya se construye `ViewState` cada `WM_PAINT`).
 
 En `draw_dropdown` (menú de la barra) y en `draw_suggestions` (línea de ruta): si `view.popup_open` es `Some(t)` con `t < 1.0`, en vez de dibujar el fondo/filas en su sitio final, desplázalos verticalmente `(1.0 - t) * 4.0` píxeles hacia arriba (o hacia su origen, según convenga) y funde todos los colores de esa caja con `.faded(t)` (el fondo `chrome_hi`, la sombra, el texto de cada fila). No hace falta animar el hit-testing: los rectángulos de `hits` se registran en su posición final aunque la caja todavía se esté desplazando 4px — un clic a mitad de la animación (120ms) cae dentro de un margen de error aceptable, no merece la complejidad de animar también el hit-test.
 
-- [ ] **Step 5: Compilar y capturar**
+- [x] **Step 5: Compilar y capturar**
 
 `cargo build --release`, abre el menú Archivo/Ver un momento antes de capturar (con `-Keys` puedes forzar la apertura pero no capturar a mitad de animación de forma fiable; compara el estado **final** — 150ms después de abrir, ya asentado — contra cómo se veía antes: debe verse igual de nítido, la animación es solo de entrada).
 
-- [ ] **Step 6: Commit** `feat(ui): el menú, las sugerencias y el desplegable funden y se deslizan al abrir`
+- [x] **Step 6: Commit** `feat(ui): el menú, las sugerencias y el desplegable funden y se deslizan al abrir`
 
 ---
 

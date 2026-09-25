@@ -85,6 +85,10 @@ pub struct ViewState {
     /// Menú `Alt` desplegado, o barra de menús visible.
     pub menu_bar_visible: bool,
     pub open_menu: Option<usize>,
+    /// Progreso (`0.0..=1.0`) del fundido+desplazamiento de apertura del menú o de la
+    /// caja de sugerencias, si hay uno en curso. `None` en reposo (dibuja igual que
+    /// siempre, sin coste extra).
+    pub popup_open: Option<f32>,
 }
 
 /// Los formatos de texto fijos que usa la maqueta, creados una vez en `Renderer::new`.
@@ -800,6 +804,13 @@ impl Renderer {
     unsafe fn draw_dropdown(&mut self, items: &[crate::menu::MenuItem], x: f32, top: f32, view: &ViewState, pal: &theme::Palette) {
         use crate::menu::MenuItem;
         unsafe {
+            // Fundido + 4px de desplazamiento vertical al abrirse (ver anim.rs / Task 3
+            // del plan de animaciones). `t == 1.0` (o sin animación en curso) dibuja
+            // exactamente igual que antes, sin coste extra.
+            let t = view.popup_open.unwrap_or(1.0);
+            let dy = (1.0 - t) * 4.0;
+            let draw_y = |y: f32| y - dy;
+
             let row_h = 28.0;
             let sep_h = 9.0;
             let content_w = items
@@ -814,28 +825,38 @@ impl Renderer {
             let width = (content_w + 24.0).max(250.0);
             let height: f32 = layout::POPUP_PAD * 2.0
                 + items.iter().map(|it| if matches!(it, MenuItem::Sep) { sep_h } else { row_h }).sum::<f32>();
+            // Posición final (sin desplazar): la usada para el hit-testing, que no anima.
             let box_r = Rect::new(x, top, x + width, top + height);
+            let draw_r = Rect::new(box_r.left, draw_y(box_r.top), box_r.right, draw_y(box_r.bottom));
 
-            self.fill_round(Rect::new(box_r.left - 2.0, box_r.top - 2.0, box_r.right + 2.0, box_r.bottom + 2.0), layout::POPUP_RADIUS + 2.0, pal.shadow);
-            self.fill_round(box_r, layout::POPUP_RADIUS, pal.chrome_hi);
-            self.stroke_round_rect(box_r, layout::POPUP_RADIUS, 1.0, pal.shadow_ring);
+            self.fill_round(
+                Rect::new(draw_r.left - 2.0, draw_r.top - 2.0, draw_r.right + 2.0, draw_r.bottom + 2.0),
+                layout::POPUP_RADIUS + 2.0,
+                pal.shadow.faded(t),
+            );
+            self.fill_round(draw_r, layout::POPUP_RADIUS, pal.chrome_hi.faded(t));
+            self.stroke_round_rect(draw_r, layout::POPUP_RADIUS, 1.0, pal.shadow_ring.faded(t));
 
             let mut y = box_r.top + layout::POPUP_PAD;
             for (j, it) in items.iter().enumerate() {
                 match it {
                     MenuItem::Sep => {
-                        let ly = y + sep_h / 2.0;
-                        self.stroke_line(box_r.left + 4.0, ly, box_r.right - 4.0, ly, 1.0, pal.line);
+                        let ly = draw_y(y + sep_h / 2.0);
+                        self.stroke_line(draw_r.left + 4.0, ly, draw_r.right - 4.0, ly, 1.0, pal.line.faded(t));
                         y += sep_h;
                     }
                     MenuItem::Entry { label, shortcut, .. } => {
+                        // El rect de hit-testing se registra en su posición final (sin
+                        // desplazar): un clic a mitad de los 120ms de animación cae dentro
+                        // de un margen de error aceptable.
                         let r = Rect::new(box_r.left + 4.0, y, box_r.right - 4.0, y + row_h);
+                        let dr = Rect::new(draw_r.left + 4.0, draw_y(y), draw_r.right - 4.0, draw_y(y + row_h));
                         if view.hover == Hit::MenuItem(j) {
-                            self.fill_round(r, 4.0, pal.hover);
+                            self.fill_round(dr, 4.0, pal.hover.faded(t));
                         }
-                        self.text(label, &self.fonts.ui_12_5, Rect::new(r.left + 6.0, r.top, r.right - 6.0, r.bottom), pal.text);
+                        self.text(label, &self.fonts.ui_12_5, Rect::new(dr.left + 6.0, dr.top, dr.right - 6.0, dr.bottom), pal.text.faded(t));
                         if !shortcut.is_empty() {
-                            self.text_right(shortcut, &self.fonts.mono_11, Rect::new(r.left + 6.0, r.top, r.right - 6.0, r.bottom), pal.text_3);
+                            self.text_right(shortcut, &self.fonts.mono_11, Rect::new(dr.left + 6.0, dr.top, dr.right - 6.0, dr.bottom), pal.text_3.faded(t));
                         }
                         self.hits.push((r, Hit::MenuItem(j)));
                         y += row_h;
@@ -959,7 +980,7 @@ impl Renderer {
             if matches!(ws.prompt, crate::Prompt::None) {
                 self.draw_status_normal(state, pal, r, merged, view);
             } else {
-                self.draw_prompt(&ws.prompt, state, pal, r, merged);
+                self.draw_prompt(&ws.prompt, state, pal, r, merged, view);
             }
         }
     }
@@ -1078,10 +1099,10 @@ impl Renderer {
     /// Prompt activo (ruta, buscar/reemplazar, línea de comandos vim), ocupando la
     /// franja de estado entera.
     #[allow(unused_unsafe)]
-    unsafe fn draw_prompt(&mut self, prompt: &crate::Prompt, state: &EditorState, pal: &theme::Palette, r: Rect, merged: bool) {
+    unsafe fn draw_prompt(&mut self, prompt: &crate::Prompt, state: &EditorState, pal: &theme::Palette, r: Rect, merged: bool, view: &ViewState) {
         unsafe {
             match prompt {
-                crate::Prompt::Path(p) => self.draw_path_prompt(p, pal, r),
+                crate::Prompt::Path(p) => self.draw_path_prompt(p, pal, r, view),
                 crate::Prompt::Find(s) => self.draw_search_bar(s, &state.doc, pal, r, false),
                 crate::Prompt::Replace(s) => self.draw_search_bar(s, &state.doc, pal, r, true),
                 crate::Prompt::VimCmdline(line) => {
@@ -1103,7 +1124,7 @@ impl Renderer {
     }
 
     #[allow(unused_unsafe)]
-    unsafe fn draw_path_prompt(&mut self, p: &crate::PathPromptState, pal: &theme::Palette, r: Rect) {
+    unsafe fn draw_path_prompt(&mut self, p: &crate::PathPromptState, pal: &theme::Palette, r: Rect, view: &ViewState) {
         unsafe {
             let x = r.left + layout::STATUS_PAD_X;
             let value_color = if p.is_invalid() { pal.danger } else { pal.text };
@@ -1155,7 +1176,7 @@ impl Renderer {
             }
 
             if p.last_error.is_none() && !visible_sugs.is_empty() {
-                self.draw_suggestions(&visible_sugs, p.scroll, p.selected, total_sugs, pal, r);
+                self.draw_suggestions(&visible_sugs, p.scroll, p.selected, total_sugs, pal, r, view);
             }
         }
     }
@@ -1177,30 +1198,43 @@ impl Renderer {
         total: usize,
         pal: &theme::Palette,
         status: Rect,
+        view: &ViewState,
     ) {
         unsafe {
+            // Mismo tratamiento de fundido + desplazamiento que `draw_dropdown` (Task 3).
+            let t = view.popup_open.unwrap_or(1.0);
+            let dy = (1.0 - t) * 4.0;
+            let draw_y = |y: f32| y - dy;
+
             let row_h = 24.0;
             let has_more = total > sugs.len();
             let counter_h = if has_more { 20.0 } else { 0.0 };
             let longest = sugs.iter().map(|e| self.measure(&e.name, &self.fonts.mono_12)).fold(0.0f32, f32::max);
             let width = (longest + 16.0 + 16.0).clamp(220.0, 360.0);
             let height = row_h * sugs.len() as f32 + counter_h + layout::POPUP_PAD * 2.0;
+            // Posición final (sin desplazar): la usada para el hit-testing, que no anima.
             let box_r = Rect::new(12.0, status.top - 2.0 - height, 12.0 + width, status.top - 2.0);
+            let draw_r = Rect::new(box_r.left, draw_y(box_r.top), box_r.right, draw_y(box_r.bottom));
 
-            self.fill_round(Rect::new(box_r.left - 2.0, box_r.top - 2.0, box_r.right + 2.0, box_r.bottom + 2.0), layout::POPUP_RADIUS + 2.0, pal.shadow);
-            self.fill_round(box_r, layout::POPUP_RADIUS, pal.chrome_hi);
-            self.stroke_round_rect(box_r, layout::POPUP_RADIUS, 1.0, pal.shadow_ring);
+            self.fill_round(
+                Rect::new(draw_r.left - 2.0, draw_r.top - 2.0, draw_r.right + 2.0, draw_r.bottom + 2.0),
+                layout::POPUP_RADIUS + 2.0,
+                pal.shadow.faded(t),
+            );
+            self.fill_round(draw_r, layout::POPUP_RADIUS, pal.chrome_hi.faded(t));
+            self.stroke_round_rect(draw_r, layout::POPUP_RADIUS, 1.0, pal.shadow_ring.faded(t));
 
             for (rel, entry) in sugs.iter().enumerate() {
                 let i = scroll + rel;
                 let row_top = box_r.top + layout::POPUP_PAD + row_h * rel as f32;
                 let row = Rect::new(box_r.left + layout::POPUP_PAD, row_top, box_r.right - layout::POPUP_PAD, row_top + row_h);
+                let draw_row = Rect::new(draw_r.left + layout::POPUP_PAD, draw_y(row_top), draw_r.right - layout::POPUP_PAD, draw_y(row_top + row_h));
                 if i == selected {
-                    self.fill_round(row, 5.0, pal.accent_soft);
+                    self.fill_round(draw_row, 5.0, pal.accent_soft.faded(t));
                 }
                 let label = if entry.is_dir { format!("{}\\", entry.name) } else { entry.name.clone() };
                 let c = if i == selected { pal.accent } else if entry.is_dir { pal.text } else { pal.text_2 };
-                self.text(&label, &self.fonts.mono_12, Rect::new(row.left + 8.0, row.top, row.right - 8.0, row.bottom), c);
+                self.text(&label, &self.fonts.mono_12, Rect::new(draw_row.left + 8.0, draw_row.top, draw_row.right - 8.0, draw_row.bottom), c.faded(t));
                 self.hits.push((row, Hit::Suggestion(i)));
             }
 
@@ -1212,8 +1246,8 @@ impl Renderer {
                 self.text(
                     &label,
                     &self.fonts.ui_11_5,
-                    Rect::new(box_r.left + layout::POPUP_PAD + 8.0, counter_top, box_r.right - layout::POPUP_PAD, counter_top + counter_h),
-                    pal.text_3,
+                    Rect::new(draw_r.left + layout::POPUP_PAD + 8.0, draw_y(counter_top), draw_r.right - layout::POPUP_PAD, draw_y(counter_top + counter_h)),
+                    pal.text_3.faded(t),
                 );
             }
         }

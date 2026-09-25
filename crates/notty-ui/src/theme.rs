@@ -6,6 +6,14 @@ use notty_config::Theme;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Rgba(pub f32, pub f32, pub f32, pub f32);
 
+impl Rgba {
+    /// Mismo color con la opacidad multiplicada por `factor` (`0.0..=1.0`), para
+    /// fundidos: `Rgba(r,g,b,a).faded(0.4)` da `Rgba(r,g,b,a*0.4)`.
+    pub fn faded(self, factor: f32) -> Self {
+        Self(self.0, self.1, self.2, self.3 * factor.clamp(0.0, 1.0))
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Palette {
     pub chrome: Rgba,
@@ -106,6 +114,13 @@ pub fn palette(dark: bool) -> &'static Palette {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn faded_scales_alpha_only() {
+        let c = Rgba(1.0, 1.0, 1.0, 1.0);
+        assert_eq!(c.faded(0.5), Rgba(1.0, 1.0, 1.0, 0.5));
+        assert_eq!(c.faded(1.0), c);
+    }
 
     #[test]
     fn system_theme_follows_windows() {
