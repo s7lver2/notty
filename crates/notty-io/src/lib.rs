@@ -10,3 +10,4 @@ pub use encoding::{CodecError, Detected, TextEncoding, decode, decode_lossy, det
 pub use eol::{LineEnding, convert, detect_eol};
 pub use fsutil::{atomic_write, can_write, create_parent_dirs};
 pub use open::{Opened, RawBytes, open, open_raw};
+pub use pathline::{Entry, Hint, INVALID_CHARS, PathContext, has_invalid_chars, hint_for, home_dir, normalize, suggestions};
