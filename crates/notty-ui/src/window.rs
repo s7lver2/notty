@@ -672,6 +672,33 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             }
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
+                        crate::Hit::Clickme => {
+                            w.ws.prompt = crate::Prompt::Path(crate::PathPromptState::new(crate::Purpose::Save, String::new()));
+                            let _ = InvalidateRect(Some(hwnd), None, false);
+                        }
+                        crate::Hit::SearchOpt(k) => {
+                            if let crate::Prompt::Find(s) | crate::Prompt::Replace(s) = &mut w.ws.prompt {
+                                match k {
+                                    0 => s.toggle_case(),
+                                    1 => s.toggle_word(),
+                                    _ => s.toggle_regex(),
+                                }
+                            }
+                            let _ = InvalidateRect(Some(hwnd), None, false);
+                        }
+                        crate::Hit::SearchField(k) => {
+                            if let crate::Prompt::Replace(s) = &mut w.ws.prompt {
+                                s.editing_replacement = k == 1;
+                            }
+                            let _ = InvalidateRect(Some(hwnd), None, false);
+                        }
+                        crate::Hit::Suggestion(i) => {
+                            if let crate::Prompt::Path(p) = &mut w.ws.prompt {
+                                p.selected = i;
+                                p.accept();
+                            }
+                            let _ = InvalidateRect(Some(hwnd), None, false);
+                        }
                         crate::Hit::Tab(i) => {
                             w.ws.activate(i);
                             let _ = InvalidateRect(Some(hwnd), None, false);
@@ -1074,9 +1101,13 @@ fn commit_vim_cmdline(w: &mut WindowState, hwnd: HWND) {
 
 fn handle_search_char(w: &mut WindowState, ch: char) {
     if let crate::Prompt::Find(s) | crate::Prompt::Replace(s) = &mut w.ws.prompt {
-        let mut q = s.query.clone();
-        q.push(ch);
-        s.set_query(q);
+        s.type_char(ch);
+    }
+}
+
+fn handle_search_backspace(w: &mut WindowState) {
+    if let crate::Prompt::Find(s) | crate::Prompt::Replace(s) = &mut w.ws.prompt {
+        s.backspace();
     }
 }
 
@@ -1099,6 +1130,11 @@ fn handle_search_key(w: &mut WindowState, vk: u32, mods: Modifiers) {
         }
     }
     match vk {
+        0x08 => handle_search_backspace(w), // Backspace
+        // Tab alterna el campo activo (buscar/por) solo tiene sentido en Reemplazar.
+        0x09 if matches!(w.ws.prompt, crate::Prompt::Replace(_)) => {
+            toggle_search(w, crate::SearchState::toggle_field);
+        }
         0x0D if mods.ctrl && mods.alt => replace_all_matches(w), // Ctrl+Alt+Enter
         0x0D if mods.shift => nav_search(w, false),              // Shift+Enter
         0x0D if matches!(w.ws.prompt, crate::Prompt::Replace(_)) => replace_current_match(w),

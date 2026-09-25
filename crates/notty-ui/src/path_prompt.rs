@@ -34,6 +34,20 @@ impl PathPromptState {
         notty_io::hint_for(&self.value)
     }
 
+    /// La palabra de estado que enseña la maqueta a la derecha del campo de ruta.
+    pub fn hint_word(&self) -> &'static str {
+        if self.is_invalid() {
+            return "no válido";
+        }
+        match self.hint() {
+            notty_io::Hint::Empty => "",
+            notty_io::Hint::New => "nuevo",
+            notty_io::Hint::Exists => "existe",
+            notty_io::Hint::Dir => "carpeta",
+            notty_io::Hint::DirNew => "carpeta nueva",
+        }
+    }
+
     fn last_segment(&self) -> &str {
         self.value.rsplit('\\').next().unwrap_or(&self.value)
     }
@@ -175,5 +189,22 @@ mod tests {
         let mut p = PathPromptState::new(Purpose::Save, String::new());
         p.type_text("a\\nota?.txt", &ctx(&PathBuf::from(".")));
         assert!(p.is_invalid());
+    }
+
+    #[test]
+    fn hint_word_matches_hint_and_invalid_wins() {
+        let dir = setup();
+        let mut p = PathPromptState::new(Purpose::Save, String::new());
+        p.type_text(&format!("{}\\presupuesto.txt", dir.path().display()), &ctx(dir.path()));
+        assert_eq!(p.hint_word(), "existe");
+
+        p.type_text(&format!("{}\\idea.txt", dir.path().display()), &ctx(dir.path()));
+        assert_eq!(p.hint_word(), "nuevo");
+
+        p.type_text(&format!("{}\\proyectos", dir.path().display()), &ctx(dir.path()));
+        assert_eq!(p.hint_word(), "carpeta");
+
+        p.type_text("a\\nota?.txt", &ctx(&PathBuf::from(".")));
+        assert_eq!(p.hint_word(), "no válido");
     }
 }

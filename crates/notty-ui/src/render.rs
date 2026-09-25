@@ -101,6 +101,7 @@ struct Fonts {
     mono_13_bold: IDWriteTextFormat,
     mono_11: IDWriteTextFormat,
     mono_11_bold: IDWriteTextFormat,
+    mono_11_5: IDWriteTextFormat,
     mono_11_5_semibold: IDWriteTextFormat,
     mono_12: IDWriteTextFormat,
     mono_12_5: IDWriteTextFormat,
@@ -208,6 +209,7 @@ impl Renderer {
             let mono_13_bold = make_format(&dwrite, &mono_family, layout::FONT_MONO, DWRITE_FONT_WEIGHT_BOLD)?;
             let mono_11 = make_format(&dwrite, &mono_family, layout::FONT_HINTS, DWRITE_FONT_WEIGHT_NORMAL)?;
             let mono_11_bold = make_format(&dwrite, &mono_family, layout::FONT_HINTS, DWRITE_FONT_WEIGHT_BOLD)?;
+            let mono_11_5 = make_format(&dwrite, &mono_family, 11.5, DWRITE_FONT_WEIGHT_NORMAL)?;
             let mono_11_5_semibold = make_format(&dwrite, &mono_family, 11.5, DWRITE_FONT_WEIGHT_SEMI_BOLD)?;
             let mono_12 = make_format(&dwrite, &mono_family, layout::FONT_SUGGEST, DWRITE_FONT_WEIGHT_NORMAL)?;
             with_ellipsis_trimming(&dwrite, &mono_12)?;
@@ -236,6 +238,7 @@ impl Renderer {
                     mono_13_bold,
                     mono_11,
                     mono_11_bold,
+                    mono_11_5,
                     mono_11_5_semibold,
                     mono_12,
                     mono_12_5,
@@ -607,6 +610,8 @@ impl Renderer {
                 self.draw_hints(state, ws, pal, frame);
             }
 
+            self.draw_status(ws, state, pal, frame, bands.merged_status);
+
             let _ = self.target.EndDraw(None, None);
         }
     }
@@ -791,6 +796,307 @@ impl Renderer {
                 self.text(action, &self.fonts.mono_11, Rect::new(x, frame.hints.top, x + action_w, frame.hints.bottom), pal.text_2);
                 x += action_w + layout::HINTS_GAP;
             }
+        }
+    }
+
+    /// Barra de estado (`.status`) o, si hay un prompt activo, lo dibuja en su lugar
+    /// (nunca coexisten: mientras hay prompt, la franja inferior es suya por completo).
+    #[allow(unused_unsafe)]
+    unsafe fn draw_status(&mut self, ws: &Workspace, state: &EditorState, pal: &theme::Palette, frame: layout::Frame, merged: bool) {
+        unsafe {
+            let r = frame.status;
+            if merged {
+                self.fill(r, pal.cmd);
+                self.stroke_line(0.0, r.top, r.width(), r.top, 1.0, pal.line);
+            } else {
+                self.fill(r, pal.chrome);
+            }
+
+            if matches!(ws.prompt, crate::Prompt::None) {
+                self.draw_status_normal(state, pal, r, merged);
+            } else {
+                self.draw_prompt(&ws.prompt, state, pal, r, merged);
+            }
+        }
+    }
+
+    #[allow(unused_unsafe)]
+    unsafe fn draw_status_normal(&mut self, state: &EditorState, pal: &theme::Palette, r: Rect, merged: bool) {
+        unsafe {
+            let label_font = if merged { self.fonts.mono_12.clone() } else { self.fonts.ui_11.clone() };
+            let label_font = &label_font;
+            let mut x = r.left + layout::STATUS_PAD_X;
+
+            if let Some(vim) = &state.vim {
+                let (label, c) = match vim.mode {
+                    crate::VimMode::Normal => ("-- NORMAL --", pal.accent),
+                    crate::VimMode::Insert => ("-- INSERT --", pal.ok),
+                    crate::VimMode::Visual => ("-- VISUAL --", pal.accent),
+                };
+                let w = self.measure(label, &self.fonts.mono_11_5_semibold);
+                self.text(label, &self.fonts.mono_11_5_semibold, Rect::new(x, r.top, x + w, r.bottom), c);
+                x += w + layout::STATUS_L_GAP;
+            }
+
+            if let Some(raw) = &state.raw {
+                let size_label = crate::raw_size(raw.len());
+                let w = self.measure(&size_label, label_font);
+                self.text(&size_label, label_font, Rect::new(x, r.top, x + w, r.bottom), pal.text_2);
+                x += w + layout::STATUS_L_GAP;
+
+                if !raw.writable_fs() {
+                    self.draw_lock(pal, x, r);
+                    x += 12.0 + 6.0;
+                }
+                let word = if raw.writable_fs() && raw.is_editing() { "escritura" } else { "solo lectura" };
+                let ww = self.measure(word, label_font);
+                self.text(word, label_font, Rect::new(x, r.top, x + ww, r.bottom), pal.text_3);
+                x += ww + layout::STATUS_L_GAP;
+
+                self.draw_pencil(raw, pal, x, r);
+            } else if state.path.is_none() {
+                let label = "CLICKME";
+                let w = self.measure(label, &self.fonts.mono_12) + 8.0;
+                let click_r = Rect::new(x, r.top, x + w, r.bottom);
+                self.fill_round(click_r, 4.0, pal.accent_soft);
+                self.text(label, &self.fonts.mono_12, Rect::new(x + 4.0, r.top, x + w - 4.0, r.bottom), pal.accent);
+                self.hits.push((click_r, Hit::Clickme));
+            } else if !merged {
+                self.text("Texto", label_font, Rect::new(x, r.top, x + 60.0, r.bottom), pal.text_2);
+            }
+
+            // Derecha: los tres campos de `status_right`, o el desplazamiento en raw.
+            let fields: Vec<String> = if state.raw.is_some() {
+                vec![crate::raw_offset(state.raw_cursor)]
+            } else {
+                crate::status_right(&state.doc, state.encoding, state.eol).to_vec()
+            };
+            let mut xr = r.right - layout::STATUS_PAD_X;
+            for (i, field) in fields.iter().enumerate().rev() {
+                let w = self.measure(field, label_font);
+                if merged && i > 0 {
+                    let sep = "· ";
+                    let sw = self.measure(sep, label_font);
+                    xr -= sw;
+                    self.text(sep, label_font, Rect::new(xr, r.top, xr + sw, r.bottom), pal.text_3);
+                }
+                xr -= w;
+                self.text(field, label_font, Rect::new(xr, r.top, xr + w, r.bottom), pal.text_2);
+                if !merged {
+                    xr -= layout::STATUS_FLD_PAD_X * 2.0 + layout::STATUS_R_GAP;
+                }
+            }
+        }
+    }
+
+    /// Candado (`LOCK` de la maqueta): sin permiso de escritura, junto al lápiz.
+    fn draw_lock(&self, pal: &theme::Palette, x: f32, r: Rect) {
+        let top = r.top + (r.height() - 12.0) / 2.0;
+        let c = theme::Rgba(pal.text_3.0, pal.text_3.1, pal.text_3.2, pal.text_3.3 * 0.5);
+        self.stroke_round_rect(Rect::new(x + 3.0, top + 7.0, x + 10.0, top + 12.0), 1.5, 1.3, c);
+        self.stroke_line(x + 5.5, top + 7.0, x + 5.5, top + 5.0, 1.3, c);
+        self.stroke_line(x + 5.5, top + 5.0, x + 8.0, top + 5.0, 1.3, c);
+        self.stroke_line(x + 8.0, top + 5.0, x + 10.5, top + 7.0, 1.3, c);
+    }
+
+    /// Botón de lápiz (`PENCIL`): alterna el permiso de escritura de la vista raw.
+    #[allow(unused_unsafe)]
+    unsafe fn draw_pencil(&mut self, raw: &crate::RawDoc, pal: &theme::Palette, x: f32, r: Rect) {
+        unsafe {
+            let btn = Rect::new(x, r.top + (r.height() - 22.0) / 2.0, x + 24.0, r.top + (r.height() + 22.0) / 2.0);
+            let (bg, fg) = if raw.is_editing() {
+                (Some(pal.accent_soft), pal.accent)
+            } else if raw.writable_fs() {
+                (None, pal.text_2)
+            } else {
+                (None, theme::Rgba(pal.text_3.0, pal.text_3.1, pal.text_3.2, pal.text_3.3 * 0.5))
+            };
+            if let Some(bg) = bg {
+                self.fill_round(btn, 4.0, bg);
+            }
+            let px = btn.left + (btn.width() - 14.0) / 2.0;
+            let py = btn.top + (btn.height() - 14.0) / 2.0;
+            self.stroke_line(px + 11.0, py + 2.5, px + 13.5, py + 5.0, 1.3, fg);
+            self.stroke_line(px + 13.5, py + 5.0, px + 6.0, py + 12.5, 1.3, fg);
+            self.stroke_line(px + 6.0, py + 12.5, px + 2.8, py + 13.2, 1.3, fg);
+            self.stroke_line(px + 2.8, py + 13.2, px + 3.5, py + 10.0, 1.3, fg);
+            self.stroke_line(px + 3.5, py + 10.0, px + 11.0, py + 2.5, 1.3, fg);
+            self.hits.push((btn, Hit::Pencil));
+        }
+    }
+
+    /// Prompt activo (ruta, buscar/reemplazar, línea de comandos vim), ocupando la
+    /// franja de estado entera.
+    #[allow(unused_unsafe)]
+    unsafe fn draw_prompt(&mut self, prompt: &crate::Prompt, state: &EditorState, pal: &theme::Palette, r: Rect, merged: bool) {
+        unsafe {
+            match prompt {
+                crate::Prompt::Path(p) => self.draw_path_prompt(p, pal, r),
+                crate::Prompt::Find(s) => self.draw_search_bar(s, &state.doc, pal, r, false),
+                crate::Prompt::Replace(s) => self.draw_search_bar(s, &state.doc, pal, r, true),
+                crate::Prompt::VimCmdline(line) => {
+                    let label_c = if merged { pal.accent } else { pal.text_3 };
+                    let x = r.left + layout::STATUS_PAD_X;
+                    let w = self.measure(":", &self.fonts.ui_11_5);
+                    self.text(":", &self.fonts.ui_11_5, Rect::new(x, r.top, x + w, r.bottom), label_c);
+                    let fx = x + w + 4.0;
+                    self.text(line, &self.fonts.mono_12_5, Rect::new(fx, r.top, r.right - layout::STATUS_PAD_X, r.bottom), pal.text);
+                }
+                crate::Prompt::None => {}
+            }
+        }
+    }
+
+    #[allow(unused_unsafe)]
+    unsafe fn draw_path_prompt(&mut self, p: &crate::PathPromptState, pal: &theme::Palette, r: Rect) {
+        unsafe {
+            let x = r.left + layout::STATUS_PAD_X;
+            let value_color = if p.is_invalid() { pal.danger } else { pal.text };
+
+            let placeholder = match p.purpose {
+                crate::Purpose::Open => "ruta del archivo",
+                crate::Purpose::Save => "ruta donde guardar",
+            };
+
+            if p.value.is_empty() {
+                let w = self.measure(placeholder, &self.fonts.mono_12_5);
+                self.text(placeholder, &self.fonts.mono_12_5, Rect::new(x, r.top, x + w, r.bottom), pal.text_3);
+            } else {
+                let vw = self.measure(&p.value, &self.fonts.mono_12_5);
+                self.text(&p.value, &self.fonts.mono_12_5, Rect::new(x, r.top, x + vw, r.bottom), value_color);
+                let caret_x = x + vw;
+                let ghost = p.ghost();
+                if !ghost.is_empty() {
+                    let gw = self.measure(&ghost, &self.fonts.mono_12_5);
+                    self.text(&ghost, &self.fonts.mono_12_5, Rect::new(caret_x, r.top, caret_x + gw, r.bottom), pal.text_3);
+                }
+                self.fill(Rect::new(caret_x, r.top + 4.0, caret_x + 1.0, r.bottom - 4.0), pal.text);
+            }
+
+            // Derecha: la palabra de estado, y "Tab ↹" si hay sugerencias.
+            let sugs = p.suggestions();
+            let mut xr = r.right - layout::STATUS_PAD_X;
+            if !sugs.is_empty() {
+                let tab_label = "Tab ↹";
+                let w = self.measure(tab_label, &self.fonts.ui_11_5);
+                xr -= w;
+                self.text(tab_label, &self.fonts.ui_11_5, Rect::new(xr, r.top, xr + w, r.bottom), pal.text_3);
+                xr -= 10.0;
+            }
+            let word = p.hint_word();
+            if !word.is_empty() {
+                let wc = if p.is_invalid() { pal.danger } else { pal.text_3 };
+                let w = self.measure(word, &self.fonts.ui_11_5);
+                xr -= w;
+                self.text(word, &self.fonts.ui_11_5, Rect::new(xr, r.top, xr + w, r.bottom), wc);
+            }
+
+            if !sugs.is_empty() {
+                self.draw_suggestions(&sugs, p.selected, pal, r);
+            }
+        }
+    }
+
+    /// Lista de sugerencias de ruta (`.psuggest`), hasta 5 filas, justo encima de la
+    /// barra de estado. Aproxima la sombra difusa de la maqueta con un borde de 1 px
+    /// en `shadow_ring` en vez de los 4 anillos concéntricos exactos (desviación menor
+    /// por tiempo: el resultado es legible y del color correcto, pero menos difuso).
+    #[allow(unused_unsafe)]
+    unsafe fn draw_suggestions(&mut self, sugs: &[notty_io::Entry], selected: usize, pal: &theme::Palette, status: Rect) {
+        unsafe {
+            let row_h = 24.0;
+            let longest = sugs.iter().map(|e| self.measure(&e.name, &self.fonts.mono_12)).fold(0.0f32, f32::max);
+            let width = (longest + 16.0 + 16.0).clamp(220.0, 360.0);
+            let height = row_h * sugs.len() as f32 + layout::POPUP_PAD * 2.0;
+            let box_r = Rect::new(12.0, status.top - 2.0 - height, 12.0 + width, status.top - 2.0);
+
+            self.fill_round(Rect::new(box_r.left - 2.0, box_r.top - 2.0, box_r.right + 2.0, box_r.bottom + 2.0), layout::POPUP_RADIUS + 2.0, pal.shadow);
+            self.fill_round(box_r, layout::POPUP_RADIUS, pal.chrome_hi);
+            self.stroke_round_rect(box_r, layout::POPUP_RADIUS, 1.0, pal.shadow_ring);
+
+            for (i, entry) in sugs.iter().enumerate() {
+                let row_top = box_r.top + layout::POPUP_PAD + row_h * i as f32;
+                let row = Rect::new(box_r.left + layout::POPUP_PAD, row_top, box_r.right - layout::POPUP_PAD, row_top + row_h);
+                if i == selected {
+                    self.fill_round(row, 5.0, pal.accent_soft);
+                }
+                let label = if entry.is_dir { format!("{}\\", entry.name) } else { entry.name.clone() };
+                let c = if i == selected { pal.accent } else if entry.is_dir { pal.text } else { pal.text_2 };
+                self.text(&label, &self.fonts.mono_12, Rect::new(row.left + 8.0, row.top, row.right - 8.0, row.bottom), c);
+                self.hits.push((row, Hit::Suggestion(i)));
+            }
+        }
+    }
+
+    #[allow(unused_unsafe)]
+    unsafe fn draw_search_bar(&mut self, s: &crate::SearchState, doc: &notty_core::Document, pal: &theme::Palette, r: Rect, is_replace: bool) {
+        unsafe {
+            // Cluster de la derecha: contador + Aa/ab/.* , calculado primero para saber
+            // cuánto espacio le queda al campo de la izquierda.
+            let count = s.count_label(doc);
+            let count_color = if count == "regex ✕" { pal.danger } else { pal.text_3 };
+            let count_w = self.measure(&count, &self.fonts.mono_11_5).max(44.0);
+
+            let mut xr = r.right - layout::STATUS_PAD_X;
+            let opts = [(".*", s.opts.regex, 2u8), ("ab", s.opts.whole_word, 1u8), ("Aa", s.opts.case_sensitive, 0u8)];
+            let mut opt_rects = Vec::new();
+            for (label, on, idx) in opts {
+                let w = self.measure(label, &self.fonts.mono_11) + 10.0;
+                xr -= w;
+                let rr = Rect::new(xr, r.top + 3.0, xr + w, r.bottom - 3.0);
+                opt_rects.push((rr, label, on, idx));
+                xr -= 4.0;
+            }
+            xr -= 10.0;
+            let count_r = Rect::new(xr - count_w, r.top, xr, r.bottom);
+            self.text_right(&count, &self.fonts.mono_11_5, count_r, count_color);
+            let right_cluster_start = count_r.left - 10.0;
+
+            for (rr, label, on, idx) in opt_rects {
+                let (bg, fg) = if on { (Some(pal.accent_soft), pal.accent) } else { (None, pal.text_3) };
+                if let Some(bg) = bg {
+                    self.fill_round(rr, 3.0, bg);
+                }
+                self.text(label, &self.fonts.mono_11, rr, fg);
+                self.hits.push((rr, Hit::SearchOpt(idx)));
+            }
+
+            // Izquierda: etiqueta(s) + campo(s), en el espacio libre hasta `right_cluster_start`.
+            let mut x = r.left + layout::STATUS_PAD_X;
+            let verb = "buscar";
+            let vw = self.measure(verb, &self.fonts.ui_11_5);
+            self.text(verb, &self.fonts.ui_11_5, Rect::new(x, r.top, x + vw, r.bottom), pal.text_3);
+            x += vw + 8.0;
+
+            if is_replace {
+                let field_w = ((right_cluster_start - x) / 2.0 - 40.0).max(40.0);
+                let field1 = Rect::new(x, r.top, x + field_w, r.bottom);
+                self.draw_search_field(&s.query, field1, pal, !s.editing_replacement);
+                self.hits.push((field1, Hit::SearchField(0)));
+                x = field1.right + 10.0;
+
+                let por = "por";
+                let pw = self.measure(por, &self.fonts.ui_11_5);
+                self.text(por, &self.fonts.ui_11_5, Rect::new(x, r.top, x + pw, r.bottom), pal.text_3);
+                x += pw + 8.0;
+
+                let field2 = Rect::new(x, r.top, right_cluster_start, r.bottom);
+                self.draw_search_field(&s.replacement, field2, pal, s.editing_replacement);
+                self.hits.push((field2, Hit::SearchField(1)));
+            } else {
+                let field1 = Rect::new(x, r.top, right_cluster_start, r.bottom);
+                self.draw_search_field(&s.query, field1, pal, true);
+                self.hits.push((field1, Hit::SearchField(0)));
+            }
+        }
+    }
+
+    fn draw_search_field(&self, value: &str, r: Rect, pal: &theme::Palette, active_caret: bool) {
+        let vw = self.measure(value, &self.fonts.mono_12_5);
+        self.text(value, &self.fonts.mono_12_5, r, pal.text);
+        if active_caret {
+            let cx = r.left + vw.min(r.width().max(0.0));
+            self.fill(Rect::new(cx, r.top + 4.0, cx + 1.0, r.bottom - 4.0), pal.text);
         }
     }
 }

@@ -8,12 +8,43 @@ pub struct SearchState {
     pub replacement: String,
     pub opts: SearchOptions,
     pub current: usize,
+    /// Solo tiene sentido en el prompt de reemplazar: si `true`, lo tecleado va al
+    /// campo «por» (`replacement`) en vez de al de búsqueda (`query`). `Tab` o un
+    /// clic en `Hit::SearchField` lo alternan.
+    pub editing_replacement: bool,
 }
 
 impl SearchState {
     pub fn set_query(&mut self, query: String) {
         self.query = query;
         self.current = 0;
+    }
+
+    /// Añade `ch` al campo activo (`replacement` si `editing_replacement`, si no
+    /// `query`). El contador de coincidencias solo se resetea cuando cambia `query`.
+    pub fn type_char(&mut self, ch: char) {
+        if self.editing_replacement {
+            self.replacement.push(ch);
+        } else {
+            let mut q = self.query.clone();
+            q.push(ch);
+            self.set_query(q);
+        }
+    }
+
+    /// Borra el último char del campo activo.
+    pub fn backspace(&mut self) {
+        if self.editing_replacement {
+            self.replacement.pop();
+        } else {
+            let mut q = self.query.clone();
+            q.pop();
+            self.set_query(q);
+        }
+    }
+
+    pub fn toggle_field(&mut self) {
+        self.editing_replacement = !self.editing_replacement;
     }
 
     pub fn matches(&self, doc: &Document) -> Result<Vec<Range<usize>>, SearchError> {
@@ -125,6 +156,36 @@ mod tests {
         s.toggle_case();
         assert_eq!(s.matches(&doc()).unwrap().len(), 1);
         assert_eq!(s.current, 0);
+    }
+
+    #[test]
+    fn typing_goes_to_query_by_default() {
+        let mut s = SearchState::default();
+        s.type_char('a');
+        s.type_char('b');
+        assert_eq!(s.query, "ab");
+        assert_eq!(s.replacement, "");
+    }
+
+    #[test]
+    fn toggle_field_routes_typing_to_replacement() {
+        let mut s = SearchState::default();
+        s.toggle_field();
+        s.type_char('x');
+        assert_eq!(s.query, "");
+        assert_eq!(s.replacement, "x");
+    }
+
+    #[test]
+    fn backspace_removes_from_the_active_field() {
+        let mut s = SearchState::default();
+        s.set_query("abc".into());
+        s.backspace();
+        assert_eq!(s.query, "ab");
+        s.toggle_field();
+        s.replacement = "xyz".into();
+        s.backspace();
+        assert_eq!(s.replacement, "xy");
     }
 
     #[test]
