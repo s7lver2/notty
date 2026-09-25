@@ -56,7 +56,7 @@ crates/notty/src/shortcut.rs            crear el .lnk con atajo (nuevo)
   - `pub struct HotkeyConfig { pub mechanism: HotkeyMechanism, pub start_with_windows: bool }` (`Default`: `mechanism=Daemon, start_with_windows=true`).
   - `Config` gana los campos `pub files: FilesConfig` y `pub hotkey: HotkeyConfig` (ambos `#[serde(default)]`, igual que `ui`).
 
-- [ ] **Step 1: Escribir los tests que fallan**
+- [x] **Step 1: Escribir los tests que fallan**
 
 Añadir a `mod tests` en `crates/notty-config/src/model.rs`:
 
@@ -102,12 +102,12 @@ Añadir a `mod tests` en `crates/notty-config/src/model.rs`:
     }
 ```
 
-- [ ] **Step 2: Ejecutar y ver que falla**
+- [x] **Step 2: Ejecutar y ver que falla**
 
 Run: `cargo test -p notty-config model`
 Expected: FAIL de compilación, `cannot find type FilesConfig`.
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 Añadir a `crates/notty-config/src/model.rs`, junto a los `enum`/`struct` ya existentes:
 
@@ -176,12 +176,12 @@ pub struct Config {
 pub use model::{Config, Files, FilesConfig, HotkeyConfig, HotkeyMechanism, MenuBar, Preset, TabsPosition, TempMode, Theme, UiConfig};
 ```
 
-- [ ] **Step 4: Ejecutar y ver que pasa**
+- [x] **Step 4: Ejecutar y ver que pasa**
 
 Run: `cargo test --workspace`
 Expected: PASS, +5 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/notty-config

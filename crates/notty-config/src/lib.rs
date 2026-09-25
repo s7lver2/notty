@@ -4,6 +4,6 @@ mod model;
 mod preset;
 mod storage;
 
-pub use model::{Config, Files, MenuBar, Preset, TabsPosition, Theme, UiConfig};
+pub use model::{Config, Files, FilesConfig, HotkeyConfig, HotkeyMechanism, MenuBar, Preset, TabsPosition, TempMode, Theme, UiConfig};
 pub use preset::apply_preset;
 pub use storage::{LoadResult, default_path, load, save};
