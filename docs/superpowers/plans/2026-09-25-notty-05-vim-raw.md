@@ -488,7 +488,7 @@ git commit -m "feat(ui): modo vim (normal/insert/visual) sobre Document"
 - Consumes: nada (el resultado lo ejecuta `window.rs`).
 - Produces: `pub enum VimCmd { Save, Quit, SaveAndQuit, Substitute { pattern: String, replacement: String, global: bool, ignore_case: bool }, Unknown(String) }` y `pub fn parse_vim_cmd(line: &str) -> VimCmd`. Reconoce `w`, `q`, `wq`, `x` (alias de `wq`), y `%s/patrón/reemplazo/flags` con `/` escapable como `\/` dentro de patrón/reemplazo; cualquier otra cosa es `Unknown(line.to_string())`.
 
-- [ ] **Step 1: Escribir los tests que fallan**
+- [x] **Step 1: Escribir los tests que fallan**
 
 `crates/notty-ui/src/vim_cmd.rs`:
 
@@ -541,12 +541,12 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Ejecutar y ver que falla**
+- [x] **Step 2: Ejecutar y ver que falla**
 
 Run: `cargo test -p notty-ui vim_cmd`
 Expected: FAIL de compilación, `cannot find function parse_vim_cmd`.
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 Añadir **encima** del módulo de tests en `crates/notty-ui/src/vim_cmd.rs`:
 
@@ -606,12 +606,12 @@ fn split_unescaped_slash(s: &str) -> Vec<&str> {
 }
 ```
 
-- [ ] **Step 4: Ejecutar y ver que pasa**
+- [x] **Step 4: Ejecutar y ver que pasa**
 
 Run: `cargo test --workspace`
 Expected: PASS, +6 tests sobre los de la Task 2.
 
-- [ ] **Step 5: Exportar los módulos nuevos**
+- [x] **Step 5: Exportar los módulos nuevos**
 
 `crates/notty-ui/src/lib.rs` añade (junto a los `mod`/`pub use` ya existentes de los planes anteriores):
 
@@ -623,7 +623,7 @@ pub use vim::{VimMode, VimOutcome, VimState};
 pub use vim_cmd::{VimCmd, parse_vim_cmd};
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/notty-ui

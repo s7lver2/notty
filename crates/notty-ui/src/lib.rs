@@ -14,6 +14,7 @@ pub mod settings_window;
 mod status;
 mod viewport;
 mod vim;
+mod vim_cmd;
 pub mod window;
 pub mod workspace;
 
@@ -29,4 +30,5 @@ pub use search_prompt::SearchState;
 pub use status::status_line;
 pub use viewport::Viewport;
 pub use vim::{VimMode, VimOutcome, VimState};
+pub use vim_cmd::{VimCmd, parse_vim_cmd};
 pub use workspace::Workspace;
