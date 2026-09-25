@@ -36,7 +36,8 @@ use crate::theme::{self, Rgba};
 
 /// Geometría de un `Select` abierto, para dibujar su desplegable al final de `paint`
 /// (igual que `pending_dropdown` en `render.rs`): fila, caja y sus opciones.
-type OpenSelectGeom = (usize, Rect, &'static [(&'static str, SettingValue)]);
+/// `(fila, caja, opciones, índice de la opción actualmente seleccionada)`.
+type OpenSelectGeom = (usize, Rect, &'static [(&'static str, SettingValue)], usize);
 use crate::{Renderer, is_dark};
 
 const TITLEBAR_H: f32 = 36.0;
@@ -614,7 +615,7 @@ fn paint(st: &mut State) {
                 r.text("˅", &r.fonts().ui_12_5, Rect::new(box_r.right - 20.0, box_r.top, box_r.right - 6.0, box_r.bottom), pal.text_2);
                 st.hits.push((box_r, Hit::SelectBox(i)));
                 if st.open_select == Some(i) {
-                    open_select_geom = Some((i, box_r, options));
+                    open_select_geom = Some((i, box_r, options, selected));
                 }
                 ry += rr.height() + 3.0;
             }
@@ -641,7 +642,7 @@ fn paint(st: &mut State) {
         }
     }
 
-    if let Some((row_idx, box_r, options)) = open_select_geom {
+    if let Some((row_idx, box_r, options, selected)) = open_select_geom {
         // Fundido + 4px de desplazamiento al abrirse, mismo tratamiento que el menú y
         // las sugerencias de la ventana principal (Task 3 del plan de animaciones).
         let st_t = st.select_open_anim.map(|a| a.value(Instant::now(), 0.0, 1.0)).unwrap_or(1.0);
@@ -664,14 +665,20 @@ fn paint(st: &mut State) {
         for (j, (label, _)) in options.iter().enumerate() {
             let or_ = Rect::new(dd.left + 4.0, oy, dd.right - 4.0, oy + row_h);
             let draw_or = Rect::new(draw_dd.left + 4.0, draw_y(oy), draw_dd.right - 4.0, draw_y(oy + row_h));
-            if st.hover == Hit::SelectOption(j) {
+            // La opción actualmente seleccionada se marca (fondo accent_soft + texto
+            // accent) aunque el ratón esté sobre otra, igual que `.prow.sel` en las
+            // sugerencias de ruta (Task 6 del plan de animaciones/pulido).
+            if j == selected {
+                r.fill_round(draw_or, 4.0, pal.accent_soft.faded(st_t));
+            } else if st.hover == Hit::SelectOption(j) {
                 r.fill_round(draw_or, 4.0, pal.hover.faded(st_t));
             }
+            let label_c = if j == selected { pal.accent } else { pal.text };
             r.text(
                 label,
                 &r.fonts().mono_12,
                 Rect::new(draw_or.left + 8.0, draw_or.top, draw_or.right - 8.0, draw_or.bottom),
-                pal.text.faded(st_t),
+                label_c.faded(st_t),
             );
             st.hits.push((or_, Hit::SelectOption(j)));
             oy += row_h;

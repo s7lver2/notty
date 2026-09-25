@@ -328,9 +328,9 @@ En `settings_window::open`, la ventana ya se crea y se muestra (`ShowWindow`); e
 
 Bug de pulido encontrado al revisar `draw` del desplegable abierto (`Row::Select`): las filas de las opciones no marcan cuál es la actualmente seleccionada (solo se resalta la que tiene el ratón encima, `Hit::SelectOption`). En la maqueta (`.menu-item kbd`, fila con `✓`) y en cualquier desplegable nativo de Windows, la opción activa lleva una marca aunque el ratón esté sobre otra.
 
-- [ ] **Step 1:** En el bucle que dibuja las filas del desplegable abierto, calcula `selected = selected_option_index(&st.cfg.borrow(), key, options)` (la misma función que ya usa `Row::Select` para pintar la etiqueta cerrada) y, para la fila `j == selected`, añade un `✓` a la izquierda del texto (o cambia su color a `pal.accent`, lo que quede más consistente con el resto de la app — mira cómo la maqueta marca la fila seleccionada de las sugerencias de ruta, `.prow.sel`, y replica ese mismo lenguaje visual: fondo `accent_soft` + texto `accent`, en vez de limitarte al hover).
-- [ ] **Step 2:** Compilar, abrir un desplegable de Ajustes (p.ej. "Posición de las pestañas") y capturar: la opción activa debe distinguirse de las demás incluso sin el ratón encima.
-- [ ] **Step 3: Commit** `fix(ui): el desplegable de Ajustes marca cuál es la opción actual`
+- [x] **Step 1:** En el bucle que dibuja las filas del desplegable abierto, calcula `selected = selected_option_index(&st.cfg.borrow(), key, options)` (la misma función que ya usa `Row::Select` para pintar la etiqueta cerrada) y, para la fila `j == selected`, añade un `✓` a la izquierda del texto (o cambia su color a `pal.accent`, lo que quede más consistente con el resto de la app — mira cómo la maqueta marca la fila seleccionada de las sugerencias de ruta, `.prow.sel`, y replica ese mismo lenguaje visual: fondo `accent_soft` + texto `accent`, en vez de limitarte al hover).
+- [x] **Step 2:** Compilar, abrir un desplegable de Ajustes (p.ej. "Posición de las pestañas") y capturar: la opción activa debe distinguirse de las demás incluso sin el ratón encima.
+- [x] **Step 3: Commit** `fix(ui): el desplegable de Ajustes marca cuál es la opción actual`
 
 ---
 
