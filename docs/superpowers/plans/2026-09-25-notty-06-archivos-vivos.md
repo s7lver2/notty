@@ -208,7 +208,7 @@ git commit -m "feat(config): FilesConfig y HotkeyConfig (temporales y atajo glob
   - `pub fn list_recovery(dir: &Path) -> Vec<RecoveryEntry>` (lee todos los `.txt` de `dir`; vacío si `dir` no existe).
   - `pub fn clear_recovery(dir: &Path) -> std::io::Result<()>` (borra `dir` entero si existe; `Ok(())` si no existía).
 
-- [ ] **Step 1: Escribir los tests que fallan**
+- [x] **Step 1: Escribir los tests que fallan**
 
 `crates/notty-io/src/drafts.rs`:
 
@@ -287,14 +287,14 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Ejecutar y ver que falla**
+- [x] **Step 2: Ejecutar y ver que falla**
 
 Añadir `mod drafts; mod recovery;` a `crates/notty-io/src/lib.rs`.
 
 Run: `cargo test -p notty-io drafts recovery`
 Expected: FAIL de compilación, `cannot find function drafts_dir`.
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 Añadir **encima** del módulo de tests en `crates/notty-io/src/drafts.rs`:
 
@@ -385,12 +385,12 @@ pub fn clear_recovery(dir: &Path) -> std::io::Result<()> {
 }
 ```
 
-- [ ] **Step 4: Ejecutar y ver que pasa**
+- [x] **Step 4: Ejecutar y ver que pasa**
 
 Run: `cargo test --workspace`
 Expected: PASS, +7 tests.
 
-- [ ] **Step 5: Exportar los módulos**
+- [x] **Step 5: Exportar los módulos**
 
 `crates/notty-io/src/lib.rs` añade:
 
@@ -399,7 +399,7 @@ pub use drafts::{drafts_dir, draft_filename};
 pub use recovery::{RecoveryEntry, clear_recovery, dump_recovery, list_recovery, recovery_dir};
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/notty-io
