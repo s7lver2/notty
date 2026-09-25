@@ -136,6 +136,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "notty-input"
+version = "0.1.0"
+dependencies = [
+ "notty-config",
+]
+
+[[package]]
 name = "notty-io"
 version = "0.1.0"
 dependencies = [

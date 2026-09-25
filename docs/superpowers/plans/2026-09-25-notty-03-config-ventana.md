@@ -372,7 +372,7 @@ git commit -m "feat(config): modelo de Config/UiConfig y presets"
 
 Nota de diseño: `Modifiers` se duplica entre `notty-ui` y `notty-input` a propósito (tres booleanos, coste de mantenimiento mínimo) para que ninguno de los dos dependa del otro; es `notty-ui::window` quien construye ambos tipos desde el mismo `WM_KEYDOWN` y los usa cada uno con su propio mapa.
 
-- [ ] **Step 1: Crear el crate**
+- [x] **Step 1: Crear el crate**
 
 `crates/notty-input/Cargo.toml`:
 
@@ -399,7 +399,7 @@ pub use command::{UiCommand, apply_overrides, default_ui_keymap};
 pub use keyspec::{Modifiers, parse_key_spec};
 ```
 
-- [ ] **Step 2: Escribir los tests que fallan**
+- [x] **Step 2: Escribir los tests que fallan**
 
 `crates/notty-input/src/keyspec.rs`:
 
@@ -487,12 +487,12 @@ mod tests {
 }
 ```
 
-- [ ] **Step 3: Ejecutar y ver que falla**
+- [x] **Step 3: Ejecutar y ver que falla**
 
 Run: `cargo test -p notty-input`
 Expected: FAIL de compilación, `cannot find function parse_key_spec`.
 
-- [ ] **Step 4: Implementar**
+- [x] **Step 4: Implementar**
 
 Añadir **encima** del módulo de tests en `crates/notty-input/src/keyspec.rs`:
 
@@ -594,12 +594,12 @@ pub fn default_ui_keymap() -> HashMap<(u32, Modifiers), UiCommand> {
 pub fn apply_overrides(_map: &mut HashMap<(u32, Modifiers), UiCommand>, _cfg: &notty_config::Config) {}
 ```
 
-- [ ] **Step 5: Ejecutar y ver que pasa**
+- [x] **Step 5: Ejecutar y ver que pasa**
 
 Run: `cargo test --workspace`
 Expected: PASS. `notty-input` pasa 10 tests; total del workspace 105 (95 anteriores + 10).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add Cargo.toml Cargo.lock crates/notty-input
