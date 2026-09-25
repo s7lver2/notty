@@ -1,17 +1,27 @@
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{
-    DWMSBT_MAINWINDOW, DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute,
+    DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmExtendFrameIntoClientArea,
+    DwmSetWindowAttribute,
 };
 use windows::Win32::Graphics::Gdi::{InvalidateRect, ValidateRect};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::UI::Controls::{MARGINS, WM_MOUSELEAVE};
+use windows::Win32::UI::HiDpi::{
+    DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForWindow, GetSystemMetricsForDpi,
+    SetProcessDpiAwarenessContext,
+};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetKeyState, ReleaseCapture, SetCapture, VK_CONTROL, VK_MENU, VK_SHIFT,
+    GetKeyState, ReleaseCapture, SetCapture, TME_LEAVE, TME_NONCLIENT, TRACKMOUSEEVENT, TrackMouseEvent, VK_CONTROL,
+    VK_MENU, VK_SHIFT,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DispatchMessageW, GWLP_USERDATA, GetClientRect,
-    GetMessageW, GetWindowLongPtrW, MSG, PostQuitMessage, RegisterClassExW, SW_SHOW, SetWindowLongPtrW,
-    SetWindowTextW, ShowWindow, TranslateMessage, WHEEL_DELTA, WM_CHAR, WM_DESTROY, WM_KEYDOWN,
-    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_PAINT, WM_SIZE, WM_SYSKEYDOWN, WNDCLASSEXW,
+    CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DispatchMessageW, GWLP_USERDATA, GetClientRect, GetMessageW,
+    GetWindowLongPtrW, HTCAPTION, HTCLIENT, HTMAXBUTTON, HTTOP, IsZoomed, MSG, NCCALCSIZE_PARAMS, PostQuitMessage,
+    RegisterClassExW, SM_CXPADDEDBORDER, SM_CYFRAME, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW,
+    SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos, SetWindowTextW,
+    ShowWindow, TranslateMessage, WHEEL_DELTA, WM_ACTIVATE, WM_CHAR, WM_DESTROY, WM_DPICHANGED, WM_KEYDOWN,
+    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCALCSIZE, WM_NCHITTEST, WM_NCLBUTTONDOWN,
+    WM_NCLBUTTONUP, WM_NCMOUSELEAVE, WM_NCMOUSEMOVE, WM_PAINT, WM_SETTINGCHANGE, WM_SIZE, WM_SYSKEYDOWN, WNDCLASSEXW,
     WS_EX_APPWINDOW, WS_OVERLAPPEDWINDOW,
 };
 use windows::core::{PCWSTR, Result, w};
@@ -19,7 +29,8 @@ use windows::core::{PCWSTR, Result, w};
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::{EditorState, Modifiers, Renderer, Viewport};
+use crate::layout;
+use crate::{EditorState, Hit, Modifiers, Renderer, Viewport};
 
 /// Estado ligado a una ventana concreta: se guarda en `GWLP_USERDATA` mientras vive.
 struct WindowState {
@@ -31,6 +42,10 @@ struct WindowState {
     ui_keymap: std::collections::HashMap<(u32, notty_input::Modifiers), notty_input::UiCommand>,
     /// Solo se usa cuando `cfg.ui.menubar == MenuBar::Alt`: si el menú está desplegado.
     menu_visible: bool,
+    /// Zona bajo el ratón / con el botón pulsado (barra de título, pestañas, ✕, +, ...).
+    hover: Hit,
+    pressed: Hit,
+    active_window: bool,
 }
 
 impl WindowState {
@@ -45,11 +60,19 @@ impl WindowState {
         ui
     }
 
-    /// Contexto de dibujo que no vive en `Workspace`/`UiConfig` (Task 5: solo el tema;
-    /// hover/pressed/maximized/menú llegan con la barra de título propia en la Task 6).
-    fn view_state(&self) -> crate::ViewState {
+    /// Contexto de dibujo que no vive en `Workspace`/`UiConfig`.
+    fn view_state(&self, hwnd: HWND) -> crate::ViewState {
         let dark = crate::is_dark(self.cfg.borrow().ui.theme, system_uses_dark_mode());
-        crate::ViewState { dark, ..Default::default() }
+        let maximized = unsafe { IsZoomed(hwnd).as_bool() };
+        crate::ViewState {
+            dark,
+            hover: self.hover,
+            pressed: self.pressed,
+            maximized,
+            active_window: self.active_window,
+            menu_bar_visible: self.cfg.borrow().ui.menubar == notty_config::MenuBar::Visible || self.menu_visible,
+            open_menu: None,
+        }
     }
 }
 
@@ -97,6 +120,11 @@ pub fn run(path: Option<&str>, load: notty_config::LoadResult) -> Result<()> {
     };
 
     unsafe {
+        // Per-monitor v2: cada ventana sigue el DPI del monitor en el que está, sin
+        // reescalado borroso. Si ya estaba puesto (p.ej. por el manifiesto), se ignora
+        // el error: no es fatal.
+        let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+
         let instance = GetModuleHandleW(None)?;
         let class_name = w!("NottyWindowClass");
 
@@ -117,7 +145,7 @@ pub fn run(path: Option<&str>, load: notty_config::LoadResult) -> Result<()> {
             WS_OVERLAPPEDWINDOW,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
-            900,
+            920,
             600,
             None,
             None,
@@ -125,7 +153,22 @@ pub fn run(path: Option<&str>, load: notty_config::LoadResult) -> Result<()> {
             None,
         )?;
 
-        enable_mica(hwnd);
+        // La ventana se creó con un tamaño nominal en píxeles; ahora que existe, se
+        // conoce su DPI real y se ajusta a 920x600 DIPs exactos.
+        let dpi0 = GetDpiForWindow(hwnd);
+        let scale0 = dpi0 as f32 / 96.0;
+        let _ = SetWindowPos(
+            hwnd,
+            None,
+            0,
+            0,
+            (920.0 * scale0).round() as i32,
+            (600.0 * scale0).round() as i32,
+            SWP_NOMOVE | SWP_NOZORDER,
+        );
+
+        let dark = crate::is_dark(cfg.ui.theme, system_uses_dark_mode());
+        setup_chrome(hwnd, dark);
 
         let mut ws = crate::Workspace::new();
         if let Some(p) = path {
@@ -144,14 +187,16 @@ pub fn run(path: Option<&str>, load: notty_config::LoadResult) -> Result<()> {
                 }
             }
         }
-        let dpi = windows::Win32::UI::HiDpi::GetDpiForWindow(hwnd);
+        let dpi = GetDpiForWindow(hwnd);
         let renderer = Renderer::new(hwnd, dpi)?;
 
         let mut client = RECT::default();
         let _ = GetClientRect(hwnd, &mut client);
-        let height = (client.bottom - client.top).max(0) as f32;
-        ws.active_mut().viewport =
-            Viewport::new(renderer.line_height(), (height - renderer.line_height()).max(0.0));
+        let scale = renderer.scale();
+        let height = ((client.bottom - client.top).max(0) as f32) / scale;
+        let width = ((client.right - client.left).max(0) as f32) / scale;
+        let frame = layout::frame(width, height, layout::Bands::default());
+        ws.active_mut().viewport = Viewport::new(renderer.line_height(), frame.body.height());
         update_title(hwnd, ws.active());
 
         let ui_keymap = {
@@ -169,6 +214,9 @@ pub fn run(path: Option<&str>, load: notty_config::LoadResult) -> Result<()> {
             cfg,
             ui_keymap,
             menu_visible: false,
+            hover: Hit::None,
+            pressed: Hit::None,
+            active_window: true,
         });
         let ptr = Box::into_raw(window_state);
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, ptr as isize);
@@ -186,23 +234,48 @@ pub fn run(path: Option<&str>, load: notty_config::LoadResult) -> Result<()> {
     Ok(())
 }
 
-/// Activa el fondo Mica y el modo oscuro de la barra de título si el sistema está en oscuro.
-/// Si `DwmSetWindowAttribute` falla (Windows más viejo que 11 22621), la ventana sigue
-/// funcionando con el fondo por defecto: no es un error fatal.
-unsafe fn enable_mica(hwnd: HWND) {
+/// Prepara la ventana para dibujar su propia barra de título: quita la nativa (con
+/// `WM_NCCALCSIZE`, ver `wndproc`) pero deja que DWM siga dibujando sombra y esquinas
+/// redondeadas (`DwmExtendFrameIntoClientArea` con un margen de 1 px arriba). Sin Mica:
+/// la maqueta usa colores sólidos. Si `DwmSetWindowAttribute` falla (Windows más viejo
+/// que 11), la ventana sigue funcionando con el aspecto por defecto: no es fatal.
+unsafe fn setup_chrome(hwnd: HWND, dark: bool) {
     unsafe {
-        let dark: i32 = if system_uses_dark_mode() { 1 } else { 0 };
+        apply_dark_mode(hwnd, dark);
+
+        let prefer_round = DWMWCP_ROUND;
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            &prefer_round as *const _ as *const _,
+            std::mem::size_of_val(&prefer_round) as u32,
+        );
+
+        let margins = MARGINS { cxLeftWidth: 0, cxRightWidth: 0, cyTopHeight: 1, cyBottomHeight: 0 };
+        let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
+
+        // Fuerza a que WM_NCCALCSIZE se vuelva a evaluar ya sin la barra nativa.
+        let _ = SetWindowPos(
+            hwnd,
+            None,
+            0,
+            0,
+            0,
+            0,
+            SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER,
+        );
+    }
+}
+
+/// `DWMWA_USE_IMMERSIVE_DARK_MODE`: oscurece el marco nativo (los 4 px de borde que
+/// sigue dibujando DWM). Se vuelve a llamar cuando cambia el tema (Task 10).
+unsafe fn apply_dark_mode(hwnd: HWND, dark: bool) {
+    unsafe {
+        let value: i32 = if dark { 1 } else { 0 };
         let _ = DwmSetWindowAttribute(
             hwnd,
             DWMWA_USE_IMMERSIVE_DARK_MODE,
-            &dark as *const _ as *const _,
-            std::mem::size_of::<i32>() as u32,
-        );
-        let backdrop = DWMSBT_MAINWINDOW.0;
-        let _ = DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_SYSTEMBACKDROP_TYPE,
-            &backdrop as *const _ as *const _,
+            &value as *const _ as *const _,
             std::mem::size_of::<i32>() as u32,
         );
     }
@@ -236,7 +309,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             WM_PAINT => {
                 if let Some(w) = ptr.as_mut() {
                     let ui = w.render_ui();
-                    let view = w.view_state();
+                    let view = w.view_state(hwnd);
                     w.renderer.paint(&w.ws, &ui, &view);
                 }
                 let _ = ValidateRect(Some(hwnd), None);
@@ -247,12 +320,165 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     let width = (lparam.0 as u32) & 0xFFFF;
                     let height = ((lparam.0 as u32) >> 16) & 0xFFFF;
                     w.renderer.resize(width, height);
-                    let line_height = w.renderer.line_height();
-                    let new_viewport = Viewport::new(line_height, (height as f32 - line_height).max(0.0));
-                    w.ws.active_mut().viewport.visible_lines = new_viewport.visible_lines;
+                    let scale = w.renderer.scale();
+                    let (w_dip, h_dip) = (width as f32 / scale, height as f32 / scale);
+                    let frame = layout::frame(w_dip, h_dip, layout::Bands::default());
+                    w.ws.active_mut().viewport.visible_lines = layout::visible_lines(frame.body);
                     let _ = InvalidateRect(Some(hwnd), None, false);
                 }
                 LRESULT(0)
+            }
+            WM_NCCALCSIZE if wparam.0 != 0 => {
+                // Quita la barra de título nativa pero conserva los bordes de
+                // redimensionar de los lados y de abajo (técnica de Windows Terminal).
+                let params = &mut *(lparam.0 as *mut NCCALCSIZE_PARAMS);
+                let original_top = params.rgrc[0].top;
+                let r = DefWindowProcW(hwnd, msg, wparam, lparam);
+                params.rgrc[0].top = original_top;
+                if IsZoomed(hwnd).as_bool() {
+                    // Maximizada, Windows la saca unos px por arriba: se recuperan.
+                    let dpi = GetDpiForWindow(hwnd);
+                    params.rgrc[0].top +=
+                        GetSystemMetricsForDpi(SM_CYFRAME, dpi) + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+                }
+                r
+            }
+            WM_NCHITTEST => {
+                let def = DefWindowProcW(hwnd, msg, wparam, lparam);
+                if def.0 as u32 != HTCLIENT {
+                    return def;
+                }
+                if let Some(w) = ptr.as_mut() {
+                    let x = (lparam.0 as i16) as i32;
+                    let y = ((lparam.0 >> 16) as i16) as i32;
+                    let mut pt = windows::Win32::Foundation::POINT { x, y };
+                    let _ = windows::Win32::Graphics::Gdi::ScreenToClient(hwnd, &mut pt);
+                    let scale = w.renderer.scale();
+                    let (x_dip, y_dip) = (pt.x as f32 / scale, pt.y as f32 / scale);
+
+                    if !IsZoomed(hwnd).as_bool() {
+                        let dpi = GetDpiForWindow(hwnd);
+                        let border = (GetSystemMetricsForDpi(SM_CYFRAME, dpi)
+                            + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi)) as f32;
+                        if (pt.y as f32) < border {
+                            return LRESULT(HTTOP as isize);
+                        }
+                    }
+                    match w.renderer.hit(x_dip, y_dip) {
+                        Hit::Max => LRESULT(HTMAXBUTTON as isize),
+                        Hit::Caption => LRESULT(HTCAPTION as isize),
+                        _ => LRESULT(HTCLIENT as isize),
+                    }
+                } else {
+                    LRESULT(HTCLIENT as isize)
+                }
+            }
+            WM_NCLBUTTONDOWN => {
+                let x = (lparam.0 as i16) as i32;
+                let y = ((lparam.0 >> 16) as i16) as i32;
+                let mut pt = windows::Win32::Foundation::POINT { x, y };
+                let _ = windows::Win32::Graphics::Gdi::ScreenToClient(hwnd, &mut pt);
+                if let Some(w) = ptr.as_mut() {
+                    let scale = w.renderer.scale();
+                    if w.renderer.hit(pt.x as f32 / scale, pt.y as f32 / scale) == Hit::Max {
+                        w.pressed = Hit::Max;
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                        return LRESULT(0);
+                    }
+                }
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
+            WM_NCLBUTTONUP => {
+                let x = (lparam.0 as i16) as i32;
+                let y = ((lparam.0 >> 16) as i16) as i32;
+                let mut pt = windows::Win32::Foundation::POINT { x, y };
+                let _ = windows::Win32::Graphics::Gdi::ScreenToClient(hwnd, &mut pt);
+                if let Some(w) = ptr.as_mut() {
+                    let scale = w.renderer.scale();
+                    let was_pressed = w.pressed == Hit::Max;
+                    w.pressed = Hit::None;
+                    if was_pressed && w.renderer.hit(pt.x as f32 / scale, pt.y as f32 / scale) == Hit::Max {
+                        let _ = ShowWindow(hwnd, if IsZoomed(hwnd).as_bool() { SW_RESTORE } else { SW_MAXIMIZE });
+                    }
+                    let _ = InvalidateRect(Some(hwnd), None, false);
+                    return LRESULT(0);
+                }
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
+            WM_NCMOUSEMOVE => {
+                if let Some(w) = ptr.as_mut() {
+                    let x = (lparam.0 as i16) as i32;
+                    let y = ((lparam.0 >> 16) as i16) as i32;
+                    let mut pt = windows::Win32::Foundation::POINT { x, y };
+                    let _ = windows::Win32::Graphics::Gdi::ScreenToClient(hwnd, &mut pt);
+                    let scale = w.renderer.scale();
+                    let hit = w.renderer.hit(pt.x as f32 / scale, pt.y as f32 / scale);
+                    if hit != w.hover {
+                        w.hover = hit;
+                        let mut tme = TRACKMOUSEEVENT {
+                            cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
+                            dwFlags: TME_LEAVE | TME_NONCLIENT,
+                            hwndTrack: hwnd,
+                            dwHoverTime: 0,
+                        };
+                        let _ = TrackMouseEvent(&mut tme);
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                    }
+                }
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
+            WM_NCMOUSELEAVE => {
+                if let Some(w) = ptr.as_mut() {
+                    if w.hover != Hit::None {
+                        w.hover = Hit::None;
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                    }
+                }
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
+            WM_MOUSELEAVE => {
+                if let Some(w) = ptr.as_mut() {
+                    if w.hover != Hit::None {
+                        w.hover = Hit::None;
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                    }
+                }
+                LRESULT(0)
+            }
+            WM_ACTIVATE => {
+                if let Some(w) = ptr.as_mut() {
+                    w.active_window = (wparam.0 & 0xFFFF) != 0;
+                    let _ = InvalidateRect(Some(hwnd), None, false);
+                }
+                LRESULT(0)
+            }
+            WM_DPICHANGED => {
+                if let Some(w) = ptr.as_mut() {
+                    let new_dpi = (wparam.0 & 0xFFFF) as u32;
+                    w.renderer.set_dpi(new_dpi);
+                    let suggested = &*(lparam.0 as *const RECT);
+                    let _ = SetWindowPos(
+                        hwnd,
+                        None,
+                        suggested.left,
+                        suggested.top,
+                        suggested.right - suggested.left,
+                        suggested.bottom - suggested.top,
+                        SWP_NOZORDER,
+                    );
+                    let _ = InvalidateRect(Some(hwnd), None, false);
+                }
+                LRESULT(0)
+            }
+            WM_SETTINGCHANGE => {
+                // "ImmersiveColorSet": el usuario cambió el tema claro/oscuro de Windows
+                // mientras notty (en `Theme::System`) seguía abierto.
+                if let Some(w) = ptr.as_mut() {
+                    let dark = crate::is_dark(w.cfg.borrow().ui.theme, system_uses_dark_mode());
+                    apply_dark_mode(hwnd, dark);
+                    let _ = InvalidateRect(Some(hwnd), None, false);
+                }
+                DefWindowProcW(hwnd, msg, wparam, lparam)
             }
             WM_KEYDOWN => {
                 if let Some(w) = ptr.as_mut() {
@@ -426,6 +652,10 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     let (x, y) = (x / scale, y / scale);
                     let hit = w.renderer.hit(x, y);
                     match hit {
+                        Hit::Min | Hit::Close => {
+                            w.pressed = hit;
+                            let _ = InvalidateRect(Some(hwnd), None, false);
+                        }
                         crate::Hit::Pencil if w.ws.active().raw.is_some() => {
                             if let Some(raw) = w.ws.active_mut().raw.as_mut() {
                                 raw.enable_write();
@@ -454,15 +684,27 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             }
             WM_MOUSEMOVE => {
                 if let Some(w) = ptr.as_mut() {
+                    let (x, y) = point_from_lparam(lparam);
+                    let scale = w.renderer.scale();
+                    let (x, y) = (x / scale, y / scale);
                     if w.mouse_down {
-                        let (x, y) = point_from_lparam(lparam);
-                        let scale = w.renderer.scale();
-                        let (x, y) = (x / scale, y / scale);
                         let ui = w.render_ui();
                         let total = w.ws.active().doc.buffer().len_lines();
                         let (body, gutter_w) = w.renderer.body_and_gutter(&ui, total);
                         let idx = w.renderer.char_index_at(w.ws.active(), body, gutter_w, x, y);
                         w.ws.active_mut().doc.set_selection(w.selection_anchor, idx);
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                    }
+                    let hit = w.renderer.hit(x, y);
+                    if hit != w.hover {
+                        w.hover = hit;
+                        let mut tme = TRACKMOUSEEVENT {
+                            cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
+                            dwFlags: TME_LEAVE,
+                            hwndTrack: hwnd,
+                            dwHoverTime: 0,
+                        };
+                        let _ = TrackMouseEvent(&mut tme);
                         let _ = InvalidateRect(Some(hwnd), None, false);
                     }
                 }
@@ -471,6 +713,27 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             WM_LBUTTONUP => {
                 if let Some(w) = ptr.as_mut() {
                     w.mouse_down = false;
+                    let (x, y) = point_from_lparam(lparam);
+                    let scale = w.renderer.scale();
+                    let (x, y) = (x / scale, y / scale);
+                    let still_over = w.renderer.hit(x, y);
+                    let pressed = w.pressed;
+                    w.pressed = Hit::None;
+                    match (pressed, still_over) {
+                        (Hit::Min, Hit::Min) => {
+                            let _ = ShowWindow(hwnd, SW_MINIMIZE);
+                        }
+                        (Hit::Close, Hit::Close) => {
+                            let _ = windows::Win32::UI::WindowsAndMessaging::PostMessageW(
+                                Some(hwnd),
+                                windows::Win32::UI::WindowsAndMessaging::WM_CLOSE,
+                                WPARAM(0),
+                                LPARAM(0),
+                            );
+                        }
+                        _ => {}
+                    }
+                    let _ = InvalidateRect(Some(hwnd), None, false);
                 }
                 let _ = ReleaseCapture();
                 LRESULT(0)

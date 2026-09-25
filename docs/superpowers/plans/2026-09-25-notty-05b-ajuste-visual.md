@@ -705,8 +705,8 @@ pub struct ViewState {
 
 Objetivo: que desaparezca la barra de título de Windows y la dibujemos nosotros, **conservando** todo lo nativo: arrastrar, doble clic para maximizar, Aero Snap, el menú de Alt+Espacio, la sombra y las esquinas redondeadas de Windows 11, y el desplegable de Snap Layouts al pasar por el botón maximizar.
 
-- [ ] **Step 1: DPI.** Al principio de `run`, antes de crear ventanas: `SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)` (ignora el error si ya estaba puesto). Crea la ventana con tamaño `920×600` DIPs convertido con `GetDpiForWindow` (crea la ventana, lee su DPI, y `SetWindowPos` a `920*scale × 600*scale` antes de mostrarla). Maneja `WM_DPICHANGED`: `renderer.set_dpi(HIWORD(wparam))` y `SetWindowPos` al `RECT` sugerido en `lparam`.
-- [ ] **Step 2: Quitar la barra nativa** conservando los bordes de redimensionar de los lados y de abajo (el mismo enfoque que Windows Terminal):
+- [x] **Step 1: DPI.** Al principio de `run`, antes de crear ventanas: `SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)` (ignora el error si ya estaba puesto). Crea la ventana con tamaño `920×600` DIPs convertido con `GetDpiForWindow` (crea la ventana, lee su DPI, y `SetWindowPos` a `920*scale × 600*scale` antes de mostrarla). Maneja `WM_DPICHANGED`: `renderer.set_dpi(HIWORD(wparam))` y `SetWindowPos` al `RECT` sugerido en `lparam`.
+- [x] **Step 2: Quitar la barra nativa** conservando los bordes de redimensionar de los lados y de abajo (el mismo enfoque que Windows Terminal):
 
 ```rust
 WM_NCCALCSIZE if wparam.0 != 0 => {
@@ -725,16 +725,16 @@ WM_NCCALCSIZE if wparam.0 != 0 => {
 
   Tras crear la ventana: `SetWindowPos(hwnd, None, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER)` para que se aplique, y `DwmExtendFrameIntoClientArea(hwnd, &MARGINS { cyTopHeight: 1, ..Default::default() })` para que DWM siga dibujando sombra y borde. Pon `DWMWA_WINDOW_CORNER_PREFERENCE = DWMWCP_ROUND`. **Quita Mica** (`DWMWA_SYSTEMBACKDROP_TYPE`): la maqueta usa colores sólidos. Mantén `DWMWA_USE_IMMERSIVE_DARK_MODE`, pero con el valor de `theme::is_dark(cfg.ui.theme, system_uses_dark_mode())`, y vuelve a ponerlo cuando cambie el tema en Ajustes.
 
-- [ ] **Step 3: `WM_NCHITTEST`.** Primero `DefWindowProcW`; si no devuelve `HTCLIENT`, devuelve eso (bordes). Si devuelve `HTCLIENT`, pasa el punto a coordenadas de cliente en DIPs y:
+- [x] **Step 3: `WM_NCHITTEST`.** Primero `DefWindowProcW`; si no devuelve `HTCLIENT`, devuelve eso (bordes). Si devuelve `HTCLIENT`, pasa el punto a coordenadas de cliente en DIPs y:
   - no maximizada y `y < borde superior` (`GetSystemMetricsForDpi(SM_CYFRAME) + SM_CXPADDEDBORDER`, en píxeles físicos) → `HTTOP`;
   - `renderer.hit(..) == Hit::Max` → `HTMAXBUTTON` (así Windows 11 enseña Snap Layouts);
   - `Hit::Caption` → `HTCAPTION`;
   - cualquier otra cosa → `HTCLIENT`.
-- [ ] **Step 4: Botones de la barra.** Min y Cerrar se reciben como clic normal de cliente (`WM_LBUTTONDOWN`/`UP` sobre `Hit::Min`/`Hit::Close`, se ejecuta al soltar si el ratón sigue encima): `ShowWindow(SW_MINIMIZE)` / `PostMessageW(WM_CLOSE)`. Maximizar llega como `WM_NCLBUTTONDOWN` con `HTMAXBUTTON`: devuelve 0 (no pases a `DefWindowProc`, o pintaría botones antiguos) y en `WM_NCLBUTTONUP` con `HTMAXBUTTON` alterna `SW_MAXIMIZE`/`SW_RESTORE`. Para el hover del botón maximizar usa `WM_NCMOUSEMOVE` + `WM_NCMOUSELEAVE` (con `TrackMouseEvent(TME_LEAVE | TME_NONCLIENT)`); para el resto `WM_MOUSEMOVE` + `WM_MOUSELEAVE` (`TrackMouseEvent(TME_LEAVE)`). Guarda `hover: Hit` y `pressed: Hit` en `WindowState` y repinta solo si cambian.
-- [ ] **Step 5:** `WM_ACTIVATE` y `WM_SIZE` repintan (el glifo de maximizar cambia a «restaurar» cuando la ventana está maximizada). `WM_SIZE` recalcula `visible_lines` con `layout::visible_lines(frame.body)` (no con `height - line_height` como ahora).
-- [ ] **Step 6:** Todas las coordenadas del ratón (`WM_LBUTTONDOWN`, `WM_MOUSEMOVE`...) se dividen por `renderer.scale()` antes de usarlas. Un clic en la barra de título, las pestañas o las barras **no** mueve el cursor del texto; solo `Hit::Body`.
-- [ ] **Step 7:** Captura la app: ya no debe verse la barra de Windows, y la ventana se tiene que poder arrastrar, maximizar con doble clic, redimensionar por los cuatro lados y encajar con Win+flechas. Comprueba a mano lo que puedas (arrastre con `SendKeys` no se puede; déjalo anotado para el usuario).
-- [ ] **Step 8: Commit** `feat(ui): barra de título propia y DPI por monitor`
+- [x] **Step 4: Botones de la barra.** Min y Cerrar se reciben como clic normal de cliente (`WM_LBUTTONDOWN`/`UP` sobre `Hit::Min`/`Hit::Close`, se ejecuta al soltar si el ratón sigue encima): `ShowWindow(SW_MINIMIZE)` / `PostMessageW(WM_CLOSE)`. Maximizar llega como `WM_NCLBUTTONDOWN` con `HTMAXBUTTON`: devuelve 0 (no pases a `DefWindowProc`, o pintaría botones antiguos) y en `WM_NCLBUTTONUP` con `HTMAXBUTTON` alterna `SW_MAXIMIZE`/`SW_RESTORE`. Para el hover del botón maximizar usa `WM_NCMOUSEMOVE` + `WM_NCMOUSELEAVE` (con `TrackMouseEvent(TME_LEAVE | TME_NONCLIENT)`); para el resto `WM_MOUSEMOVE` + `WM_MOUSELEAVE` (`TrackMouseEvent(TME_LEAVE)`). Guarda `hover: Hit` y `pressed: Hit` en `WindowState` y repinta solo si cambian.
+- [x] **Step 5:** `WM_ACTIVATE` y `WM_SIZE` repintan (el glifo de maximizar cambia a «restaurar» cuando la ventana está maximizada). `WM_SIZE` recalcula `visible_lines` con `layout::visible_lines(frame.body)` (no con `height - line_height` como ahora).
+- [x] **Step 6:** Todas las coordenadas del ratón (`WM_LBUTTONDOWN`, `WM_MOUSEMOVE`...) se dividen por `renderer.scale()` antes de usarlas. Un clic en la barra de título, las pestañas o las barras **no** mueve el cursor del texto; solo `Hit::Body`.
+- [x] **Step 7:** Captura la app: ya no debe verse la barra de Windows, y la ventana se tiene que poder arrastrar, maximizar con doble clic, redimensionar por los cuatro lados y encajar con Win+flechas. Comprueba a mano lo que puedas (arrastre con `SendKeys` no se puede; déjalo anotado para el usuario).
+- [x] **Step 8: Commit** `feat(ui): barra de título propia y DPI por monitor`
 
 ---
 
