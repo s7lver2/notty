@@ -32,6 +32,8 @@ pub enum Files {
     #[default]
     Tabs,
     Buffers,
+    /// Paneles lado a lado estilo kitty (hasta 3), además de las pestañas.
+    Splits,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]

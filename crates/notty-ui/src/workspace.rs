@@ -53,6 +53,10 @@ impl Workspace {
         self.docs.iter()
     }
 
+    pub fn get_mut(&mut self, idx: usize) -> Option<&mut EditorState> {
+        self.docs.get_mut(idx)
+    }
+
     /// `EditorState::new_empty`/`from_opened` no conocen el tamaño de la ventana (se
     /// crean con `visible_lines: 1`): se hereda el de la pestaña activa, que sí lo
     /// tiene, para que el documento no se vea "de una línea" hasta el próximo resize.

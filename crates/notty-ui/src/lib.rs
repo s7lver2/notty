@@ -19,6 +19,7 @@ mod raw_doc;
 pub mod render;
 mod search_prompt;
 pub mod syntax;
+pub mod splits;
 pub mod settings_model;
 pub mod settings_window;
 pub mod step_rail;
