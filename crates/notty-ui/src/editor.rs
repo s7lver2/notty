@@ -143,7 +143,10 @@ impl EditorState {
     }
 
     pub fn scroll_by(&mut self, delta_lines: i32) {
-        let total = self.doc.buffer().len_lines();
+        let total = match &self.raw {
+            Some(raw) => raw.len().div_ceil(16).max(1),
+            None => self.doc.buffer().len_lines(),
+        };
         let max_first = total.saturating_sub(1) as i64;
         let new_first = (self.viewport.first_line as i64 + delta_lines as i64).clamp(0, max_first);
         self.viewport.first_line = new_first as usize;
@@ -286,6 +289,19 @@ mod tests {
         assert_eq!(s.viewport.first_line, 0);
         s.scroll_by(100);
         assert_eq!(s.viewport.first_line, s.doc.buffer().len_lines() - 1);
+    }
+
+    #[test]
+    fn scroll_by_in_raw_mode_clamps_to_hex_rows_not_text_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.bin");
+        std::fs::write(&path, [0u8; 64]).unwrap(); // 4 filas de 16 bytes
+        let mut s = state("una sola línea, sin relación con las 4 filas de arriba");
+        s.raw = Some(crate::open_raw_doc(&path).unwrap());
+        s.scroll_by(2);
+        assert_eq!(s.viewport.first_line, 2);
+        s.scroll_by(100);
+        assert_eq!(s.viewport.first_line, 3); // 4 filas: máximo first_line es 3, no 0 (habría 1 sola línea de texto)
     }
 
     #[test]

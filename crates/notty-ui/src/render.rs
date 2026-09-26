@@ -1017,7 +1017,7 @@ impl Renderer {
 
             if is_raw {
                 if let Some(raw) = &state.raw {
-                    self.draw_hex(raw, state.raw_cursor, state.raw_pending_nibble, pal, frame);
+                    self.draw_hex(raw, state.raw_cursor, state.raw_pending_nibble, state.viewport.first_line, pal, frame);
                 }
             } else {
             let mut y = frame.body.top + layout::TEXT_PAD_T;
@@ -2311,7 +2311,7 @@ impl Renderer {
     /// más simple y evita necesitar un `IDWriteTextRenderer` a medida para colorear
     /// rangos dentro de un único layout por fila (desviación de tiempo respecto al
     /// plan, que pedía `SetDrawingEffect`; el resultado visual es el mismo).
-    fn draw_hex(&mut self, raw: &crate::RawDoc, cursor: usize, pending_nibble: Option<u8>, pal: &theme::Palette, frame: layout::Frame) {
+    fn draw_hex(&mut self, raw: &crate::RawDoc, cursor: usize, pending_nibble: Option<u8>, first_row: usize, pal: &theme::Palette, frame: layout::Frame) {
         const PREFIX_COLS: f32 = 11.0; // "XXXXXXXX   " (8 dígitos de offset + 3 espacios)
         const ASCII_COL: f32 = 61.0; // PREFIX_COLS + 16*3 + 1 (espacio extra tras el 8º) + 1 (espacio literal)
 
@@ -2324,7 +2324,7 @@ impl Renderer {
         let sel_col = cursor % 16;
 
         let mut y = origin_y;
-        for row in 0..rows {
+        for row in first_row..rows {
             if y > frame.body.bottom {
                 break;
             }

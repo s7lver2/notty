@@ -2264,6 +2264,7 @@ fn toggle_raw(w: &mut WindowState) {
             st.raw = Some(raw);
             st.raw_cursor = 0;
             st.raw_pending_nibble = None;
+            st.viewport.first_line = 0;
         }
     }
 }
@@ -2283,8 +2284,12 @@ fn handle_raw_keydown(w: &mut WindowState, vk: u32, action: crate::EditorAction)
             return;
         }
         let cur = w.ws.active().raw_cursor as i64;
-        w.ws.active_mut().raw_cursor = (cur + delta).clamp(0, len as i64 - 1) as usize;
-        w.ws.active_mut().raw_pending_nibble = None;
+        let new_cursor = (cur + delta).clamp(0, len as i64 - 1) as usize;
+        let st = w.ws.active_mut();
+        st.raw_cursor = new_cursor;
+        st.raw_pending_nibble = None;
+        let rows = len.div_ceil(16).max(1);
+        st.viewport.scroll_to_include(new_cursor / 16, rows);
         return;
     }
     if matches!(action, crate::EditorAction::Save) {
