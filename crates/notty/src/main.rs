@@ -82,6 +82,7 @@ pub(crate) fn strip_ifeo_arg(args: &mut Vec<String>) {
 fn main() -> windows::core::Result<()> {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     strip_ifeo_arg(&mut args);
+    notty_ui::set_app_version(env!("CARGO_PKG_VERSION"));
 
     if args.first().map(String::as_str) == Some("--daemon") {
         return daemon::run();

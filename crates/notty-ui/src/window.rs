@@ -823,8 +823,17 @@ fn manual_check_tick(w: &mut WindowState) -> bool {
             ManualCheckEvent::Error(msg) => w.update.set_manual_error(msg),
         }
         w.manual_check_rx = None;
+        // El chequeo manual también cuenta como "última comprobación" (Ajustes la
+        // enseña), igual que el automático de arranque.
+        let mut cfg = w.cfg.borrow_mut();
+        cfg.updates.last_check = unix_now();
+        let _ = notty_config::save(&cfg, &notty_config::default_path());
     }
     changed
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
 /// "Buscar ahora" (Task 4, Step 4 del plan del actualizador): mismo chequeo que el
@@ -832,13 +841,18 @@ fn manual_check_tick(w: &mut WindowState) -> bool {
 /// no bloquear la UI ("síncrono" en el plan quiere decir "lo pidió el usuario", no
 /// "bloquea"). Siempre deja un resultado claro (nunca en silencio).
 fn check_updates_now(w: &mut WindowState, hwnd: HWND) {
+    if w.manual_check_rx.is_some() {
+        return; // ya hay una en marcha
+    }
+    w.update.start_check();
     let (tx, rx) = std::sync::mpsc::channel();
     w.manual_check_rx = Some(rx);
     let repo = w.repo.clone();
     std::thread::spawn(move || {
-        let ua = format!("notty/{}", env!("CARGO_PKG_VERSION"));
+        let version = crate::app_version();
+        let ua = format!("notty/{version}");
         let event = match notty_update::http::latest_release(&repo, &ua) {
-            Ok(release) if notty_update::is_newer(env!("CARGO_PKG_VERSION"), &release.version) => ManualCheckEvent::Found(release),
+            Ok(release) if notty_update::is_newer(version, &release.version) => ManualCheckEvent::Found(release),
             Ok(_) => ManualCheckEvent::UpToDate,
             Err(e) => ManualCheckEvent::Error(e.to_string()),
         };
@@ -1000,7 +1014,7 @@ fn update_panel_content(update: &crate::UpdateState) -> Option<crate::UpdatePane
 /// el marcador de posición de las compilaciones sin configurar).
 fn about_content(repo: &str) -> crate::AboutContent {
     let url = (!repo.is_empty() && !repo.starts_with("OWNER/")).then(|| format!("https://github.com/{repo}"));
-    crate::AboutContent { version: env!("CARGO_PKG_VERSION").to_string(), url }
+    crate::AboutContent { version: crate::app_version().to_string(), url }
 }
 
 /// Resuelve `Prompt::Conflict`: `M` conserva lo escrito en notty y lo guarda, `D`

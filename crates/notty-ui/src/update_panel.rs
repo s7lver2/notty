@@ -27,6 +27,39 @@ pub struct UpdateState {
     /// Mensaje de error a mostrar (firma inválida, sin red en la comprobación
     /// manual...). Se limpia en cuanto se sabe algo nuevo.
     pub error: Option<String>,
+    /// "Buscar ahora" en curso (el hilo aún no ha contestado).
+    pub checking: bool,
+    /// La última comprobación manual dijo que no hay nada más nuevo.
+    pub up_to_date: bool,
+}
+
+/// Lo que enseña Ajustes → Actualizaciones, resuelto a partir de `UpdateState`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum UpdatePhase {
+    /// Sin comprobar todavía en esta sesión, o ya al día.
+    Idle,
+    Checking,
+    Found,
+    /// `(bytes leídos, total)`; `total == 0` si el servidor no lo dijo.
+    Downloading(u64, u64),
+    Error(String),
+}
+
+impl UpdateState {
+    pub fn phase_for_settings(&self) -> UpdatePhase {
+        if self.checking {
+            return UpdatePhase::Checking;
+        }
+        match (&self.phase, &self.error, &self.available) {
+            (Some(DownloadPhase::Downloading | DownloadPhase::Verifying), _, _) => {
+                let (d, t) = self.progress.unwrap_or((0, 0));
+                UpdatePhase::Downloading(d, t)
+            }
+            (_, Some(e), _) if !self.up_to_date => UpdatePhase::Error(e.clone()),
+            (_, _, Some(_)) => UpdatePhase::Found,
+            _ => UpdatePhase::Idle,
+        }
+    }
 }
 
 impl UpdateState {
@@ -48,6 +81,17 @@ impl UpdateState {
     pub fn set_available(&mut self, release: Release) {
         self.available = Some(release);
         self.error = None;
+        self.checking = false;
+        self.up_to_date = false;
+    }
+
+    /// Arranca una comprobación manual: se olvida el resultado anterior.
+    pub fn start_check(&mut self) {
+        self.checking = true;
+        self.up_to_date = false;
+        if self.phase != Some(DownloadPhase::Downloading) {
+            self.error = None;
+        }
     }
 
     /// Abre/cierra el panel. No hace nada si no hay ninguna release encontrada
@@ -67,6 +111,8 @@ impl UpdateState {
     pub fn set_manual_error(&mut self, msg: String) {
         self.error = Some(msg);
         self.phase = None;
+        self.checking = false;
+        self.up_to_date = false;
     }
 
     /// Comprobación manual sin errores, pero ya estás en la última versión: también
@@ -74,6 +120,8 @@ impl UpdateState {
     pub fn set_up_to_date(&mut self) {
         self.error = Some("ya tienes la última versión".to_string());
         self.phase = None;
+        self.checking = false;
+        self.up_to_date = true;
     }
 
     pub fn start_download(&mut self) {
@@ -142,6 +190,25 @@ mod tests {
         s.set_manual_error("sin red".to_string());
         s.set_available(release("1.4.0"));
         assert_eq!(s.error, None);
+    }
+
+    #[test]
+    fn settings_phase_follows_the_check() {
+        let mut s = UpdateState::default();
+        assert_eq!(s.phase_for_settings(), UpdatePhase::Idle);
+        s.start_check();
+        assert_eq!(s.phase_for_settings(), UpdatePhase::Checking);
+        s.set_up_to_date();
+        assert_eq!(s.phase_for_settings(), UpdatePhase::Idle);
+        s.start_check();
+        s.set_manual_error("sin red".to_string());
+        assert_eq!(s.phase_for_settings(), UpdatePhase::Error("sin red".to_string()));
+        s.start_check();
+        s.set_available(release("9.0.0"));
+        assert_eq!(s.phase_for_settings(), UpdatePhase::Found);
+        s.start_download();
+        s.set_progress(10, 100);
+        assert_eq!(s.phase_for_settings(), UpdatePhase::Downloading(10, 100));
     }
 
     #[test]

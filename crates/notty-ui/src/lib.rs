@@ -46,8 +46,21 @@ pub use raw_doc::{RawDoc, open_raw_doc};
 pub use render::{AboutContent, Hit, Renderer, UpdatePanelContent, ViewState};
 pub use search_prompt::SearchState;
 pub use theme::{Palette, Rgba, is_dark, palette};
-pub use update_panel::{DownloadPhase, UpdateState};
+pub use update_panel::{DownloadPhase, UpdatePhase, UpdateState};
 pub use viewport::Viewport;
 pub use vim::{VimMode, VimOutcome, VimState};
 pub use vim_cmd::{VimCmd, parse_vim_cmd};
 pub use workspace::Workspace;
+
+static APP_VERSION: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+
+/// Versión de la app (la de `crates/notty`, que es la que se publica). La fija
+/// `notty::main` al arrancar: `env!("CARGO_PKG_VERSION")` aquí dentro daría la de
+/// este crate (0.1.0), y con ella "Buscar ahora" comparaba contra una versión falsa.
+pub fn set_app_version(v: &'static str) {
+    let _ = APP_VERSION.set(v);
+}
+
+pub fn app_version() -> &'static str {
+    APP_VERSION.get().copied().unwrap_or(env!("CARGO_PKG_VERSION"))
+}
