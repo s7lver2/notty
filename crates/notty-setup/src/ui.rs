@@ -252,6 +252,14 @@ pub struct GroupState {
     pub since: Option<Instant>,
 }
 
+/// Comprobación de si hay un notty-setup más nuevo en GitHub Releases al abrir.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelfUpdate {
+    Idle,
+    Checking,
+    Failed,
+}
+
 pub struct State {
     pub renderer: Renderer,
     pub animations_enabled: bool,
@@ -291,6 +299,7 @@ pub struct State {
     pub entrance: Instant,
     rail_from: f32,
     rail_at: Option<Instant>,
+    pub self_update: SelfUpdate,
 }
 
 #[derive(Clone, Copy)]
@@ -342,6 +351,7 @@ impl State {
             entrance: Instant::now() + Duration::from_millis(90),
             rail_from: 0.0,
             rail_at: None,
+            self_update: SelfUpdate::Idle,
         }
     }
 
@@ -782,6 +792,15 @@ fn draw_welcome(r: &Renderer, pal: &SetupPalette, area: Rect, fade: f32, st: &St
     hits.push((Rect::new(change.left - 6.0, field.top, field.right, field.bottom), Hit::ChangeFolder));
     y += 32.0 + 10.0;
     text_fit(r, "2,3 MB · Windows 10 1809 o posterior", &r.fonts().ui_11_5, Rect::new(x, y, right, y + 16.0), pal.text_3);
+    let note = match st.self_update {
+        SelfUpdate::Checking => Some("Comprobando la última versión…"),
+        SelfUpdate::Failed => Some("No se pudo comprobar si hay una versión más nueva."),
+        SelfUpdate::Idle => None,
+    };
+    if let Some(note) = note {
+        y += 16.0 + 4.0;
+        text_fit(r, note, &r.fonts().ui_11_5, Rect::new(x, y, right, y + 16.0), pal.text_3);
+    }
     r.set_fade(1.0);
 }
 
