@@ -87,10 +87,10 @@ impl EditorState {
         let end = self.line_end(head);
 
         match action {
-            MoveLeft => self.doc.set_cursor(head.saturating_sub(1)),
-            ExtendLeft => self.doc.set_selection(anchor, head.saturating_sub(1)),
-            MoveRight => self.doc.set_cursor((head + 1).min(buf_len)),
-            ExtendRight => self.doc.set_selection(anchor, (head + 1).min(buf_len)),
+            MoveLeft => self.doc.set_cursor(self.prev_index(head)),
+            ExtendLeft => self.doc.set_selection(anchor, self.prev_index(head)),
+            MoveRight => self.doc.set_cursor(self.next_index(head)),
+            ExtendRight => self.doc.set_selection(anchor, self.next_index(head)),
             MoveUp => self.vertical(-1, false),
             ExtendUp => self.vertical(-1, true),
             MoveDown => self.vertical(1, false),
@@ -127,6 +127,18 @@ impl EditorState {
         self.doc.insert(&ch.to_string(), now);
         let (line, _) = self.doc.buffer().line_col(self.doc.selection().head);
         self.viewport.scroll_to_include(line, self.doc.buffer().len_lines());
+    }
+
+    /// Un paso a la izquierda, saltando `\r\n` entero (el cursor nunca queda entre ambos).
+    fn prev_index(&self, idx: usize) -> usize {
+        let buf = self.doc.buffer();
+        if idx >= 2 && buf.slice(idx - 2..idx) == "\r\n" { idx - 2 } else { idx.saturating_sub(1) }
+    }
+
+    fn next_index(&self, idx: usize) -> usize {
+        let buf = self.doc.buffer();
+        let n = buf.len_chars();
+        if idx + 2 <= n && buf.slice(idx..idx + 2) == "\r\n" { idx + 2 } else { (idx + 1).min(n) }
     }
 
     fn line_end(&self, idx: usize) -> usize {
@@ -205,6 +217,31 @@ mod tests {
         let mut s = state("abc");
         s.apply(MoveRight, Instant::now());
         assert_eq!(s.doc.selection(), notty_core::Selection::caret(1));
+    }
+
+    #[test]
+    fn horizontal_moves_step_over_crlf() {
+        let mut s = state("a\r\nb");
+        s.doc.set_cursor(1);
+        s.apply(MoveRight, Instant::now());
+        assert_eq!(s.doc.selection().head, 3);
+        s.apply(MoveLeft, Instant::now());
+        assert_eq!(s.doc.selection().head, 1);
+        s.apply(ExtendRight, Instant::now());
+        assert_eq!(s.doc.selection().head, 3);
+        s.doc.set_cursor(3);
+        s.apply(ExtendLeft, Instant::now());
+        assert_eq!(s.doc.selection().head, 1);
+    }
+
+    #[test]
+    fn vertical_and_end_never_land_inside_crlf() {
+        let mut s = state("abc\r\nx");
+        s.doc.set_cursor(6);
+        s.apply(MoveUp, Instant::now());
+        assert_eq!(s.doc.selection().head, 1);
+        s.apply(MoveEnd, Instant::now());
+        assert_eq!(s.doc.selection().head, 3);
     }
 
     #[test]
