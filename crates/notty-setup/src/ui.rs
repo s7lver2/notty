@@ -624,6 +624,7 @@ pub fn paint(st: &mut State) -> bool {
 
     let mut opts_out = OptsLayout::default();
     {
+        st.renderer.recover_device();
         let (w, h) = st.renderer.size_dips();
         let r = &st.renderer;
         r.begin_paint(pal.win);

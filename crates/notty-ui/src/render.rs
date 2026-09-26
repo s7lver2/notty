@@ -242,7 +242,11 @@ fn with_ellipsis_trimming(dwrite: &IDWriteFactory, fmt: &IDWriteTextFormat) -> R
 
 pub struct Renderer {
     _d2d: ID2D1Factory,
+    hwnd: HWND,
     target: ID2D1HwndRenderTarget,
+    /// El último `EndDraw` dijo que el dispositivo se perdió (driver reiniciado,
+    /// escritorio remoto...): `recover_device` recrea el target antes de pintar.
+    device_lost: std::cell::Cell<bool>,
     dwrite: IDWriteFactory,
     brush: ID2D1SolidColorBrush,
     fonts: Fonts,
@@ -312,23 +316,32 @@ pub struct UpdatePanelContent {
     pub show_actualizar: bool,
 }
 
+/// Render target de `hwnd` (al tamaño actual de su área cliente) y la brocha única,
+/// que depende de él. Se llama al crear el `Renderer` y cada vez que se pierde el dispositivo.
+unsafe fn create_target(d2d: &ID2D1Factory, hwnd: HWND, dpi: u32) -> Result<(ID2D1HwndRenderTarget, ID2D1SolidColorBrush)> {
+    unsafe {
+        let mut client = windows::Win32::Foundation::RECT::default();
+        let _ = windows::Win32::UI::WindowsAndMessaging::GetClientRect(hwnd, &mut client);
+        let width = (client.right - client.left).max(1) as u32;
+        let height = (client.bottom - client.top).max(1) as u32;
+        let target = d2d.CreateHwndRenderTarget(
+            &D2D1_RENDER_TARGET_PROPERTIES::default(),
+            &D2D1_HWND_RENDER_TARGET_PROPERTIES { hwnd, pixelSize: D2D_SIZE_U { width, height }, ..Default::default() },
+        )?;
+        target.SetDpi(dpi as f32, dpi as f32);
+        let brush = target.CreateSolidColorBrush(
+            &color(Rgba(1.0, 1.0, 1.0, 1.0)),
+            Some(&D2D1_BRUSH_PROPERTIES { opacity: 1.0, transform: Matrix3x2::identity() }),
+        )?;
+        Ok((target, brush))
+    }
+}
+
 impl Renderer {
     pub fn new(hwnd: HWND, dpi: u32) -> Result<Self> {
         unsafe {
             let d2d: ID2D1Factory = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
-            let mut client = windows::Win32::Foundation::RECT::default();
-            let _ = windows::Win32::UI::WindowsAndMessaging::GetClientRect(hwnd, &mut client);
-            let width = (client.right - client.left).max(1) as u32;
-            let height = (client.bottom - client.top).max(1) as u32;
-            let target = d2d.CreateHwndRenderTarget(
-                &D2D1_RENDER_TARGET_PROPERTIES::default(),
-                &D2D1_HWND_RENDER_TARGET_PROPERTIES {
-                    hwnd,
-                    pixelSize: D2D_SIZE_U { width, height },
-                    ..Default::default()
-                },
-            )?;
-            target.SetDpi(dpi as f32, dpi as f32);
+            let (target, brush) = create_target(&d2d, hwnd, dpi)?;
 
             let dwrite: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
             let sys_fonts: IDWriteFontCollection = {
@@ -365,14 +378,11 @@ impl Renderer {
             let mono_12_semibold = make_format(&dwrite, &mono_family, layout::FONT_SUGGEST, DWRITE_FONT_WEIGHT_SEMI_BOLD)?;
             let mono_12_5 = make_format(&dwrite, &mono_family, layout::FONT_PROMPT, DWRITE_FONT_WEIGHT_NORMAL)?;
 
-            let brush = target.CreateSolidColorBrush(
-                &color(Rgba(1.0, 1.0, 1.0, 1.0)),
-                Some(&D2D1_BRUSH_PROPERTIES { opacity: 1.0, transform: Matrix3x2::identity() }),
-            )?;
-
             Ok(Self {
                 _d2d: d2d,
+                hwnd,
                 target,
+                device_lost: std::cell::Cell::new(false),
                 dwrite,
                 brush,
                 fonts: Fonts {
@@ -579,8 +589,36 @@ impl Renderer {
 
     pub fn end_paint(&self) {
         self.hold_frame.set(false);
-        unsafe {
-            let _ = self.target.EndDraw(None, None);
+        let r = unsafe { self.target.EndDraw(None, None) };
+        self.note_end_draw(r);
+    }
+
+    /// Si `EndDraw` pide recrear el target, lo apunta y pide otro `WM_PAINT`: en vez de
+    /// quedarse en negro, el siguiente pintado empieza por `recover_device`.
+    fn note_end_draw(&self, r: Result<()>) {
+        if r.is_err_and(|e| e.code() == windows::Win32::Foundation::D2DERR_RECREATE_TARGET) {
+            self.device_lost.set(true);
+            unsafe {
+                let _ = windows::Win32::Graphics::Gdi::InvalidateRect(Some(self.hwnd), None, false);
+            }
+        }
+    }
+
+    /// Recrea el render target y la brocha si el dispositivo se perdió. Devuelve `true`
+    /// si lo hizo: quien guarde recursos propios creados con este `Renderer` (bitmaps)
+    /// debe soltarlos y volver a pedirlos. Hay que llamarla antes de `begin_paint`.
+    pub fn recover_device(&mut self) -> bool {
+        if !self.device_lost.get() {
+            return false;
+        }
+        match unsafe { create_target(&self._d2d, self.hwnd, self.dpi) } {
+            Ok((target, brush)) => {
+                self.target = target;
+                self.brush = brush;
+                self.device_lost.set(false);
+                true
+            }
+            Err(_) => false,
         }
     }
 
@@ -1014,6 +1052,7 @@ impl Renderer {
         view: &ViewState,
         ligature_table: &[(String, char)],
     ) {
+        self.recover_device();
         self.hits.clear();
         self.pending_dropdown = None;
         let pal_mixed;
@@ -1301,7 +1340,8 @@ impl Renderer {
             }
 
             if !self.hold_frame.get() {
-                let _ = self.target.EndDraw(None, None);
+                let r = self.target.EndDraw(None, None);
+                self.note_end_draw(r);
             }
         }
     }

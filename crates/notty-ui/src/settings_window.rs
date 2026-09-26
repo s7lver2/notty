@@ -1119,6 +1119,9 @@ fn paint(st: &mut State) {
         }
         _ => theme::palette(dark),
     };
+    if st.renderer.recover_device() {
+        st.logo = None;
+    }
     let (w, h) = st.renderer.size_dips();
     let logo_px = (64.0 * st.renderer.scale()).round() as i32;
     if st.page == Page::AcercaDe && (st.logo.is_none() || st.logo_px != logo_px) {
