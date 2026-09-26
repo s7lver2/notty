@@ -75,6 +75,25 @@ pub struct SetupPalette {
     pub rail_dot: Rgba,
     /// Halo del punto activo (`rgba(115,182,250,.18)`).
     pub rail_glow: Rgba,
+    /// `.dots i` apagado (`#46474c`).
+    pub dot_off: Rgba,
+    /// `.path` / `.notes` fondo (`#18191b`).
+    pub field_bg: Rgba,
+    /// Texto de las escenas de vista previa (`.term`, `.file`: `#c9cacd`).
+    pub scene_text: Rgba,
+    /// `.file.sel` (`#2a3a4d`).
+    pub file_sel: Rgba,
+    /// `.ctx` fondo (`#2b2c30`).
+    pub ctx_bg: Rgba,
+    /// `.ctx .hl` (`#3a3b40`).
+    pub ctx_hl: Rgba,
+    /// Caja "Anclado" del menú Inicio (`#26272b`).
+    pub start_box: Rgba,
+    /// Botón cerrar de la barra de título al pasar el ratón (rojo de Windows 11).
+    pub close_hover: Rgba,
+    /// Botón minimizar al pasar el ratón.
+    pub caption_hover: Rgba,
+    pub shadow: Rgba,
 }
 
 pub const DARK: SetupPalette = SetupPalette {
@@ -104,4 +123,14 @@ pub const DARK: SetupPalette = SetupPalette {
     canvas_border: hex(0x2a2b2f),
     rail_dot: hex(0x55565b),
     rail_glow: hexa(0x73b6fa, 0.18),
+    dot_off: hex(0x46474c),
+    field_bg: hex(0x18191b),
+    scene_text: hex(0xc9cacd),
+    file_sel: hex(0x2a3a4d),
+    ctx_bg: hex(0x2b2c30),
+    ctx_hl: hex(0x3a3b40),
+    start_box: hex(0x26272b),
+    close_hover: hex(0xc42b1c),
+    caption_hover: hexa(0xffffff, 0.06),
+    shadow: hexa(0x000000, 0.45),
 };

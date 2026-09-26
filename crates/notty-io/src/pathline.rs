@@ -91,11 +91,20 @@ fn glob_match(pattern: &[char], text: &[char]) -> bool {
 }
 
 pub fn suggestions(typed: &str, max: usize) -> Vec<Entry> {
+    ranked_suggestions(typed, max, &crate::usage::Usage::default())
+}
+
+/// Como `suggestions`, pero lo más usado (y reciente) según `usage` va primero; el
+/// resto sigue en el orden de siempre (carpetas primero, luego por nombre).
+pub fn ranked_suggestions(typed: &str, max: usize, usage: &crate::usage::Usage) -> Vec<Entry> {
+    // Sin nada tras la última `\` se listan todas las entradas de la carpeta: no hace
+    // falta teclear una letra para empezar a ver sugerencias.
     let (parent, last) = split_last(typed);
-    if last.is_empty() {
+    if parent.is_empty() {
         return Vec::new();
     }
-    let Ok(read) = std::fs::read_dir(parent) else { return Vec::new() };
+    // Con la `\` final: `read_dir("C:")` leería la carpeta actual de C:, no la raíz.
+    let Ok(read) = std::fs::read_dir(&typed[..=parent.len()]) else { return Vec::new() };
     let last_lower = last.to_lowercase();
     let glob = is_glob(&last_lower);
     let pattern: Vec<char> = last_lower.chars().collect();
@@ -115,9 +124,18 @@ pub fn suggestions(typed: &str, max: usize) -> Vec<Entry> {
             })
         })
         .collect();
-    entries.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
-    entries.truncate(max);
-    entries
+    let now = crate::usage::current_secs();
+    let dir = &typed[..=parent.len()];
+    let mut scored: Vec<(f64, Entry)> =
+        entries.drain(..).map(|e| (usage.score(&format!("{dir}{}", e.name), now), e)).collect();
+    scored.sort_by(|(sa, a), (sb, b)| {
+        sb.partial_cmp(sa)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| b.is_dir.cmp(&a.is_dir))
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+    scored.truncate(max);
+    scored.into_iter().map(|(_, e)| e).collect()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -265,10 +283,26 @@ mod tests {
     }
 
     #[test]
-    fn empty_last_segment_has_no_suggestions() {
+    fn frequently_used_entries_come_first() {
+        let dir = setup();
+        let mut usage = crate::usage::Usage::default();
+        let used = dir.path().join("presupuesto.txt");
+        let now = crate::usage::current_secs();
+        usage.record(&used, now);
+        usage.record(&used, now);
+        let typed = format!("{}\\", dir.path().display());
+        let s = ranked_suggestions(&typed, 50, &usage);
+        assert_eq!(s[0].name, "presupuesto.txt");
+    }
+
+    #[test]
+    fn empty_last_segment_lists_the_whole_folder_dirs_first() {
         let dir = setup();
         let typed = format!("{}\\", dir.path().display());
-        assert!(suggestions(&typed, 5).is_empty());
+        let s = suggestions(&typed, 50);
+        assert!(!s.is_empty());
+        assert!(s[0].is_dir);
+        assert_eq!(s.len(), std::fs::read_dir(dir.path()).unwrap().count());
     }
 
     #[test]

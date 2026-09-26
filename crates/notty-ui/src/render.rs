@@ -3,18 +3,24 @@
 //! `hits` qué rectángulo es qué para el ratón (ver `Hit`/`hit()`).
 
 use windows::Win32::Foundation::HWND;
-use windows::Win32::Graphics::Direct2D::Common::{D2D1_COLOR_F, D2D_RECT_F, D2D_SIZE_U};
+use windows::Win32::Graphics::Direct2D::Common::{
+    D2D1_COLOR_F, D2D1_FIGURE_BEGIN_FILLED, D2D1_FIGURE_BEGIN_HOLLOW, D2D1_FIGURE_END_CLOSED, D2D1_FIGURE_END_OPEN,
+    D2D_RECT_F, D2D_SIZE_U,
+};
 use windows::Win32::Graphics::Direct2D::{
-    D2D1_BRUSH_PROPERTIES, D2D1_COMBINE_MODE_EXCLUDE, D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_ELLIPSE,
-    D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_HWND_RENDER_TARGET_PROPERTIES, D2D1_RENDER_TARGET_PROPERTIES,
-    D2D1_ROUNDED_RECT, D2D1CreateFactory, ID2D1Factory, ID2D1HwndRenderTarget, ID2D1SolidColorBrush,
+    D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_BRUSH_PROPERTIES, D2D1_CAP_STYLE_ROUND, D2D1_COMBINE_MODE_EXCLUDE,
+    D2D1_DASH_STYLE_SOLID, D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT, D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_ELLIPSE,
+    D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_HWND_RENDER_TARGET_PROPERTIES, D2D1_LINE_JOIN_ROUND,
+    D2D1_RENDER_TARGET_PROPERTIES, D2D1_ROUNDED_RECT, D2D1_STROKE_STYLE_PROPERTIES, D2D1CreateFactory, ID2D1Factory,
+    ID2D1HwndRenderTarget, ID2D1PathGeometry, ID2D1SolidColorBrush,
 };
 use windows::Win32::Graphics::DirectWrite::{
-    DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-    DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD,
-    DWRITE_PARAGRAPH_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_TRAILING, DWRITE_TRIMMING,
-    DWRITE_TRIMMING_GRANULARITY_CHARACTER, DWRITE_WORD_WRAPPING_NO_WRAP, DWriteCreateFactory,
-    IDWriteFactory, IDWriteFontCollection, IDWriteTextFormat,
+    DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT_BOLD,
+    DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_LINE_SPACING_METHOD_UNIFORM,
+    DWRITE_PARAGRAPH_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_NEAR, DWRITE_TEXT_ALIGNMENT_CENTER,
+    DWRITE_TEXT_ALIGNMENT_TRAILING, DWRITE_TRIMMING, DWRITE_TRIMMING_GRANULARITY_CHARACTER,
+    DWRITE_WORD_WRAPPING_NO_WRAP, DWRITE_WORD_WRAPPING_WRAP, DWriteCreateFactory, IDWriteFactory,
+    IDWriteFontCollection, IDWriteTextFormat, IDWriteTextLayout,
 };
 use windows::core::Result;
 use windows_numerics::{Matrix3x2, Vector2};
@@ -77,6 +83,38 @@ pub enum Hit {
     UpdatePanelActualizar,
     /// Botón "Cerrar" del panel de notas de versión.
     UpdatePanelCerrar,
+    /// Elemento `j` del menú contextual abierto (solo los activados).
+    CtxItem(usize),
+    /// Fondo de un desplegable o menú contextual (separadores, márgenes, elementos
+    /// desactivados): se traga el clic en vez de dejarlo caer a lo que hay debajo.
+    PopupBox,
+    /// Botones ‹ › de la fila de pestañas cuando no caben todas.
+    TabScrollLeft,
+    TabScrollRight,
+    /// Respuesta a "ya existe" en la línea de ruta: 0 = sobrescribir, 1 = abrir el
+    /// existente, 2 = cancelar.
+    Overwrite(u8),
+    /// Enlace al repositorio en "Acerca de notty".
+    AboutLink,
+}
+
+/// Lo que enseña "Acerca de notty" (menú Ayuda).
+#[derive(Debug, Clone, PartialEq)]
+pub struct AboutContent {
+    pub version: String,
+    /// `https://github.com/owner/repo`, si el binario lo tiene configurado.
+    pub url: Option<String>,
+}
+
+/// Una fila de un desplegable o menú contextual, ya resuelta para dibujar.
+struct MenuRow<'a> {
+    label: &'a str,
+    shortcut: &'a str,
+    enabled: bool,
+    sep: bool,
+    /// `Some(activo)` en las opciones que se encienden/apagan: se dibuja ✓ a la
+    /// izquierda cuando están activas.
+    check: Option<bool>,
 }
 
 /// Contexto que no vive en `Workspace`/`UiConfig` pero que `paint` necesita para
@@ -99,6 +137,20 @@ pub struct ViewState {
     /// Progreso (`0.0..=1.0`) del fundido del fondo de la pestaña activa al cambiar,
     /// si hay uno en curso. `None` en reposo (se pinta igual que siempre).
     pub tab_switch: Option<f32>,
+    /// Bandas (`layout::Bands`) tal como estaban antes del cambio de ajuste en curso
+    /// (Ajustes → "Varios archivos", barra de menús, pestañas bajo el menú, atajos,
+    /// línea de comandos fusionada...), para fundir el contenido de la banda que
+    /// aparece/desaparece en vez de que salte de golpe (Task 3 del plan de
+    /// animaciones, extensión de `start_tab_switch_anim`). `None` en reposo: sin
+    /// transición en curso, cada banda se pinta a fundido 1.0 de siempre.
+    pub chrome_from: Option<layout::BandFrac>,
+    /// Progreso (`0.0..=1.0`) de esa transición. Solo tiene sentido junto a `chrome_from`.
+    pub chrome_fade: Option<f32>,
+    /// Cambio de tema en curso: de qué tema se viene (`true` = oscuro) y progreso.
+    pub theme_from: Option<(bool, f32)>,
+    /// Elemento resaltado con el teclado (flechas) en el desplegable o menú
+    /// contextual abierto.
+    pub menu_sel: Option<usize>,
 }
 
 /// Los formatos de texto fijos que usa la maqueta, creados una vez en `Renderer::new`.
@@ -113,6 +165,11 @@ pub struct Fonts {
     pub ui_20_semibold: IDWriteTextFormat,
     pub ui_11_5_semibold: IDWriteTextFormat,
     pub ui_9: IDWriteTextFormat,
+    pub ui_10_5: IDWriteTextFormat,
+    pub ui_12_semibold: IDWriteTextFormat,
+    pub ui_12_5_semibold: IDWriteTextFormat,
+    pub ui_13_semibold: IDWriteTextFormat,
+    pub ui_18_semibold: IDWriteTextFormat,
     pub mono_13: IDWriteTextFormat,
     pub mono_13_bold: IDWriteTextFormat,
     pub mono_11: IDWriteTextFormat,
@@ -120,6 +177,7 @@ pub struct Fonts {
     pub mono_11_5: IDWriteTextFormat,
     pub mono_11_5_semibold: IDWriteTextFormat,
     pub mono_12: IDWriteTextFormat,
+    pub mono_12_semibold: IDWriteTextFormat,
     pub mono_12_5: IDWriteTextFormat,
 }
 
@@ -191,12 +249,28 @@ pub struct Renderer {
     /// `settings_window` para el fundido de apertura de la ventana (Task 5 del plan de
     /// animaciones): más simple que tocar cada llamada de dibujo una a una.
     fade: std::cell::Cell<f32>,
+    /// Si `paint` debe dejar el frame abierto para que una capa (el tour) se dibuje
+    /// encima antes del `EndDraw`: dos `EndDraw` por frame presentan el editor sin la
+    /// capa entre medias y se ve parpadear.
+    hold_frame: std::cell::Cell<bool>,
     /// Texto del aviso de actualización disponible en la barra de estado (Task 4 del
     /// plan del actualizador), o `None` si no hay ninguna comprobada/pendiente. Vive en
     /// el `Renderer` (no en `ViewState`, que es `Copy`) porque es una `String` propia.
     update_notice: Option<String>,
     /// Contenido del panel de notas de versión, si está abierto. Ver `UpdatePanelContent`.
     update_panel: Option<UpdatePanelContent>,
+    /// Menú contextual abierto (se dibuja el último, encima de todo).
+    context_menu: Option<crate::context_menu::ContextMenu>,
+    /// Pestañas entrando/saliendo en este fotograma (ver `tab_anim.rs`).
+    tab_anim: crate::tab_anim::TabAnimFrame,
+    /// Documento más cercano oculto a cada lado de la fila de pestañas (lo que
+    /// activan los botones ‹ ›), calculado al dibujarla.
+    tab_scroll_targets: (Option<usize>, Option<usize>),
+    /// "Acerca de notty" abierto.
+    about: Option<AboutContent>,
+    /// Atajos en vigor (tras reasignaciones en `[keys]`) de los elementos de menú que
+    /// los tienen, ya en formato corto ("^N").
+    menu_keys: Vec<(crate::menu::MenuCmd, String)>,
 }
 
 /// Lo que hay que pintar en el panel de notas de versión cuando está abierto
@@ -249,6 +323,11 @@ impl Renderer {
             let ui_11_5_semibold =
                 make_format(&dwrite, &ui_family, layout::FONT_PROMPT_LABEL, DWRITE_FONT_WEIGHT_SEMI_BOLD)?;
             let ui_9 = make_format(&dwrite, &ui_family, 9.0, DWRITE_FONT_WEIGHT_NORMAL)?;
+            let ui_10_5 = make_format(&dwrite, &ui_family, 10.5, DWRITE_FONT_WEIGHT_NORMAL)?;
+            let ui_12_semibold = make_format(&dwrite, &ui_family, 12.0, DWRITE_FONT_WEIGHT_SEMI_BOLD)?;
+            let ui_12_5_semibold = make_format(&dwrite, &ui_family, 12.5, DWRITE_FONT_WEIGHT_SEMI_BOLD)?;
+            let ui_18_semibold = make_format(&dwrite, &ui_family, 18.0, DWRITE_FONT_WEIGHT_SEMI_BOLD)?;
+            let ui_13_semibold = make_format(&dwrite, &ui_family, 13.0, DWRITE_FONT_WEIGHT_SEMI_BOLD)?;
             let mono_13 = make_format(&dwrite, &mono_family, layout::FONT_MONO, DWRITE_FONT_WEIGHT_NORMAL)?;
             let mono_13_bold = make_format(&dwrite, &mono_family, layout::FONT_MONO, DWRITE_FONT_WEIGHT_BOLD)?;
             let mono_11 = make_format(&dwrite, &mono_family, layout::FONT_HINTS, DWRITE_FONT_WEIGHT_NORMAL)?;
@@ -257,6 +336,7 @@ impl Renderer {
             let mono_11_5_semibold = make_format(&dwrite, &mono_family, 11.5, DWRITE_FONT_WEIGHT_SEMI_BOLD)?;
             let mono_12 = make_format(&dwrite, &mono_family, layout::FONT_SUGGEST, DWRITE_FONT_WEIGHT_NORMAL)?;
             with_ellipsis_trimming(&dwrite, &mono_12)?;
+            let mono_12_semibold = make_format(&dwrite, &mono_family, layout::FONT_SUGGEST, DWRITE_FONT_WEIGHT_SEMI_BOLD)?;
             let mono_12_5 = make_format(&dwrite, &mono_family, layout::FONT_PROMPT, DWRITE_FONT_WEIGHT_NORMAL)?;
 
             let brush = target.CreateSolidColorBrush(
@@ -278,6 +358,11 @@ impl Renderer {
                     ui_20_semibold,
                     ui_11_5_semibold,
                     ui_9,
+                    ui_10_5,
+                    ui_12_semibold,
+                    ui_12_5_semibold,
+                    ui_13_semibold,
+                    ui_18_semibold,
                     mono_13,
                     mono_13_bold,
                     mono_11,
@@ -285,14 +370,21 @@ impl Renderer {
                     mono_11_5,
                     mono_11_5_semibold,
                     mono_12,
+                    mono_12_semibold,
                     mono_12_5,
                 },
                 dpi,
                 hits: Vec::new(),
                 pending_dropdown: None,
                 fade: std::cell::Cell::new(1.0),
+                hold_frame: std::cell::Cell::new(false),
                 update_notice: None,
                 update_panel: None,
+                context_menu: None,
+                tab_anim: Default::default(),
+                tab_scroll_targets: (None, None),
+                about: None,
+                menu_keys: Vec::new(),
             })
         }
     }
@@ -356,18 +448,40 @@ impl Renderer {
     /// dibujó en el `paint()` normal de esta misma pasada (el recorrido guiado,
     /// ver `tour.rs`), en vez de repetir todo el dibujo del documento.
     pub(crate) fn begin_overlay(&self) {
+        if self.hold_frame.get() {
+            return;
+        }
         unsafe {
             self.target.BeginDraw();
         }
     }
 
-    /// Vela oscura sobre `full` con un agujero de esquinas redondeadas en `hole`
-    /// (`tour.rs`, mockup: `box-shadow:0 0 0 2px #73b6fa,0 0 0 9999px rgba(...)`)
-    /// más el anillo de acento alrededor del agujero. Se resuelve con una resta de
-    /// geometrías D2D (rectángulo completo menos rectángulo redondeado) en vez de
+    pub(crate) fn hold_next_frame(&self) {
+        self.hold_frame.set(true);
+    }
+
+    /// Vela oscura sobre `full` con un agujero de esquinas redondeadas en `hole`, más
+    /// un resplandor suave de `ring` alrededor del agujero. Se resuelve con una resta
+    /// de geometrías D2D (rectángulo completo menos rectángulo redondeado) en vez de
     /// cuatro franjas rectangulares, para que las esquinas del foco queden redondeadas
     /// de verdad en vez de en escuadra.
+    ///
+    /// El resplandor era antes un único trazo opaco de 2px (`box-shadow:0 0 0 2px
+    /// #73b6fa`, un contorno azul duro) que el usuario reportó como un "flash": al
+    /// cambiar de foco aparecía de golpe, sin gradiente, y contrastaba fuerte contra
+    /// la vela. Aquí se sustituye por varias capas concéntricas cada vez más anchas y
+    /// tenues (misma técnica que `draw_popup_shadow` para las sombras de popups), que
+    /// se difuminan hacia afuera en vez de marcar un borde neto.
     pub(crate) fn fill_veil_with_hole(&self, full: Rect, hole: Rect, hole_radius: f32, veil: Rgba, ring: Rgba) {
+        const GLOW_LAYERS: [(f32, f32); 5] = [
+            // (ancho de trazo, multiplicador de alpha), de más ancho/tenue a más
+            // fino/marcado: el resultado es un halo suave en vez de un anillo duro.
+            (10.0, 0.05),
+            (7.0, 0.09),
+            (5.0, 0.14),
+            (3.0, 0.22),
+            (1.5, 0.32),
+        ];
         unsafe {
             let Ok(outer) = self._d2d.CreateRectangleGeometry(&rect_of(full)) else { return };
             let Ok(inner) = self._d2d.CreateRoundedRectangleGeometry(&D2D1_ROUNDED_RECT {
@@ -384,17 +498,18 @@ impl Renderer {
             }
             self.brush.SetColor(&color(veil.faded(self.fade.get())));
             let _ = self.target.FillGeometry(&path, &self.brush, None);
-            self.brush.SetColor(&color(ring.faded(self.fade.get())));
-            self.target.DrawRoundedRectangle(
-                &D2D1_ROUNDED_RECT { rect: rect_of(hole), radiusX: hole_radius, radiusY: hole_radius },
-                &self.brush,
-                2.0,
-                None,
-            );
+
+            let hole_rect = D2D1_ROUNDED_RECT { rect: rect_of(hole), radiusX: hole_radius, radiusY: hole_radius };
+            for (width, alpha_mul) in GLOW_LAYERS {
+                let c = Rgba(ring.0, ring.1, ring.2, ring.3 * alpha_mul);
+                self.brush.SetColor(&color(c.faded(self.fade.get())));
+                self.target.DrawRoundedRectangle(&hole_rect, &self.brush, width, None);
+            }
         }
     }
 
     pub fn end_paint(&self) {
+        self.hold_frame.set(false);
         unsafe {
             let _ = self.target.EndDraw(None, None);
         }
@@ -421,6 +536,10 @@ impl Renderer {
     /// `Renderer::new`) no cambia nada.
     pub fn set_fade(&self, factor: f32) {
         self.fade.set(factor.clamp(0.0, 1.0));
+    }
+
+    pub fn fade(&self) -> f32 {
+        self.fade.get()
     }
 
     // --- Helpers de dibujo con la brocha única --------------------------------------
@@ -558,6 +677,156 @@ impl Renderer {
         }
     }
 
+    /// Igual que `text`, pero centrado también en horizontal (etiquetas de botón).
+    pub fn text_center(&self, s: &str, fmt: &IDWriteTextFormat, r: Rect, c: Rgba) {
+        let w = wide(s);
+        if w.is_empty() || r.width() <= 0.0 {
+            return;
+        }
+        unsafe {
+            if let Ok(layout) = self.dwrite.CreateTextLayout(&w, fmt, r.width(), r.height().max(0.0)) {
+                let _ = layout.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+                let _ = layout.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+                self.brush.SetColor(&color(c.faded(self.fade.get())));
+                self.target.DrawTextLayout(Vector2 { X: r.left, Y: r.top }, &layout, &self.brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
+            }
+        }
+    }
+
+    fn wrapped_layout(&self, s: &str, fmt: &IDWriteTextFormat, width: f32, line_h: Option<f32>) -> Option<IDWriteTextLayout> {
+        let w = wide(s);
+        if w.is_empty() || width <= 0.0 {
+            return None;
+        }
+        unsafe {
+            let layout = self.dwrite.CreateTextLayout(&w, fmt, width, f32::MAX).ok()?;
+            let _ = layout.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
+            let _ = layout.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+            if let Some(lh) = line_h {
+                let _ = layout.SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM, lh, lh * 0.8);
+            }
+            Some(layout)
+        }
+    }
+
+    /// Texto con salto de línea por palabras, pegado arriba a la izquierda de `r`.
+    /// `line_h` fuerza un interlineado fijo (el `line-height` de CSS).
+    pub fn text_wrapped(&self, s: &str, fmt: &IDWriteTextFormat, r: Rect, c: Rgba, line_h: Option<f32>) {
+        let Some(layout) = self.wrapped_layout(s, fmt, r.width(), line_h) else { return };
+        unsafe {
+            self.brush.SetColor(&color(c.faded(self.fade.get())));
+            self.target.DrawTextLayout(Vector2 { X: r.left, Y: r.top }, &layout, &self.brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
+        }
+    }
+
+    /// Alto que ocupa `s` con salto de línea en un ancho `width` (ver `text_wrapped`).
+    pub fn measure_wrapped(&self, s: &str, fmt: &IDWriteTextFormat, width: f32, line_h: Option<f32>) -> f32 {
+        let Some(layout) = self.wrapped_layout(s, fmt, width, line_h) else { return 0.0 };
+        unsafe {
+            let mut metrics = Default::default();
+            if layout.GetMetrics(&mut metrics).is_ok() {
+                return metrics.height;
+            }
+        }
+        0.0
+    }
+
+    /// Igual que `text`, pero con los glifos a color de la fuente (emoji de Segoe UI
+    /// Emoji en vez de su versión monocroma).
+    pub fn text_color_font(&self, s: &str, fmt: &IDWriteTextFormat, r: Rect, c: Rgba) {
+        let w = wide(s);
+        if w.is_empty() || r.width() <= 0.0 {
+            return;
+        }
+        unsafe {
+            if let Ok(layout) = self.dwrite.CreateTextLayout(&w, fmt, r.width(), r.height().max(0.0)) {
+                let _ = layout.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+                // Los glifos de color (emoji) ignoran el alfa del pincel: para que se
+                // fundan con el resto hace falta una capa con opacidad.
+                let alpha = c.3 * self.fade.get();
+                let layer = if alpha < 0.999 { self.target.CreateLayer(None).ok() } else { None };
+                if let Some(l) = &layer {
+                    let params = windows::Win32::Graphics::Direct2D::D2D1_LAYER_PARAMETERS {
+                        contentBounds: rect_of(r),
+                        geometricMask: std::mem::ManuallyDrop::new(None),
+                        maskAntialiasMode: D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+                        maskTransform: windows_numerics::Matrix3x2::identity(),
+                        opacity: alpha.max(0.0),
+                        opacityBrush: std::mem::ManuallyDrop::new(None),
+                        layerOptions: windows::Win32::Graphics::Direct2D::D2D1_LAYER_OPTIONS_NONE,
+                    };
+                    self.target.PushLayer(&params, l);
+                }
+                self.brush.SetColor(&color(Rgba(c.0, c.1, c.2, if layer.is_some() { 1.0 } else { alpha })));
+                self.target.DrawTextLayout(
+                    Vector2 { X: r.left, Y: r.top },
+                    &layout,
+                    &self.brush,
+                    D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT,
+                );
+                if layer.is_some() {
+                    self.target.PopLayer();
+                }
+            }
+        }
+    }
+
+    /// Recorta todo lo que se dibuje hasta el `pop_clip` correspondiente a `r`.
+    pub fn push_clip(&self, r: Rect) {
+        unsafe {
+            self.target.PushAxisAlignedClip(&rect_of(r), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+        }
+    }
+
+    pub fn pop_clip(&self) {
+        unsafe {
+            self.target.PopAxisAlignedClip();
+        }
+    }
+
+    fn path_of(&self, points: &[(f32, f32)], closed: bool) -> Option<ID2D1PathGeometry> {
+        let (first, rest) = points.split_first()?;
+        unsafe {
+            let path = self._d2d.CreatePathGeometry().ok()?;
+            let sink = path.Open().ok()?;
+            let begin = if closed { D2D1_FIGURE_BEGIN_FILLED } else { D2D1_FIGURE_BEGIN_HOLLOW };
+            sink.BeginFigure(Vector2 { X: first.0, Y: first.1 }, begin);
+            let rest: Vec<Vector2> = rest.iter().map(|p| Vector2 { X: p.0, Y: p.1 }).collect();
+            sink.AddLines(&rest);
+            sink.EndFigure(if closed { D2D1_FIGURE_END_CLOSED } else { D2D1_FIGURE_END_OPEN });
+            sink.Close().ok()?;
+            Some(path)
+        }
+    }
+
+    /// Polígono relleno (p.ej. el escudo UAC).
+    pub fn fill_polygon(&self, points: &[(f32, f32)], c: Rgba) {
+        let Some(path) = self.path_of(points, true) else { return };
+        unsafe {
+            self.brush.SetColor(&color(c.faded(self.fade.get())));
+            self.target.FillGeometry(&path, &self.brush, None);
+        }
+    }
+
+    /// Trazo abierto con extremos y uniones redondeados (chevrones, ✓, iconos).
+    pub fn stroke_polyline(&self, points: &[(f32, f32)], width: f32, c: Rgba) {
+        let Some(path) = self.path_of(points, false) else { return };
+        unsafe {
+            let props = D2D1_STROKE_STYLE_PROPERTIES {
+                startCap: D2D1_CAP_STYLE_ROUND,
+                endCap: D2D1_CAP_STYLE_ROUND,
+                dashCap: D2D1_CAP_STYLE_ROUND,
+                lineJoin: D2D1_LINE_JOIN_ROUND,
+                miterLimit: 10.0,
+                dashStyle: D2D1_DASH_STYLE_SOLID,
+                dashOffset: 0.0,
+            };
+            let style = self._d2d.CreateStrokeStyle(&props, None).ok();
+            self.brush.SetColor(&color(c.faded(self.fade.get())));
+            self.target.DrawGeometry(&path, &self.brush, width, style.as_ref());
+        }
+    }
+
     /// Ancho de `s` con `fmt`, sin límite (para medir nombres de pestaña, etc.).
     pub fn measure(&self, s: &str, fmt: &IDWriteTextFormat) -> f32 {
         let w = wide(s);
@@ -636,9 +905,21 @@ impl Renderer {
         }
     }
 
+    /// Fracción visible de cada banda si hay una transición de bandas en curso
+    /// (`None` en reposo: se usan las `bands` tal cual).
+    fn chrome_frac(view: &ViewState, bands: layout::Bands) -> Option<layout::BandFrac> {
+        match (view.chrome_from, view.chrome_fade) {
+            (Some(from), Some(t)) if t < 1.0 => Some(from.lerp(layout::BandFrac::of(bands), t)),
+            _ => None,
+        }
+    }
+
     /// Qué franjas se muestran, resuelto a partir de `ui`, el número de documentos y
     /// si el menú `Alt` está desplegado (maqueta, `tabsVisible()` línea 462).
-    fn resolve_bands(ui: &UiConfig, doc_count: usize, menu_bar_visible: bool) -> layout::Bands {
+    /// `pub(crate)`: `window.rs` también la usa, para detectar cuándo un cambio de
+    /// ajuste hace aparecer/desaparecer una banda entera y fundirla en vez de que
+    /// salte (Task 3 del plan de animaciones, ver `WindowState::last_bands`).
+    pub(crate) fn resolve_bands(ui: &UiConfig, doc_count: usize, menu_bar_visible: bool) -> layout::Bands {
         use notty_config::{Files, TabsPosition};
         let tabs_in_title = ui.files == Files::Tabs
             && (ui.tabs_position == TabsPosition::Title
@@ -660,7 +941,14 @@ impl Renderer {
     pub fn paint(&mut self, ws: &Workspace, ui: &UiConfig, view: &ViewState) {
         self.hits.clear();
         self.pending_dropdown = None;
-        let pal = theme::palette(view.dark);
+        let pal_mixed;
+        let pal = match view.theme_from {
+            Some((from_dark, t)) => {
+                pal_mixed = theme::palette(from_dark).mix(theme::palette(view.dark), t);
+                &pal_mixed
+            }
+            None => theme::palette(view.dark),
+        };
         let state = ws.active();
         let buf = state.doc.buffer();
         let is_raw = state.raw.is_some();
@@ -680,7 +968,10 @@ impl Renderer {
 
         let (w, h) = self.size_dips();
         let bands = Self::resolve_bands(ui, ws.len(), view.menu_bar_visible);
-        let frame = layout::frame(w, h, bands);
+        let frame = match Self::chrome_frac(view, bands) {
+            Some(f) => layout::frame_frac(w, h, f),
+            None => layout::frame(w, h, bands),
+        };
         // El botón de la barra de título queda cubierto por las pestañas/botones que
         // se registran después (hit() prioriza lo último registrado).
         self.hits.push((frame.titlebar, Hit::Caption));
@@ -694,12 +985,34 @@ impl Renderer {
             self.target.Clear(Some(&color(pal.surface)));
 
             self.draw_titlebar(ws, ui, view, pal, frame);
-            if bands.menubar {
-                self.draw_menubar(view, pal, frame);
+            // Bandas que acaban de aparecer por un cambio de ajuste (Ajustes → barra de
+            // menús / "Posición de las pestañas" / ...) funden su contenido en vez de
+            // saltar directamente a opaco (Task 3 del plan de animaciones): la banda que
+            // ya estaba visible antes de la transición (o fuera de una transición, el
+            // caso de siempre) se pinta a fundido 1.0, sin coste extra. Desaparecer
+            // sigue siendo instantáneo (dejar de reservar espacio en `frame` moviendo el
+            // resto del contenido de golpe es harina de otro costal) — ver el módulo.
+            // Una banda a medio desplegar se dibuja a su altura completa, anclada por
+            // abajo y recortada a lo que ya ocupa: entra como una persiana, con el
+            // contenido fundiéndose a la vez.
+            if !frame.menubar.is_empty() {
+                let k = frame.menubar.height() / layout::MENUBAR_H;
+                let mut full = frame;
+                full.menubar = Rect::new(0.0, frame.menubar.bottom - layout::MENUBAR_H, w, frame.menubar.bottom);
+                self.push_clip(frame.menubar);
+                self.set_fade(k);
+                self.draw_menubar(view, pal, full);
+                self.set_fade(1.0);
+                self.pop_clip();
             }
-            if bands.tabs_below {
+            if !frame.tabs_below.is_empty() {
+                let k = frame.tabs_below.height() / layout::TABS_BELOW_H;
+                self.push_clip(frame.tabs_below);
+                self.fill(frame.tabs_below, pal.chrome);
+                self.set_fade(k);
                 self.draw_tabs_row(ws, view, pal, layout::TABS_BELOW_PAD_X, w - layout::TABS_BELOW_PAD_X, frame.tabs_below.bottom);
-                self.fill(Rect::new(0.0, frame.tabs_below.top, w, frame.tabs_below.top), pal.chrome);
+                self.set_fade(1.0);
+                self.pop_clip();
             }
 
             if is_raw {
@@ -810,19 +1123,53 @@ impl Renderer {
             }
             }
 
-            if bands.hints {
-                self.draw_hints(state, ws, pal, frame);
+            if !frame.hints.is_empty() {
+                let k = frame.hints.height() / layout::HINTS_H;
+                let mut full = frame;
+                full.hints = Rect::new(0.0, frame.hints.top, w, frame.hints.top + layout::HINTS_H);
+                self.push_clip(frame.hints);
+                self.set_fade(k);
+                self.draw_hints(state, ws, pal, full);
+                self.set_fade(1.0);
+                self.pop_clip();
             }
 
             self.draw_status(ws, state, pal, frame, bands.merged_status, view);
 
             if let (Some((x, top)), Some(i)) = (self.pending_dropdown.take(), view.open_menu) {
-                self.draw_dropdown(crate::menu::MENUS[i].items, x, top, view, pal);
+                let checks = crate::menu::MenuChecks {
+                    line_numbers: ui.line_numbers,
+                    hints_bar: ui.hints_bar,
+                    vim: state.vim.is_some(),
+                    raw: is_raw,
+                };
+                self.draw_dropdown(crate::menu::MENUS[i].items, x, top, checks, view, pal);
             }
 
             self.draw_update_panel(pal, frame.status.top, w);
+            self.draw_about(pal, frame.body, view);
 
-            let _ = self.target.EndDraw(None, None);
+            if let Some(menu) = self.context_menu.take() {
+                let rows: Vec<MenuRow> = menu
+                    .items
+                    .iter()
+                    .map(|it| match it {
+                        crate::context_menu::CtxItem::Entry { label, shortcut, enabled, .. } => {
+                            MenuRow { label, shortcut, enabled: *enabled, sep: false, check: None }
+                        }
+                        crate::context_menu::CtxItem::Sep => {
+                            MenuRow { label: "", shortcut: "", enabled: false, sep: true, check: None }
+                        }
+                    })
+                    .collect();
+                self.draw_menu_rows(&rows, menu.x, menu.y, menu.y, 180.0, view, pal, Hit::CtxItem);
+                drop(rows);
+                self.context_menu = Some(menu);
+            }
+
+            if !self.hold_frame.get() {
+                let _ = self.target.EndDraw(None, None);
+            }
         }
     }
 
@@ -846,17 +1193,24 @@ impl Renderer {
             self.fill_circle(icon_x + 11.5, icon_y + 4.3, 1.7, pal.accent);
 
             let bands = Self::resolve_bands(ui, ws.len(), view.menu_bar_visible);
-            if bands.tabs_in_title {
-                self.draw_tabs_row(ws, view, pal, layout::APPICON_W, frame.caption_min.left, frame.titlebar.bottom);
+            let tabs_frac = Self::chrome_frac(view, bands).map(|f| f.tabs_in_title).unwrap_or(if bands.tabs_in_title { 1.0 } else { 0.0 });
+            if tabs_frac > 0.0 && tabs_frac < 1.0 {
+                // Ajustes → "Varios archivos" (Pestañas ↔ Buffers) o "Posición de las
+                // pestañas" acaban de cambiar y esto vive en la propia barra de título:
+                // ninguno de los dos estados (pestañas o título de archivo) mueve nada
+                // (mismo hueco fijo), así que aquí es barato fundir cruzado de verdad —
+                // ambos superpuestos con fundidos complementarios — en vez de solo
+                // fundir la entrada como con el resto de bandas (Task 3 del plan de
+                // animaciones, ver el módulo).
+                let target = bands.tabs_in_title;
+                let fade_of = |tabs: bool| if tabs { tabs_frac } else { 1.0 - tabs_frac };
+                self.set_fade(fade_of(!target));
+                self.draw_titlebar_tabs_or_title(ws, ui, frame, !target, view, pal);
+                self.set_fade(fade_of(target));
+                self.draw_titlebar_tabs_or_title(ws, ui, frame, target, view, pal);
+                self.set_fade(1.0);
             } else {
-                let name = crate::doc_name(ws.active().path.as_deref());
-                let title = crate::window_title(&name, ws.active().doc.is_dirty(), ui.preset == notty_config::Preset::Zen);
-                self.text(
-                    &title,
-                    &self.fonts.ui_12,
-                    Rect::new(layout::APPICON_W, 0.0, frame.caption_min.left, layout::TITLEBAR_H),
-                    pal.text_2,
-                );
+                self.draw_titlebar_tabs_or_title(ws, ui, frame, bands.tabs_in_title, view, pal);
             }
 
             self.draw_settings_button(view, pal, frame.settings_btn);
@@ -869,6 +1223,39 @@ impl Renderer {
             // sin depender de que haya pestañas o menú justo debajo. Atenuada a la mitad
             // de su opacidad normal: en esas apps es casi imperceptible, no un trazo duro.
             self.stroke_line(0.0, frame.titlebar.bottom, frame.titlebar.width(), frame.titlebar.bottom, 1.0, pal.line.faded(0.5));
+        }
+    }
+
+    /// El hueco central de la barra de título (`layout::APPICON_W`..`frame.caption_min.left`):
+    /// la fila de pestañas si `tabs`, o el título del archivo activo si no. Extraído
+    /// de `draw_titlebar` para poder dibujar los dos estados superpuestos durante su
+    /// fundido cruzado (ver ahí, Task 3 del plan de animaciones).
+    #[allow(unused_unsafe)]
+    unsafe fn draw_titlebar_tabs_or_title(
+        &mut self,
+        ws: &Workspace,
+        ui: &UiConfig,
+        frame: layout::Frame,
+        tabs: bool,
+        view: &ViewState,
+        pal: &theme::Palette,
+    ) {
+        unsafe {
+            if tabs {
+                // Hasta el engranaje de Ajustes (no hasta los botones de ventana: se
+                // montaba encima), dejando siempre un hueco para arrastrar la ventana.
+                let max_right = (frame.settings_btn.left - layout::TITLE_DRAG_MIN).max(layout::APPICON_W);
+                self.draw_tabs_row(ws, view, pal, layout::APPICON_W, max_right, frame.titlebar.bottom);
+            } else {
+                let name = crate::doc_name(ws.active().path.as_deref());
+                let title = crate::window_title(&name, ws.active().doc.is_dirty(), ui.preset == notty_config::Preset::Zen);
+                self.text(
+                    &title,
+                    &self.fonts.ui_12,
+                    Rect::new(layout::APPICON_W, 0.0, frame.settings_btn.left - 8.0, layout::TITLEBAR_H),
+                    pal.text_2,
+                );
+            }
         }
     }
 
@@ -934,6 +1321,9 @@ impl Renderer {
             let mut open_x = None;
             for (i, def) in crate::menu::MENUS.iter().enumerate() {
                 let w = self.measure(def.name, &self.fonts.ui_12_5) + layout::MENU_BTN_PAD_X * 2.0;
+                if x + w > frame.menubar.right - layout::MENUBAR_PAD_X {
+                    break;
+                }
                 let r = Rect::new(x, top, x + w, top + 22.0);
                 let hovered = view.hover == Hit::Menu(i) || view.open_menu == Some(i);
                 if hovered {
@@ -958,8 +1348,49 @@ impl Renderer {
     /// Desplegable de un menú (`.dropdown`/`.menu-item`/`.menu-sep`): ancho mínimo
     /// 250, fondo `chrome_hi`, radio 8, sombra aproximada como en `draw_suggestions`.
     #[allow(unused_unsafe)]
-    unsafe fn draw_dropdown(&mut self, items: &[crate::menu::MenuItem], x: f32, top: f32, view: &ViewState, pal: &theme::Palette) {
+    unsafe fn draw_dropdown(
+        &mut self,
+        items: &[crate::menu::MenuItem],
+        x: f32,
+        top: f32,
+        checks: crate::menu::MenuChecks,
+        view: &ViewState,
+        pal: &theme::Palette,
+    ) {
         use crate::menu::MenuItem;
+        let keys = self.menu_keys.clone();
+        let rows: Vec<MenuRow> = items
+            .iter()
+            .map(|it| match it {
+                MenuItem::Entry { label, shortcut, cmd } => {
+                    let shortcut = keys.iter().find(|(c, _)| c == cmd).map(|(_, s)| s.as_str()).unwrap_or(shortcut);
+                    MenuRow { label, shortcut, enabled: true, sep: false, check: checks.state_of(*cmd) }
+                }
+                MenuItem::Sep => MenuRow { label: "", shortcut: "", enabled: false, sep: true, check: None },
+            })
+            .collect();
+        // Sin sitio debajo, se sube lo justo en vez de abrirse por encima de la barra.
+        unsafe { self.draw_menu_rows(&rows, x, top, f32::NEG_INFINITY, 250.0, view, pal, Hit::MenuItem) };
+    }
+
+    /// Caja de menú compartida por los desplegables de la barra y los menús
+    /// contextuales: ancho mínimo `min_w`, fondo `chrome_hi`, radio 8, atajos alineados
+    /// a la derecha, elementos desactivados atenuados y sin zona de clic. Se abre con
+    /// la esquina en `(x, top)` y se mantiene dentro de la ventana: si no cabe debajo
+    /// se abre hacia arriba terminando en `flip_y`, y si no cabe entera en alto, las
+    /// filas se compactan.
+    #[allow(unused_unsafe, clippy::too_many_arguments)]
+    unsafe fn draw_menu_rows(
+        &mut self,
+        rows: &[MenuRow],
+        x: f32,
+        top: f32,
+        flip_y: f32,
+        min_w: f32,
+        view: &ViewState,
+        pal: &theme::Palette,
+        hit_of: fn(usize) -> Hit,
+    ) {
         unsafe {
             // Fundido + 4px de desplazamiento vertical al abrirse (ver anim.rs / Task 3
             // del plan de animaciones). `t == 1.0` (o sin animación en curso) dibuja
@@ -968,53 +1399,70 @@ impl Renderer {
             let dy = (1.0 - t) * 4.0;
             let draw_y = |y: f32| y - dy;
 
-            let row_h = 28.0;
+            let (win_w, win_h) = self.size_dips();
+            let bounds = Rect::new(4.0, 4.0, (win_w - 4.0).max(8.0), (win_h - 4.0).max(8.0));
             let sep_h = 9.0;
-            let content_w = items
+            let entries = rows.iter().filter(|r| !r.sep).count().max(1) as f32;
+            let seps = rows.iter().filter(|r| r.sep).count() as f32;
+            let fixed_h = layout::POPUP_PAD * 2.0 + seps * sep_h;
+            let row_h = ((bounds.height() - fixed_h) / entries).clamp(20.0, 28.0);
+            // Con alguna opción de encender/apagar, todas las etiquetas dejan sitio a la
+            // izquierda para la ✓, para que sigan alineadas entre sí.
+            let check_w = if rows.iter().any(|r| r.check.is_some()) { 18.0 } else { 0.0 };
+            let content_w = rows
                 .iter()
-                .map(|it| match it {
-                    MenuItem::Entry { label, shortcut, .. } => {
-                        self.measure(label, &self.fonts.ui_12_5) + if shortcut.is_empty() { 0.0 } else { self.measure(shortcut, &self.fonts.mono_11) + 24.0 }
-                    }
-                    MenuItem::Sep => 0.0,
+                .filter(|r| !r.sep)
+                .map(|r| {
+                    check_w
+                        + self.measure(r.label, &self.fonts.ui_12_5)
+                        + if r.shortcut.is_empty() { 0.0 } else { self.measure(r.shortcut, &self.fonts.mono_11) + 24.0 }
                 })
                 .fold(0.0f32, f32::max);
-            let width = (content_w + 24.0).max(250.0);
-            let height: f32 = layout::POPUP_PAD * 2.0
-                + items.iter().map(|it| if matches!(it, MenuItem::Sep) { sep_h } else { row_h }).sum::<f32>();
+            let width = (content_w + 24.0).max(min_w).min(bounds.width());
+            let height = fixed_h + entries * row_h;
             // Posición final (sin desplazar): la usada para el hit-testing, que no anima.
-            let box_r = Rect::new(x, top, x + width, top + height);
+            let box_r = layout::clamp_popup(x, top, width, height, flip_y, bounds);
             let draw_r = Rect::new(box_r.left, draw_y(box_r.top), box_r.right, draw_y(box_r.bottom));
 
             self.draw_popup_shadow(draw_r, layout::POPUP_RADIUS, t, pal.shadow);
             self.fill_round(draw_r, layout::POPUP_RADIUS, pal.chrome_hi.faded(t));
             self.stroke_round_rect(draw_r, layout::POPUP_RADIUS, 1.0, pal.shadow_ring.faded(t));
+            self.hits.push((box_r, Hit::PopupBox));
 
             let mut y = box_r.top + layout::POPUP_PAD;
-            for (j, it) in items.iter().enumerate() {
-                match it {
-                    MenuItem::Sep => {
-                        let ly = draw_y(y + sep_h / 2.0);
-                        self.stroke_line(draw_r.left + 4.0, ly, draw_r.right - 4.0, ly, 1.0, pal.line.faded(t));
-                        y += sep_h;
-                    }
-                    MenuItem::Entry { label, shortcut, .. } => {
-                        // El rect de hit-testing se registra en su posición final (sin
-                        // desplazar): un clic a mitad de los 120ms de animación cae dentro
-                        // de un margen de error aceptable.
-                        let r = Rect::new(box_r.left + 4.0, y, box_r.right - 4.0, y + row_h);
-                        let dr = Rect::new(draw_r.left + 4.0, draw_y(y), draw_r.right - 4.0, draw_y(y + row_h));
-                        if view.hover == Hit::MenuItem(j) {
-                            self.fill_round(dr, 4.0, pal.hover.faded(t));
-                        }
-                        self.text(label, &self.fonts.ui_12_5, Rect::new(dr.left + 6.0, dr.top, dr.right - 6.0, dr.bottom), pal.text.faded(t));
-                        if !shortcut.is_empty() {
-                            self.text_right(shortcut, &self.fonts.mono_11, Rect::new(dr.left + 6.0, dr.top, dr.right - 6.0, dr.bottom), pal.text_3.faded(t));
-                        }
-                        self.hits.push((r, Hit::MenuItem(j)));
-                        y += row_h;
-                    }
+            for (j, row) in rows.iter().enumerate() {
+                if row.sep {
+                    let ly = draw_y(y + sep_h / 2.0);
+                    self.stroke_line(draw_r.left + 4.0, ly, draw_r.right - 4.0, ly, 1.0, pal.line.faded(t));
+                    y += sep_h;
+                    continue;
                 }
+                // El rect de hit-testing se registra en su posición final (sin
+                // desplazar): un clic a mitad de los 120ms de animación cae dentro
+                // de un margen de error aceptable.
+                let r = Rect::new(box_r.left + 4.0, y, box_r.right - 4.0, y + row_h);
+                let dr = Rect::new(draw_r.left + 4.0, draw_y(y), draw_r.right - 4.0, draw_y(y + row_h));
+                let highlighted = row.enabled && (view.hover == hit_of(j) || view.menu_sel == Some(j));
+                if highlighted {
+                    self.fill_round(dr, 4.0, pal.hover.faded(t));
+                }
+                let (label_c, key_c) = if row.enabled { (pal.text, pal.text_3) } else { (pal.text_3.faded(0.7), pal.text_3.faded(0.45)) };
+                let inner = Rect::new(dr.left + 6.0, dr.top, dr.right - 6.0, dr.bottom);
+                if row.check == Some(true) {
+                    let cy = inner.top + inner.height() / 2.0;
+                    let cx = inner.left + 2.0;
+                    self.stroke_polyline(&[(cx, cy), (cx + 3.5, cy + 3.5), (cx + 10.0, cy - 3.5)], 1.4, pal.accent.faded(t));
+                }
+                let key_w = if row.shortcut.is_empty() { 0.0 } else { self.measure(row.shortcut, &self.fonts.mono_11) + 16.0 };
+                let label_r = Rect::new(inner.left + check_w, inner.top, inner.right - key_w, inner.bottom);
+                self.text(row.label, &self.fonts.ui_12_5, label_r, label_c.faded(t));
+                if !row.shortcut.is_empty() {
+                    self.text_right(row.shortcut, &self.fonts.mono_11, inner, key_c.faded(t));
+                }
+                if row.enabled {
+                    self.hits.push((r, hit_of(j)));
+                }
+                y += row_h;
             }
         }
     }
@@ -1023,13 +1471,86 @@ impl Renderer {
     #[allow(unused_unsafe)]
     unsafe fn draw_tabs_row(&mut self, ws: &Workspace, view: &ViewState, pal: &theme::Palette, x0: f32, max_right: f32, bottom: f32) {
         unsafe {
-            let names: Vec<String> = ws.iter().map(|d| crate::doc_name(d.path.as_deref())).collect();
-            let dirty: Vec<bool> = ws.iter().map(|d| d.doc.is_dirty()).collect();
-            let name_w: Vec<f32> = names.iter().map(|n| self.measure(n, &self.fonts.ui_12)).collect();
-            let dot_w = self.measure("●", &self.fonts.ui_9);
-            let (tabs, plus) = layout::tabs(x0, bottom, max_right, &name_w, &dirty, dot_w);
+            // Fila = documentos reales + pestañas recién cerradas que aún encogen
+            // (`ghosts`), cada una en la posición que ocupaba.
+            enum Slot {
+                Doc(usize),
+                Ghost(usize),
+            }
+            let anim = self.tab_anim.clone();
+            let doc_count = ws.len();
+            let mut order: Vec<Slot> = Vec::with_capacity(doc_count + anim.ghosts.len());
+            let mut gi = 0;
+            for d in 0..doc_count {
+                while gi < anim.ghosts.len() && anim.ghosts[gi].at <= d {
+                    order.push(Slot::Ghost(gi));
+                    gi += 1;
+                }
+                order.push(Slot::Doc(d));
+            }
+            while gi < anim.ghosts.len() {
+                order.push(Slot::Ghost(gi));
+                gi += 1;
+            }
 
-            for (i, t) in tabs.iter().enumerate() {
+            let docs: Vec<&EditorState> = ws.iter().collect();
+            let names: Vec<String> = order
+                .iter()
+                .map(|s| match s {
+                    Slot::Doc(d) => crate::doc_name(docs[*d].path.as_deref()),
+                    Slot::Ghost(g) => anim.ghosts[*g].name.clone(),
+                })
+                .collect();
+            let slots: Vec<layout::TabSlot> = order
+                .iter()
+                .zip(&names)
+                .map(|(s, n)| {
+                    let (dirty, scale) = match s {
+                        Slot::Doc(d) => (docs[*d].doc.is_dirty(), anim.open_scale(*d)),
+                        Slot::Ghost(g) => (anim.ghosts[*g].dirty, anim.ghosts[*g].scale),
+                    };
+                    layout::TabSlot { name_w: self.measure(n, &self.fonts.ui_12), dirty, scale }
+                })
+                .collect();
+            let focus = order.iter().position(|s| matches!(s, Slot::Doc(d) if *d == ws.active_index())).unwrap_or(0);
+            let dot_w = self.measure("●", &self.fonts.ui_9);
+            let row = layout::tabs_fit(x0, bottom, max_right, &slots, focus, dot_w);
+            let base_fade = self.fade();
+            let first_vis = row.tabs.iter().position(Option::is_some).unwrap_or(0);
+            let last_vis = row.tabs.iter().rposition(Option::is_some).unwrap_or(0);
+            let doc_at = |si: &usize| match order[*si] {
+                Slot::Doc(d) => Some(d),
+                Slot::Ghost(_) => None,
+            };
+            self.tab_scroll_targets = (
+                (0..first_vis).rev().find_map(|si| doc_at(&si)),
+                (last_vis + 1..order.len()).find_map(|si| doc_at(&si)),
+            );
+
+            for (si, geom) in row.tabs.iter().enumerate() {
+                let Some(t) = geom else { continue };
+                let scale = slots[si].scale.clamp(0.0, 1.0);
+                if t.rect.width() < 0.5 {
+                    continue;
+                }
+                let animating = scale < 1.0;
+                if animating {
+                    self.set_fade(base_fade * scale);
+                    self.push_clip(t.rect);
+                }
+                let i = match order[si] {
+                    Slot::Doc(d) => d,
+                    Slot::Ghost(_) => {
+                        // Pestaña cerrada encogiendo: solo nombre (y ●), sin fondo ni clics.
+                        self.text(&names[si], &self.fonts.ui_12, Rect::new(t.name_x, t.rect.top, t.name_x + t.name_w, t.rect.bottom), pal.text_2);
+                        if let Some(dot_x) = t.dot_x {
+                            self.text("●", &self.fonts.ui_9, Rect::new(dot_x, t.rect.top, dot_x + dot_w, t.rect.bottom), pal.text_2);
+                        }
+                        self.pop_clip();
+                        self.set_fade(base_fade);
+                        continue;
+                    }
+                };
                 let active = i == ws.active_index();
                 let hovered_tab = view.hover == Hit::Tab(i) || view.hover == Hit::TabClose(i);
                 if active {
@@ -1044,7 +1565,7 @@ impl Renderer {
                     self.fill(Rect::new(t.rect.left, t.rect.bottom - layout::TAB_RADIUS, t.rect.right, t.rect.bottom), pal.hover);
                 }
                 let name_color = if active { pal.text } else { pal.text_2 };
-                self.text(&names[i], &self.fonts.ui_12, Rect::new(t.name_x, t.rect.top, t.name_x + t.name_w, t.rect.bottom), name_color);
+                self.text(&names[si], &self.fonts.ui_12, Rect::new(t.name_x, t.rect.top, t.name_x + t.name_w, t.rect.bottom), name_color);
                 if let Some(dot_x) = t.dot_x {
                     self.text(
                         "●",
@@ -1054,7 +1575,9 @@ impl Renderer {
                     );
                 }
                 self.hits.push((t.rect, Hit::Tab(i)));
-                if active || hovered_tab {
+                // Mientras crece, la ✕ aún puede caer fuera de la pestaña: no se registra
+                // para que no robe el clic a la vecina.
+                if (active || hovered_tab) && t.close.right <= t.rect.right + 0.5 {
                     let close_hovered = view.hover == Hit::TabClose(i);
                     if close_hovered {
                         self.fill_round(t.close, 4.0, pal.hover);
@@ -1068,8 +1591,28 @@ impl Renderer {
                     self.stroke_line(cx + 5.0, cy - 5.0, cx - 5.0, cy + 5.0, 1.1, cc);
                     self.hits.push((t.close, Hit::TabClose(i)));
                 }
+                if animating {
+                    self.pop_clip();
+                    self.set_fade(base_fade);
+                }
             }
 
+            for (r, hit, left) in [(row.scroll_left, Hit::TabScrollLeft, true), (row.scroll_right, Hit::TabScrollRight, false)] {
+                let Some(r) = r else { continue };
+                let hovered = view.hover == hit;
+                let btn = Rect::new(r.left + 1.0, r.top + 4.0, r.right - 1.0, r.bottom - 2.0);
+                if hovered {
+                    self.fill_round(btn, 4.0, pal.hover);
+                }
+                let cx = btn.left + btn.width() / 2.0;
+                let cy = btn.top + btn.height() / 2.0;
+                let d = if left { 2.0 } else { -2.0 };
+                let c = if hovered { pal.text } else { pal.text_3 };
+                self.stroke_polyline(&[(cx + d, cy - 4.0), (cx - d, cy), (cx + d, cy + 4.0)], 1.2, c);
+                self.hits.push((r, hit));
+            }
+
+            let plus = row.plus;
             let plus_hovered = view.hover == Hit::NewTab;
             if plus_hovered {
                 self.fill_round(plus, 5.0, pal.hover);
@@ -1108,13 +1651,18 @@ impl Renderer {
 
             let mut x = layout::HINTS_PAD_X;
             let items = crate::hints_items(ctx);
+            let space_w = self.measure(" ", &self.fonts.mono_11);
             for (key, action) in items {
                 let key_w = self.measure(key, &self.fonts.mono_11_bold);
+                let action_w = self.measure(action, &self.fonts.mono_11);
+                // Van de más a menos importante: en una ventana estrecha se dejan de
+                // pintar los que no caben enteros en vez de cortarlos a medias.
+                if x + key_w + space_w + action_w > frame.hints.right - layout::HINTS_PAD_X {
+                    break;
+                }
                 self.text(key, &self.fonts.mono_11_bold, Rect::new(x, frame.hints.top, x + key_w, frame.hints.bottom), pal.text_hint);
                 x += key_w;
-                let space_w = self.measure(" ", &self.fonts.mono_11);
                 x += space_w;
-                let action_w = self.measure(action, &self.fonts.mono_11);
                 self.text(action, &self.fonts.mono_11, Rect::new(x, frame.hints.top, x + action_w, frame.hints.bottom), pal.text_2);
                 x += action_w + layout::HINTS_GAP;
             }
@@ -1134,26 +1682,38 @@ impl Renderer {
                 self.fill(r, pal.chrome);
             }
 
-            if matches!(ws.prompt, crate::Prompt::None) {
-                self.draw_status_normal(state, pal, r, merged, view);
+            // El aviso de actualización va a la derecha y el resto se reparte el hueco
+            // que deja (antes se pintaba encima de los campos). Con un prompt abierto
+            // en una ventana estrecha, el prompt tiene prioridad y el aviso se oculta.
+            let prompt_open = !matches!(ws.prompt, crate::Prompt::None);
+            let notice_w = self.update_notice.clone().map(|n| self.measure(&n, &self.fonts.mono_12) + 16.0);
+            let notice_w = notice_w.filter(|nw| !prompt_open || r.width() - nw >= 560.0);
+            let content_r = match notice_w {
+                Some(nw) => Rect::new(r.left, r.top, (r.right - layout::STATUS_PAD_X - nw).max(r.left), r.bottom),
+                None => r,
+            };
+
+            if prompt_open {
+                self.draw_prompt(&ws.prompt, state, pal, content_r, merged, view);
             } else {
-                self.draw_prompt(&ws.prompt, state, pal, r, merged, view);
+                self.draw_status_normal(state, pal, content_r, merged, view);
             }
 
-            self.draw_update_notice(pal, r, view);
+            if notice_w.is_some() {
+                self.draw_update_notice(pal, r, view);
+            }
         }
     }
 
     /// Aviso "Actualización X.Y.Z disponible" (Task 4 del plan del actualizador):
-    /// se dibuja siempre en la esquina derecha de la barra de estado, por encima de
-    /// cualquier otra cosa que haya ahí (fields, prompts...), si hay una comprobada.
+    /// se dibuja en la esquina derecha de la barra de estado, si hay una comprobada.
     /// No se muestra nada si `update_notice` está a `None` (comprobación desactivada,
     /// sin actualización más nueva, o sin comprobar todavía).
     unsafe fn draw_update_notice(&mut self, pal: &theme::Palette, r: Rect, view: &ViewState) {
         let Some(notice) = self.update_notice.clone() else { return };
         let font = self.fonts.mono_12.clone();
         let w = self.measure(&notice, &font) + 16.0;
-        let notice_r = Rect::new(r.right - layout::STATUS_PAD_X - w, r.top, r.right - layout::STATUS_PAD_X, r.bottom);
+        let notice_r = Rect::new((r.right - layout::STATUS_PAD_X - w).max(r.left), r.top, r.right - layout::STATUS_PAD_X, r.bottom);
         if view.hover == Hit::UpdateNotice {
             self.fill_round(notice_r, 4.0, pal.accent_soft);
         }
@@ -1173,13 +1733,71 @@ impl Renderer {
         self.update_panel = content;
     }
 
+    /// Fija (o borra, con `None`) el menú contextual a dibujar en el próximo `paint`.
+    pub fn set_context_menu(&mut self, menu: Option<crate::context_menu::ContextMenu>) {
+        self.context_menu = menu;
+    }
+
+    /// Estado de las animaciones de pestañas para el próximo `paint`.
+    pub fn set_tab_anim(&mut self, frame: crate::tab_anim::TabAnimFrame) {
+        self.tab_anim = frame;
+    }
+
+    pub fn set_about(&mut self, about: Option<AboutContent>) {
+        self.about = about;
+    }
+
+    /// Atajos en vigor de los elementos de menú (ver `menu::shortcut_labels`).
+    pub fn set_menu_keys(&mut self, keys: Vec<(crate::menu::MenuCmd, String)>) {
+        self.menu_keys = keys;
+    }
+
+    /// Documento que activa el botón ‹ (`left`) o › de la fila de pestañas: el más
+    /// cercano que quedó oculto por ese lado en el último `paint`.
+    pub fn tab_scroll_target(&self, left: bool) -> Option<usize> {
+        if left { self.tab_scroll_targets.0 } else { self.tab_scroll_targets.1 }
+    }
+
+    /// Punto (DIPs) justo debajo del cursor de texto, para abrir ahí el menú
+    /// contextual con el teclado (`Shift+F10`, tecla Menú). Si el cursor no está a la
+    /// vista, una esquina del cuerpo.
+    pub fn caret_point(&self, state: &EditorState, body: Rect, gutter_w: f32) -> (f32, f32) {
+        let buf = state.doc.buffer();
+        let total = buf.len_lines();
+        let head = state.doc.selection().head;
+        let (line, _) = buf.line_col(head);
+        let text_pad = body.left + gutter_w + layout::TEXT_PAD_L;
+        let fallback = (text_pad + 16.0, body.top + layout::TEXT_PAD_T + layout::LINE_H);
+        if !state.viewport.range(total).contains(&line) {
+            return fallback;
+        }
+        let y = body.top + layout::TEXT_PAD_T + (line - state.viewport.first_line) as f32 * layout::LINE_H + layout::LINE_H;
+        if y > body.bottom {
+            return fallback;
+        }
+        let start = buf.line_start(line);
+        let end = if line + 1 < total { buf.line_start(line + 1) } else { buf.len_chars() };
+        let text: String = buf.slice(start..end).trim_end_matches(['\r', '\n']).to_string();
+        let w16 = wide(&text);
+        let x = if w16.is_empty() {
+            text_pad
+        } else {
+            match unsafe { self.dwrite.CreateTextLayout(&w16, &self.fonts.mono_13, f32::MAX, layout::LINE_H) } {
+                Ok(l) => unsafe { hit_test_x(&l, &text, head.saturating_sub(start), text_pad) },
+                Err(_) => text_pad,
+            }
+        };
+        (x, y)
+    }
+
     /// Panel flotante con las notas de la release encontrada y un botón "Actualizar"
     /// (Task 4, Step 2-3 del plan del actualizador): anclado justo encima de la barra
     /// de estado, a la derecha, con el mismo estilo oscuro que los desplegables.
     unsafe fn draw_update_panel(&mut self, pal: &theme::Palette, status_top: f32, w: f32) {
         let Some(content) = self.update_panel.clone() else { return };
-        let panel_w = 340.0f32;
-        let panel_h = 190.0f32;
+        // Se encoge con la ventana en vez de salirse por la izquierda o por arriba.
+        let panel_w = 340.0f32.min(w - layout::STATUS_PAD_X * 2.0).max(160.0);
+        let panel_h = 190.0f32.min(status_top - layout::TITLEBAR_H - 16.0).max(110.0);
         let right = w - layout::STATUS_PAD_X;
         let r = Rect::new(right - panel_w, status_top - panel_h - 8.0, right, status_top - 8.0);
 
@@ -1192,7 +1810,11 @@ impl Renderer {
         self.text(&title, &self.fonts.ui_12_5, Rect::new(r.left + pad, r.top + pad, r.right - pad, r.top + pad + 20.0), pal.text);
 
         let body_r = Rect::new(r.left + pad, r.top + pad + 26.0, r.right - pad, r.bottom - 60.0);
-        self.text(&content.body, &self.fonts.ui_11, body_r, pal.text_2);
+        if !body_r.is_empty() {
+            self.push_clip(body_r);
+            self.text_wrapped(&content.body, &self.fonts.ui_11, body_r, pal.text_2, None);
+            self.pop_clip();
+        }
 
         if let Some(status) = &content.status_line {
             let status_r = Rect::new(r.left + pad, r.bottom - 56.0, r.right - pad, r.bottom - 40.0);
@@ -1215,6 +1837,48 @@ impl Renderer {
         let close_r = Rect::new(r.left + pad, r.bottom - pad - btn_h, r.left + pad + 80.0, r.bottom - pad);
         self.text("Cerrar", &self.fonts.ui_11_5, Rect::new(close_r.left, close_r.top, close_r.right, close_r.bottom), pal.text_2);
         self.hits.push((close_r, Hit::UpdatePanelCerrar));
+    }
+
+    /// "Acerca de notty": tarjeta centrada sobre el cuerpo, con el mismo aspecto que
+    /// los desplegables. Se cierra con clic fuera, Esc o Enter.
+    unsafe fn draw_about(&mut self, pal: &theme::Palette, body: Rect, view: &ViewState) {
+        let Some(about) = self.about.clone() else { return };
+        let (win_w, _) = self.size_dips();
+        let w = 320.0f32.min(win_w - 32.0);
+        let h = if about.url.is_some() { 150.0 } else { 124.0 };
+        let cx = win_w / 2.0;
+        let top = (body.top + (body.height() - h) / 2.0).max(body.top + 8.0);
+        let r = Rect::new(cx - w / 2.0, top, cx + w / 2.0, top + h);
+        self.draw_popup_shadow(r, layout::POPUP_RADIUS, 1.0, pal.shadow);
+        self.fill_round(r, layout::POPUP_RADIUS, pal.chrome_hi);
+        self.stroke_round_rect(r, layout::POPUP_RADIUS, 1.0, pal.shadow_ring);
+        self.hits.push((r, Hit::PopupBox));
+
+        let pad = 18.0;
+        let mut y = r.top + pad;
+        self.text("notty", &self.fonts.ui_18_semibold, Rect::new(r.left + pad, y, r.right - pad, y + 26.0), pal.text);
+        y += 28.0;
+        let version = format!("Versión {}", about.version);
+        self.text(&version, &self.fonts.ui_12, Rect::new(r.left + pad, y, r.right - pad, y + 18.0), pal.text_2);
+        y += 20.0;
+        self.text(
+            "Editor de texto nativo para Windows",
+            &self.fonts.ui_11_5,
+            Rect::new(r.left + pad, y, r.right - pad, y + 18.0),
+            pal.text_3,
+        );
+        y += 26.0;
+        if let Some(url) = &about.url {
+            let label = url.trim_start_matches("https://");
+            let lw = self.measure(label, &self.fonts.ui_11_5).min(r.width() - pad * 2.0);
+            let link_r = Rect::new(r.left + pad, y, r.left + pad + lw, y + 18.0);
+            let hovered = view.hover == Hit::AboutLink;
+            self.text(label, &self.fonts.ui_11_5, link_r, pal.accent);
+            if hovered {
+                self.stroke_line(link_r.left, link_r.bottom - 2.0, link_r.right, link_r.bottom - 2.0, 1.0, pal.accent);
+            }
+            self.hits.push((link_r, Hit::AboutLink));
+        }
     }
 
     #[allow(unused_unsafe)]
@@ -1251,29 +1915,60 @@ impl Renderer {
                 x += ww + layout::STATUS_L_GAP;
 
                 self.draw_pencil(raw, pal, x, r);
+                x += 24.0;
             } else if state.path.is_none() {
-                let label = "CLICKME";
-                let w = self.measure(label, &self.fonts.mono_12) + 8.0;
-                let click_r = Rect::new(x, r.top, x + w, r.bottom);
-                if view.hover == Hit::Clickme {
+                // Documento sin ruta todavía: un enlace discreto que explica qué pasa
+                // al pulsarlo (antes ponía "CLICKME", que no decía nada).
+                let label = "Guardar como…";
+                let w = self.measure(label, label_font) + 8.0;
+                let click_r = Rect::new(x, r.top + 3.0, x + w, r.bottom - 3.0);
+                let hovered = view.hover == Hit::Clickme;
+                if hovered {
                     self.fill_round(click_r, 4.0, pal.accent_soft);
                 }
-                self.text(label, &self.fonts.mono_12, Rect::new(x + 4.0, r.top, x + w - 4.0, r.bottom), pal.accent);
+                let c = if hovered { pal.accent } else { pal.text_2 };
+                self.text(label, label_font, Rect::new(x + 4.0, r.top, x + w - 4.0, r.bottom), c);
+                let text_w = w - 8.0;
+                let uy = r.top + r.height() / 2.0 + 7.0;
+                self.stroke_line(x + 4.0, uy, x + 4.0 + text_w, uy, 1.0, c.faded(if hovered { 0.8 } else { 0.45 }));
                 self.hits.push((click_r, Hit::Clickme));
+                x += w;
             } else if !merged {
                 // El nombre del archivo, no el "Texto" genérico de la maqueta: en la
                 // barra de estado real de notty tiene más sentido decir qué archivo es.
                 let name = crate::doc_name(state.path.as_deref());
                 let w = self.measure(&name, label_font).min(r.width() * 0.4);
                 self.text(&name, label_font, Rect::new(x, r.top, x + w, r.bottom), pal.text_2);
+                x += w;
             }
+            let left_end = x;
 
             // Derecha: los tres campos de `status_right`, o el desplazamiento en raw.
-            let fields: Vec<String> = if state.raw.is_some() {
+            // Si no caben todos junto a lo de la izquierda se quitan empezando por el
+            // menos importante (el último: fin de línea, luego codificación).
+            let mut fields: Vec<String> = if state.raw.is_some() {
                 vec![crate::raw_offset(state.raw_cursor)]
             } else {
                 crate::status_right(&state.doc, state.encoding, state.eol).to_vec()
             };
+            let sep_w = self.measure("· ", label_font);
+            let fields_w = |fs: &[String]| -> f32 {
+                fs.iter()
+                    .enumerate()
+                    .map(|(i, f)| {
+                        let w = self.measure(f, label_font);
+                        let extra = if merged {
+                            if i + 1 < fs.len() { sep_w } else { 0.0 }
+                        } else {
+                            layout::STATUS_FLD_PAD_X * 2.0 + layout::STATUS_R_GAP
+                        };
+                        w + extra
+                    })
+                    .sum()
+            };
+            while !fields.is_empty() && r.right - layout::STATUS_PAD_X - fields_w(&fields) < left_end + layout::STATUS_GAP {
+                fields.pop();
+            }
             let mut xr = r.right - layout::STATUS_PAD_X;
             for (i, field) in fields.iter().enumerate().rev() {
                 let w = self.measure(field, label_font);
@@ -1366,26 +2061,42 @@ impl Renderer {
                 crate::Purpose::Save => "ruta donde guardar",
             };
 
-            if p.value.is_empty() {
-                let w = self.measure(placeholder, &self.fonts.mono_12_5);
-                self.text(placeholder, &self.fonts.mono_12_5, Rect::new(x, r.top, x + w, r.bottom), pal.text_3);
-            } else {
-                let vw = self.measure(&p.value, &self.fonts.mono_12_5);
-                self.text(&p.value, &self.fonts.mono_12_5, Rect::new(x, r.top, x + vw, r.bottom), value_color);
-                let caret_x = x + vw;
-                let ghost = p.ghost();
-                if !ghost.is_empty() {
-                    let gw = self.measure(&ghost, &self.fonts.mono_12_5);
-                    self.text(&ghost, &self.fonts.mono_12_5, Rect::new(caret_x, r.top, caret_x + gw, r.bottom), pal.text_3);
+            // Primero lo de la derecha (pregunta, error o palabra de estado): el valor se
+            // pinta después en el hueco que quede, desplazado para que se vea el final.
+            let mut xr = r.right - layout::STATUS_PAD_X;
+            if p.ask_overwrite {
+                // "Ya existe": tres botones pequeños con su tecla, en el color de aviso
+                // (no el rojo de error: no ha fallado nada, solo se pregunta).
+                let choices = [("C", "Cancelar", 2u8), ("A", "Abrir", 1u8), ("S", "Sobrescribir", 0u8)];
+                for (key, label, idx) in choices {
+                    let kw = self.measure(key, &self.fonts.mono_11_bold);
+                    let lw = self.measure(label, &self.fonts.ui_11_5);
+                    let w = kw + 5.0 + lw + 14.0;
+                    xr -= w;
+                    let chip = Rect::new(xr, r.top + 3.0, xr + w, r.bottom - 3.0);
+                    let hovered = view.hover == Hit::Overwrite(idx);
+                    let primary = idx == 0;
+                    let bg = if hovered { pal.hover } else if primary { pal.accent_soft } else { pal.surface_2 };
+                    self.fill_round(chip, 4.0, bg);
+                    let kc = if primary { pal.accent } else { pal.text_hint };
+                    self.text(key, &self.fonts.mono_11_bold, Rect::new(chip.left + 7.0, r.top, chip.left + 7.0 + kw, r.bottom), kc);
+                    let tc = if primary { pal.accent } else { pal.text_2 };
+                    self.text(label, &self.fonts.ui_11_5, Rect::new(chip.left + 7.0 + kw + 5.0, r.top, chip.right - 7.0, r.bottom), tc);
+                    self.hits.push((chip, Hit::Overwrite(idx)));
+                    xr -= 6.0;
                 }
-                self.fill(Rect::new(caret_x, r.top + 4.0, caret_x + 1.0, r.bottom - 4.0), pal.text);
+                let q = "Ya existe:";
+                let qw = self.measure(q, &self.fonts.ui_11_5);
+                xr -= qw + 4.0;
+                self.text(q, &self.fonts.ui_11_5, Rect::new(xr, r.top, xr + qw, r.bottom), pal.warn);
+                self.draw_path_value(p, x, xr - 10.0, r, placeholder, value_color, pal);
+                return;
             }
 
             // Derecha: si el último intento falló, por qué (en rojo, sustituye a la
             // palabra de estado y a "Tab ↹": no tiene sentido completar ni cerrar el
             // prompt en silencio cuando Enter no pudo hacer lo que pedía).
             let (visible_sugs, total_sugs) = p.visible_suggestions();
-            let mut xr = r.right - layout::STATUS_PAD_X;
             if let Some(err) = &p.last_error {
                 let w = self.measure(err, &self.fonts.ui_11_5).min(r.width() * 0.6);
                 xr -= w;
@@ -1406,11 +2117,51 @@ impl Renderer {
                     self.text(word, &self.fonts.ui_11_5, Rect::new(xr, r.top, xr + w, r.bottom), wc);
                 }
             }
+            self.draw_path_value(p, x, xr - 10.0, r, placeholder, value_color, pal);
 
             if p.last_error.is_none() && !visible_sugs.is_empty() {
                 self.draw_suggestions(&visible_sugs, p.scroll, p.selected, total_sugs, pal, r, view);
             }
         }
+    }
+
+    /// Valor de la línea de ruta (o su texto de ayuda si está vacía) entre `x` y
+    /// `right`: si no cabe, se desplaza a la izquierda para que el final (donde se
+    /// escribe) siga a la vista, y se recorta en vez de pisar lo de la derecha.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_path_value(
+        &self,
+        p: &crate::PathPromptState,
+        x: f32,
+        right: f32,
+        r: Rect,
+        placeholder: &str,
+        value_color: Rgba,
+        pal: &theme::Palette,
+    ) {
+        let right = right.max(x + 40.0);
+        self.push_clip(Rect::new(x - 2.0, r.top, right, r.bottom));
+        if p.value.is_empty() {
+            let w = self.measure(placeholder, &self.fonts.mono_12_5);
+            self.text(placeholder, &self.fonts.mono_12_5, Rect::new(x, r.top, x + w, r.bottom), pal.text_3);
+        } else {
+            let vw = self.measure(&p.value, &self.fonts.mono_12_5);
+            let x = x + (right - x - 2.0 - vw).min(0.0);
+            if p.all_selected {
+                self.fill_round(Rect::new(x - 1.0, r.top + 4.0, x + vw + 1.0, r.bottom - 4.0), 2.0, pal.accent_soft);
+            }
+            self.text(&p.value, &self.fonts.mono_12_5, Rect::new(x, r.top, x + vw, r.bottom), value_color);
+            let caret_x = x + vw;
+            let ghost = if p.all_selected || p.ask_overwrite { String::new() } else { p.ghost() };
+            if !ghost.is_empty() {
+                let gw = self.measure(&ghost, &self.fonts.mono_12_5);
+                self.text(&ghost, &self.fonts.mono_12_5, Rect::new(caret_x, r.top, caret_x + gw, r.bottom), pal.text_3);
+            }
+            if !p.ask_overwrite {
+                self.fill(Rect::new(caret_x, r.top + 4.0, caret_x + 1.0, r.bottom - 4.0), pal.text);
+            }
+        }
+        self.pop_clip();
     }
 
     /// Lista de sugerencias de ruta (`.psuggest`), hasta `VISIBLE_SUGGESTIONS` filas a
@@ -1441,7 +2192,8 @@ impl Renderer {
             let has_more = total > sugs.len();
             let counter_h = if has_more { 20.0 } else { 0.0 };
             let longest = sugs.iter().map(|e| self.measure(&e.name, &self.fonts.mono_12)).fold(0.0f32, f32::max);
-            let width = (longest + 16.0 + 16.0).clamp(220.0, 360.0);
+            let (win_w, _) = self.size_dips();
+            let width = (longest + 16.0 + 16.0).clamp(220.0, 360.0).min((win_w - 24.0).max(120.0));
             let height = row_h * sugs.len() as f32 + counter_h + layout::POPUP_PAD * 2.0;
             // Posición final (sin desplazar): la usada para el hit-testing, que no anima.
             let box_r = Rect::new(12.0, status.top - 2.0 - height, 12.0 + width, status.top - 2.0);

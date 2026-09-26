@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -159,6 +161,11 @@ pub struct Config {
     /// lo pide expresamente (eso arranca el recorrido directamente, no esta ventana).
     #[serde(default)]
     pub first_run_done: bool,
+    /// Sección `[keys]`: nombre de comando (`notty_input::Command::name`) → atajo
+    /// ("Ctrl+Shift+N"). Solo guarda lo que el usuario cambió; una cadena vacía
+    /// deja el comando sin atajo.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub keys: BTreeMap<String, String>,
 }
 
 #[cfg(test)]
@@ -190,6 +197,24 @@ mod tests {
         let s = toml::to_string_pretty(&cfg).unwrap();
         let back: Config = toml::from_str(&s).unwrap();
         assert!(back.first_run_done);
+    }
+
+    #[test]
+    fn keys_default_to_empty_and_round_trip() {
+        assert!(Config::default().keys.is_empty());
+        let mut cfg = Config::default();
+        cfg.keys.insert("new_tab".to_string(), "Ctrl+T".to_string());
+        cfg.keys.insert("close_tab".to_string(), String::new());
+        let text = toml::to_string_pretty(&cfg).unwrap();
+        assert!(text.contains("[keys]"));
+        let back: Config = toml::from_str(&text).unwrap();
+        assert_eq!(back.keys, cfg.keys);
+    }
+
+    #[test]
+    fn empty_keys_are_not_written() {
+        let text = toml::to_string_pretty(&Config::default()).unwrap();
+        assert!(!text.contains("[keys]"));
     }
 
     #[test]

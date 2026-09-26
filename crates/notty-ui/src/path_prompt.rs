@@ -29,6 +29,52 @@ pub struct PathPromptState {
     /// carpeta que no se pudo crear...). Se enseña en rojo en vez de la palabra de
     /// estado normal; nunca se cierra el prompt sin avisar de por qué no pasó nada.
     pub last_error: Option<String>,
+    /// Ctrl+A: todo el valor está seleccionado; lo siguiente que se teclee, pegue o
+    /// borre lo sustituye entero.
+    pub all_selected: bool,
+    /// Guardar un documento nuevo sobre una ruta que ya existe: en vez de escribir
+    /// encima, se pregunta (sobrescribir / abrir el existente / cancelar).
+    pub ask_overwrite: bool,
+    undo_stack: Vec<String>,
+    /// Historial de rutas usadas: ordena las sugerencias por uso frecuente y reciente.
+    usage: notty_io::Usage,
+}
+
+/// Qué hacer cuando un documento nuevo se guardaría encima de un archivo existente.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OverwriteChoice {
+    Overwrite,
+    OpenExisting,
+    Cancel,
+}
+
+impl OverwriteChoice {
+    /// Tecla de la pregunta de sobrescritura: S/Enter sobrescribe, A abre el
+    /// existente, C/Esc cancela. Cualquier otra tecla no responde.
+    pub fn from_vk(vk: u32) -> Option<Self> {
+        match vk {
+            0x53 | 0x0D => Some(Self::Overwrite),
+            0x41 => Some(Self::OpenExisting),
+            0x43 | 0x1B => Some(Self::Cancel),
+            _ => None,
+        }
+    }
+}
+
+pub const OVERWRITE_QUESTION: &str = "Ya existe · S sobrescribir · A abrirlo · C cancelar";
+
+const UNDO_MAX: usize = 100;
+
+/// Limpia lo que llega del portapapeles para usarlo como ruta: primera línea no
+/// vacía, sin espacios alrededor ni las comillas de "Copiar como ruta" del Explorador.
+pub fn clean_pasted_path(text: &str) -> String {
+    let line = text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+    line.trim_matches('"').trim().to_string()
+}
+
+fn is_absolute_path(s: &str) -> bool {
+    let b = s.as_bytes();
+    s.starts_with(r"\\") || (b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':')
 }
 
 impl PathPromptState {
@@ -37,7 +83,18 @@ impl PathPromptState {
     /// para que las sugerencias aparezcan al instante sin tener que teclear nada.
     pub fn new(purpose: Purpose, initial: String) -> Self {
         let value = if initial.is_empty() { r"C:\".to_string() } else { initial };
-        Self { value, purpose, selected: 0, scroll: 0, pending_prefix: None, last_error: None }
+        Self {
+            value,
+            purpose,
+            selected: 0,
+            scroll: 0,
+            pending_prefix: None,
+            last_error: None,
+            all_selected: false,
+            ask_overwrite: false,
+            undo_stack: Vec::new(),
+            usage: notty_io::Usage::load(),
+        }
     }
 
     pub fn type_text(&mut self, raw: &str, ctx: &notty_io::PathContext) {
@@ -46,10 +103,72 @@ impl PathPromptState {
         self.scroll = 0;
         self.pending_prefix = None;
         self.last_error = None;
+        self.all_selected = false;
+        self.ask_overwrite = false;
+    }
+
+    /// Como `type_text`, pero guardando el valor anterior para Ctrl+Z.
+    fn edit(&mut self, raw: &str, ctx: &notty_io::PathContext) {
+        if self.undo_stack.last() != Some(&self.value) {
+            self.undo_stack.push(self.value.clone());
+            if self.undo_stack.len() > UNDO_MAX {
+                self.undo_stack.remove(0);
+            }
+        }
+        self.type_text(raw, ctx);
+    }
+
+    pub fn type_char(&mut self, ch: char, ctx: &notty_io::PathContext) {
+        let raw = if self.all_selected { ch.to_string() } else { format!("{}{ch}", self.value) };
+        self.edit(&raw, ctx);
+    }
+
+    pub fn backspace(&mut self, ctx: &notty_io::PathContext) {
+        let raw = if self.all_selected {
+            String::new()
+        } else {
+            let mut v = self.value.clone();
+            v.pop();
+            v
+        };
+        self.edit(&raw, ctx);
+    }
+
+    pub fn select_all(&mut self) {
+        self.all_selected = !self.value.is_empty();
+    }
+
+    /// Ctrl+C: la ruta entera (no hay selección parcial en esta línea).
+    pub fn copy_text(&self) -> String {
+        self.value.clone()
+    }
+
+    /// Ctrl+X: devuelve la ruta y vacía el campo.
+    pub fn cut(&mut self, ctx: &notty_io::PathContext) -> String {
+        let out = self.value.clone();
+        self.edit("", ctx);
+        out
+    }
+
+    /// Ctrl+V: una ruta absoluta (o con todo seleccionado) sustituye el valor; un
+    /// trozo relativo se añade al final, como si se hubiera tecleado.
+    pub fn paste(&mut self, text: &str, ctx: &notty_io::PathContext) {
+        let clean = clean_pasted_path(text);
+        if clean.is_empty() {
+            return;
+        }
+        let raw = if self.all_selected || is_absolute_path(&clean) { clean } else { format!("{}{clean}", self.value) };
+        self.edit(&raw, ctx);
+    }
+
+    pub fn undo(&mut self, ctx: &notty_io::PathContext) {
+        if let Some(prev) = self.undo_stack.pop() {
+            self.type_text(&prev, ctx);
+        }
     }
 
     pub fn suggestions(&self) -> Vec<notty_io::Entry> {
-        notty_io::suggestions(&self.value, FETCH_MAX)
+        notty_io::ranked_suggestions(&self.value, FETCH_MAX, &self.usage)
     }
 
     /// El tramo de `VISIBLE_SUGGESTIONS` candidatos que toca dibujar, ya recortado a
@@ -154,7 +273,7 @@ impl PathPromptState {
             }
         };
         let typed = format!("{base}{last}");
-        let sugs = notty_io::suggestions(&typed, FETCH_MAX);
+        let sugs = notty_io::ranked_suggestions(&typed, FETCH_MAX, &self.usage);
         if sugs.is_empty() {
             return;
         }
@@ -184,6 +303,59 @@ mod tests {
         std::fs::create_dir(dir.path().join("proyectos-viejos")).unwrap();
         std::fs::write(dir.path().join("presupuesto.txt"), "x").unwrap();
         dir
+    }
+
+    #[test]
+    fn select_all_then_typing_replaces_everything() {
+        let c = ctx(&PathBuf::from("."));
+        let mut p = PathPromptState::new(Purpose::Save, r"C:\algo\viejo.txt".to_string());
+        p.select_all();
+        p.type_char('D', &c);
+        assert_eq!(p.value, "D");
+        assert!(!p.all_selected);
+    }
+
+    #[test]
+    fn select_all_then_backspace_clears() {
+        let c = ctx(&PathBuf::from("."));
+        let mut p = PathPromptState::new(Purpose::Save, r"C:\algo".to_string());
+        p.select_all();
+        p.backspace(&c);
+        assert_eq!(p.value, "");
+    }
+
+    #[test]
+    fn pasting_an_absolute_path_replaces_and_strips_quotes() {
+        let c = ctx(&PathBuf::from("."));
+        let mut p = PathPromptState::new(Purpose::Open, String::new());
+        p.paste("\"D:\\docs\\notas.txt\"\r\n", &c);
+        assert_eq!(p.value, r"D:\docs\notas.txt");
+    }
+
+    #[test]
+    fn pasting_a_relative_piece_appends() {
+        let c = ctx(&PathBuf::from("."));
+        let mut p = PathPromptState::new(Purpose::Open, r"C:\docs\".to_string());
+        p.paste("notas.txt", &c);
+        assert_eq!(p.value, r"C:\docs\notas.txt");
+    }
+
+    #[test]
+    fn cut_empties_and_undo_restores() {
+        let c = ctx(&PathBuf::from("."));
+        let mut p = PathPromptState::new(Purpose::Open, r"C:\docs\a.txt".to_string());
+        assert_eq!(p.cut(&c), r"C:\docs\a.txt");
+        assert_eq!(p.value, "");
+        p.undo(&c);
+        assert_eq!(p.value, r"C:\docs\a.txt");
+    }
+
+    #[test]
+    fn overwrite_keys_map_to_choices() {
+        assert_eq!(OverwriteChoice::from_vk(0x53), Some(OverwriteChoice::Overwrite));
+        assert_eq!(OverwriteChoice::from_vk(0x41), Some(OverwriteChoice::OpenExisting));
+        assert_eq!(OverwriteChoice::from_vk(0x1B), Some(OverwriteChoice::Cancel));
+        assert_eq!(OverwriteChoice::from_vk(0x51), None);
     }
 
     #[test]

@@ -3,5 +3,7 @@
 mod command;
 mod keyspec;
 
-pub use command::{UiCommand, apply_overrides, default_ui_keymap};
-pub use keyspec::{Modifiers, parse_key_spec};
+pub use command::{
+    Command, UiCommand, apply_overrides, binding, binding_spec, command_for_key, conflict, default_ui_keymap, set_binding,
+};
+pub use keyspec::{Modifiers, format_key_spec, key_name, parse_key_spec};

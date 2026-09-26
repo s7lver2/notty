@@ -23,7 +23,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     TranslateMessage, WHEEL_DELTA, WM_ACTIVATE, WM_CHAR, WM_DESTROY, WM_DPICHANGED, WM_KEYDOWN, WM_LBUTTONDOWN,
     WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCALCSIZE, WM_NCHITTEST, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP,
     WM_NCMOUSELEAVE, WM_NCMOUSEMOVE, WM_PAINT, WM_SETCURSOR, WM_SETTINGCHANGE, WM_SIZE, WM_SYSKEYDOWN, WM_TIMER,
-    WNDCLASSEXW, WS_EX_APPWINDOW, WS_OVERLAPPEDWINDOW,
+    WNDCLASSEXW, WS_EX_APPWINDOW, WS_OVERLAPPEDWINDOW, MINMAXINFO, SIZE_MINIMIZED, WM_CONTEXTMENU, WM_GETMINMAXINFO,
+    WM_RBUTTONDOWN, WM_RBUTTONUP,
 };
 use windows::core::{PCWSTR, Result, w};
 
@@ -59,7 +60,6 @@ struct WindowState {
     mouse_down: bool,
     selection_anchor: usize,
     cfg: Rc<RefCell<notty_config::Config>>,
-    ui_keymap: std::collections::HashMap<(u32, notty_input::Modifiers), notty_input::UiCommand>,
     /// Solo se usa cuando `cfg.ui.menubar == MenuBar::Alt`: si el menú está desplegado.
     menu_visible: bool,
     /// Zona bajo el ratón / con el botón pulsado (barra de título, pestañas, ✕, +, ...).
@@ -84,6 +84,24 @@ struct WindowState {
     /// Animación en curso del fundido de fondo de la pestaña activa al cambiar de
     /// pestaña. `None` en reposo.
     tab_switch_anim: Option<crate::Anim>,
+    /// Bandas (`layout::Bands`) resueltas en el último `WM_PAINT`: comparar contra
+    /// ellas es cómo se detecta que un cambio de ajuste (desde Ajustes, u otra vía)
+    /// acaba de hacer aparecer/desaparecer una banda entera, para fundirla en vez de
+    /// que salte de golpe (Task 3 del plan de animaciones). `None` antes del primer
+    /// pintado: nada que comparar todavía, así que ese primer pintado nunca anima.
+    last_bands: Option<layout::Bands>,
+    /// Fracción visible de cada banda de la que se viene mientras `chrome_fade_anim`
+    /// está en curso (`None` en reposo): junto con ella, `render.rs` funde el
+    /// contenido que cambia de visibilidad en vez de saltar directamente al nuevo
+    /// estado. Es fraccionaria (no `Bands`) para que un cambio a mitad de transición
+    /// (Alt pulsado varias veces seguidas) arranque desde donde está ahora.
+    chrome_from: Option<layout::BandFrac>,
+    /// Animación en curso de ese fundido (extensión de `start_tab_switch_anim` a
+    /// cualquier banda de la interfaz, no solo la pestaña activa). `None` en reposo.
+    chrome_fade_anim: Option<crate::Anim>,
+    /// Tema (oscuro o no) del último pintado, y fundido en curso desde el anterior.
+    last_dark: Option<bool>,
+    theme_anim: Option<(bool, crate::Anim)>,
     /// Si el `SetTimer` de animación (`ID_ANIM_TIMER`) está corriendo.
     anim_timer_running: bool,
     /// Aviso/panel de actualización disponible (Task 4 del plan del actualizador):
@@ -108,6 +126,16 @@ struct WindowState {
     /// cualquier otro manejador, y `WM_PAINT` lo dibuja el último (por encima de
     /// todo lo demás).
     tour: Option<crate::tour::Tour>,
+    /// Menú contextual abierto (clic derecho, `Shift+F10`, tecla Menú), si lo hay.
+    ctx_menu: Option<crate::context_menu::ContextMenu>,
+    /// Elemento resaltado con las flechas en el desplegable o menú contextual abierto.
+    menu_sel: Option<usize>,
+    /// Pestañas entrando (creciendo) o saliendo (encogiendo), ver `tab_anim.rs`.
+    tab_anims: crate::tab_anim::TabAnims,
+    /// Ventana "Acerca de notty" (menú Ayuda) abierta.
+    about_open: bool,
+    /// Descartar el próximo `WM_CHAR` (la tecla ya se usó en `WM_KEYDOWN`).
+    swallow_char: bool,
 }
 
 impl WindowState {
@@ -136,6 +164,10 @@ impl WindowState {
             open_menu: self.open_menu,
             popup_open: self.popup_open_anim.map(|a| a.value(std::time::Instant::now(), 0.0, 1.0)),
             tab_switch: self.tab_switch_anim.map(|a| a.value(std::time::Instant::now(), 0.0, 1.0)),
+            chrome_from: self.chrome_from,
+            chrome_fade: self.chrome_fade_anim.map(|a| a.value(std::time::Instant::now(), 0.0, 1.0)),
+            theme_from: self.theme_anim.map(|(from, a)| (from, a.value(std::time::Instant::now(), 0.0, 1.0))),
+            menu_sel: self.menu_sel,
         }
     }
 
@@ -179,6 +211,271 @@ fn start_tab_switch_anim(w: &mut WindowState, hwnd: HWND) {
     w.tab_switch_anim =
         Some(crate::Anim::new_maybe(std::time::Instant::now(), std::time::Duration::from_millis(100), w.animations_enabled));
     ensure_anim_timer(w, hwnd);
+}
+
+/// Abre `state` como pestaña nueva, que entra creciendo desde ancho 0.
+fn open_tab(w: &mut WindowState, hwnd: HWND, state: EditorState) {
+    w.ws.open(state);
+    w.tab_anims.on_open(w.ws.active_index(), std::time::Instant::now(), w.animations_enabled);
+    ensure_anim_timer(w, hwnd);
+}
+
+/// Cierra la pestaña `idx`; si de verdad desaparece de la fila (no era la última, que
+/// solo se vacía), sale encogiendo mientras sus vecinas se deslizan a ocupar el hueco.
+fn close_tab(w: &mut WindowState, hwnd: HWND, idx: usize) {
+    let Some(st) = w.ws.iter().nth(idx) else { return };
+    let name = crate::doc_name(st.path.as_deref());
+    let dirty = st.doc.is_dirty();
+    if w.ws.close(idx) {
+        w.tab_anims.on_close(idx, name, dirty, std::time::Instant::now(), w.animations_enabled);
+        ensure_anim_timer(w, hwnd);
+    }
+}
+
+/// Cierra el desplegable de la barra de menús y el menú contextual, si hay alguno.
+fn close_menus(w: &mut WindowState) {
+    w.open_menu = None;
+    w.ctx_menu = None;
+    w.menu_sel = None;
+}
+
+/// Dónde se pidió el menú contextual.
+#[derive(Debug, Clone, Copy)]
+enum CtxTarget {
+    Tab(usize),
+    Body,
+}
+
+fn clipboard_has_text() -> bool {
+    unsafe {
+        windows::Win32::System::DataExchange::IsClipboardFormatAvailable(windows::Win32::System::Ole::CF_UNICODETEXT.0 as u32)
+            .is_ok()
+    }
+}
+
+fn selected_text(st: &EditorState) -> String {
+    let sel = st.doc.selection();
+    if sel.is_empty() { String::new() } else { st.doc.buffer().slice(sel.range()) }
+}
+
+/// Abre el menú contextual de `target` con la esquina en `(x, y)` (DIPs de cliente).
+fn open_context_menu(w: &mut WindowState, hwnd: HWND, target: CtxTarget, x: f32, y: f32) {
+    let items = match target {
+        CtxTarget::Tab(i) => {
+            let Some(st) = w.ws.iter().nth(i) else { return };
+            crate::context_menu::tab_menu(i, w.ws.len(), st.path.is_some())
+        }
+        CtxTarget::Body => crate::context_menu::body_menu(&crate::context_menu::BodyCtx {
+            selection: selected_text(w.ws.active()),
+            clipboard_has_text: clipboard_has_text(),
+            search_open: matches!(w.ws.prompt, crate::Prompt::Find(_) | crate::Prompt::Replace(_)),
+        }),
+    };
+    w.open_menu = None;
+    w.about_open = false;
+    w.ctx_menu = Some(crate::context_menu::ContextMenu { items, x, y });
+    w.menu_sel = None;
+    start_popup_anim(w, hwnd);
+    let _ = unsafe { InvalidateRect(Some(hwnd), None, false) };
+}
+
+/// Menú contextual del texto con el teclado (`Shift+F10`, tecla Menú): se abre bajo
+/// el cursor de texto.
+fn open_context_menu_at_caret(w: &mut WindowState, hwnd: HWND) {
+    if w.ws.active().raw.is_some() {
+        return;
+    }
+    let (body, gutter_w) = w.body_and_gutter();
+    let (x, y) = w.renderer.caret_point(w.ws.active(), body, gutter_w);
+    open_context_menu(w, hwnd, CtxTarget::Body, x, y);
+}
+
+/// Ctrl+C / Ctrl+X y sus equivalentes del menú contextual. En vim no cambia de modo.
+fn clipboard_copy(w: &mut WindowState, hwnd: HWND, cut: bool) {
+    let text = selected_text(w.ws.active());
+    if !text.is_empty() {
+        let _ = crate::clipboard::set_clipboard_text(hwnd, &text);
+        if cut {
+            w.ws.active_mut().doc.backspace(std::time::Instant::now());
+        }
+    }
+}
+
+/// Ctrl+V y "Pegar": inserta en el cursor, también en el modo Normal de vim.
+fn clipboard_paste(w: &mut WindowState, hwnd: HWND) {
+    if let Ok(text) = crate::clipboard::get_clipboard_text(hwnd) {
+        if !text.is_empty() {
+            let st = w.ws.active_mut();
+            st.doc.insert(&text, std::time::Instant::now());
+            let (line, _) = st.doc.buffer().line_col(st.doc.selection().head);
+            st.viewport.scroll_to_include(line, st.doc.buffer().len_lines());
+        }
+    }
+}
+
+/// Abre Buscar (o Reemplazar) con la selección ya escrita, apuntando a la
+/// coincidencia que es la propia selección. Conserva las opciones (Aa, ab, .*) de un
+/// prompt de búsqueda que ya estuviera abierto.
+fn find_prefilled(w: &mut WindowState, replace: bool) {
+    let st = w.ws.active();
+    let sel = st.doc.selection().range();
+    let mut s = crate::SearchState::default();
+    if let crate::Prompt::Find(prev) | crate::Prompt::Replace(prev) = &w.ws.prompt {
+        s.opts = prev.opts;
+        s.replacement = prev.replacement.clone();
+    }
+    s.set_query(selected_text(st));
+    if let Ok(m) = s.matches(&st.doc) {
+        if let Some(i) = m.iter().position(|r| r.start >= sel.start) {
+            s.current = i;
+        }
+    }
+    w.ws.prompt = if replace { crate::Prompt::Replace(s) } else { crate::Prompt::Find(s) };
+}
+
+/// `ShellExecuteW` con verbo "open" (sin esperar a que termine).
+fn shell_open(hwnd: HWND, file: &str, params: Option<&str>) {
+    let file_w = to_wide(file);
+    let params_w = params.map(to_wide);
+    unsafe {
+        let _ = windows::Win32::UI::Shell::ShellExecuteW(
+            Some(hwnd),
+            w!("open"),
+            PCWSTR(file_w.as_ptr()),
+            params_w.as_ref().map(|p| PCWSTR(p.as_ptr())).unwrap_or(PCWSTR::null()),
+            PCWSTR::null(),
+            windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL,
+        );
+    }
+}
+
+fn run_ctx_cmd(w: &mut WindowState, hwnd: HWND, cmd: crate::context_menu::CtxCmd) {
+    use crate::context_menu::CtxCmd;
+    let now = std::time::Instant::now();
+    let path_of = |w: &WindowState, i: usize| w.ws.iter().nth(i).and_then(|st| st.path.clone());
+    match cmd {
+        CtxCmd::NewTab => {
+            let cfg = w.cfg.borrow().clone();
+            open_tab(w, hwnd, maybe_vim(crate::EditorState::new_empty(), &cfg));
+        }
+        CtxCmd::CloseTab(i) => close_tab(w, hwnd, i),
+        CtxCmd::CloseOthers(i) => {
+            if i < w.ws.len() {
+                for j in (0..w.ws.len()).rev() {
+                    if j != i {
+                        close_tab(w, hwnd, j);
+                    }
+                }
+                w.ws.activate(0);
+            }
+        }
+        CtxCmd::CloseRight(i) => {
+            for j in (i + 1..w.ws.len()).rev() {
+                close_tab(w, hwnd, j);
+            }
+        }
+        CtxCmd::CopyPath(i) => {
+            if let Some(p) = path_of(w, i) {
+                let _ = crate::clipboard::set_clipboard_text(hwnd, &p.display().to_string());
+            }
+        }
+        CtxCmd::OpenFolder(i) => {
+            if let Some(p) = path_of(w, i) {
+                if p.exists() {
+                    shell_open(hwnd, "explorer.exe", Some(&format!("/select,\"{}\"", p.display())));
+                } else if let Some(dir) = p.parent().filter(|d| d.exists()) {
+                    shell_open(hwnd, &dir.display().to_string(), None);
+                }
+            }
+        }
+        CtxCmd::SaveAs(i) => {
+            if i != w.ws.active_index() && i < w.ws.len() {
+                w.ws.activate(i);
+                start_tab_switch_anim(w, hwnd);
+            }
+            let initial = w.ws.active().path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
+            w.ws.prompt = crate::Prompt::Path(crate::PathPromptState::new(crate::Purpose::Save, initial));
+            start_popup_anim(w, hwnd);
+        }
+        CtxCmd::Undo => w.ws.active_mut().apply(crate::EditorAction::Undo, now),
+        CtxCmd::Redo => w.ws.active_mut().apply(crate::EditorAction::Redo, now),
+        CtxCmd::Cut => clipboard_copy(w, hwnd, true),
+        CtxCmd::Copy => clipboard_copy(w, hwnd, false),
+        CtxCmd::Paste => clipboard_paste(w, hwnd),
+        CtxCmd::Delete => {
+            if !w.ws.active().doc.selection().is_empty() {
+                w.ws.active_mut().doc.backspace(now);
+            }
+        }
+        CtxCmd::SelectAll => w.ws.active_mut().apply(crate::EditorAction::SelectAll, now),
+        CtxCmd::FindSelection => find_prefilled(w, false),
+        CtxCmd::ReplaceSelection => find_prefilled(w, true),
+        CtxCmd::FindNext | CtxCmd::FindPrev => {
+            if !matches!(w.ws.prompt, crate::Prompt::Find(_) | crate::Prompt::Replace(_)) {
+                find_prefilled(w, false);
+            }
+            nav_search(w, cmd == CtxCmd::FindNext);
+        }
+    }
+    unsafe { update_title(hwnd, w.ws.active()) };
+    refresh_recovery(w);
+}
+
+/// Flechas / Inicio / Fin / Enter / Esc (y ← → entre menús de la barra) mientras hay
+/// un desplegable o menú contextual abierto. `true` si la tecla era para el menú.
+fn handle_menu_key(w: &mut WindowState, hwnd: HWND, vk: u32) -> bool {
+    use crate::menu::{MENUS, MenuItem};
+    let flags: Vec<bool> = if let Some(m) = &w.ctx_menu {
+        m.items.iter().map(|it| it.is_enabled()).collect()
+    } else if let Some(i) = w.open_menu {
+        MENUS[i].items.iter().map(|it| matches!(it, MenuItem::Entry { .. })).collect()
+    } else {
+        return false;
+    };
+    match vk {
+        0x1B => close_menus(w),
+        0x28 => w.menu_sel = crate::context_menu::step_selection(&flags, w.menu_sel, 1),
+        0x26 => w.menu_sel = crate::context_menu::step_selection(&flags, w.menu_sel, -1),
+        0x24 => w.menu_sel = crate::context_menu::step_selection(&flags, None, 1),
+        0x23 => w.menu_sel = crate::context_menu::step_selection(&flags, None, -1),
+        0x0D => {
+            if let Some(j) = w.menu_sel {
+                activate_menu_row(w, hwnd, j);
+            }
+        }
+        0x25 | 0x27 if w.ctx_menu.is_none() => {
+            if let Some(i) = w.open_menu {
+                let n = MENUS.len();
+                w.open_menu = Some(if vk == 0x27 { (i + 1) % n } else { (i + n - 1) % n });
+                w.menu_sel = None;
+                start_popup_anim(w, hwnd);
+            }
+        }
+        _ => {
+            // Cualquier otra tecla cierra el menú contextual y sigue su camino normal
+            // (el desplegable de la barra se queda abierto, como antes).
+            if w.ctx_menu.is_some() {
+                close_menus(w);
+                let _ = unsafe { InvalidateRect(Some(hwnd), None, false) };
+            }
+            return false;
+        }
+    }
+    let _ = unsafe { InvalidateRect(Some(hwnd), None, false) };
+    true
+}
+
+/// Ejecuta la fila `j` del menú abierto (contextual o de la barra) y lo cierra.
+fn activate_menu_row(w: &mut WindowState, hwnd: HWND, j: usize) {
+    if let Some(menu) = w.ctx_menu.take() {
+        w.menu_sel = None;
+        if let Some(cmd) = menu.cmd(j) {
+            run_ctx_cmd(w, hwnd, cmd);
+        }
+    } else if let Some(i) = w.open_menu.take() {
+        w.menu_sel = None;
+        run_menu_item(w, hwnd, i, j);
+    }
 }
 
 fn point_from_lparam(lparam: LPARAM) -> (f32, f32) {
@@ -231,11 +528,11 @@ fn open_config_as_document(hwnd: HWND, path: std::path::PathBuf) {
         if let Some(w) = ptr.as_mut() {
             let cfg = w.cfg.borrow().clone();
             if let Ok(opened) = crate::open_as_document(&path) {
-                w.ws.open(maybe_vim(EditorState::from_opened(opened), &cfg));
+                open_tab(w, hwnd, maybe_vim(EditorState::from_opened(opened), &cfg));
             } else {
                 let mut state = EditorState::new_empty();
                 state.path = Some(path);
-                w.ws.open(maybe_vim(state, &cfg));
+                open_tab(w, hwnd, maybe_vim(state, &cfg));
             }
             update_title(hwnd, w.ws.active());
             let _ = InvalidateRect(Some(hwnd), None, false);
@@ -246,6 +543,10 @@ fn open_config_as_document(hwnd: HWND, path: std::path::PathBuf) {
 /// Abre la ventana de Ajustes sobre `hwnd`: `Ctrl+,`, el menú Archivo → Ajustes, y el
 /// engranaje de la barra de título llegan todos aquí, para no repetir el `Box::new`.
 fn open_settings(w: &WindowState, hwnd: HWND) {
+    open_settings_at(w, hwnd, "");
+}
+
+fn open_settings_at(w: &WindowState, hwnd: HWND, section: &str) {
     let cfg_for_settings = w.cfg.clone();
     let cfg_for_theme = w.cfg.clone();
     let _ = crate::settings_window::open(
@@ -259,6 +560,7 @@ fn open_settings(w: &WindowState, hwnd: HWND) {
         Box::new(move |path| open_config_as_document(hwnd, path)),
         Box::new(move || trigger_check_updates_now(hwnd)),
         Box::new(move || start_tour(hwnd)),
+        section,
     );
 }
 
@@ -284,7 +586,16 @@ fn start_tour(hwnd: HWND) {
         let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState;
         if let Some(w) = ptr.as_mut() {
             w.tour = Some(crate::tour::Tour::start(w.animations_enabled));
+            // La entrada (vela+foco fundiéndose) y la propia transición entre paradas
+            // son animaciones cortas: sin este temporizador, `WM_PAINT` solo se
+            // repetiría en reacción a otra entrada del usuario y la animación se
+            // vería como un salto en vez de un fundido (parte del defecto #3).
+            ensure_anim_timer(w, hwnd);
             let _ = InvalidateRect(Some(hwnd), None, false);
+            // Se arranca desde la bienvenida o desde Ajustes, que se están cerrando: sin
+            // esto el foco puede quedarse fuera y Ctrl+N/Ctrl+W no llegarían a la app.
+            let _ = windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow(hwnd);
+            let _ = windows::Win32::UI::Input::KeyboardAndMouse::SetFocus(Some(hwnd));
         }
     }
 }
@@ -333,8 +644,9 @@ fn autosave_tick(w: &mut WindowState) {
 /// `NewTemp`/`NewPermanent` no llegan por este camino en la instancia normal (los
 /// maneja el daemon lanzando `notty.exe --new-temp`/`--new-permanent`, Task 9); si
 /// alguno llegara igualmente, no se hace nada. Devuelve `true` si hubo que repintar.
-fn ipc_tick(w: &mut WindowState) -> bool {
+fn ipc_tick(w: &mut WindowState, hwnd: HWND) -> bool {
     let mut changed = false;
+    let mut opened_docs = Vec::new();
     if let Some(rx) = w.ipc_rx.as_ref() {
         while let Ok(msg) = rx.try_recv() {
             match msg {
@@ -343,7 +655,7 @@ fn ipc_tick(w: &mut WindowState) -> bool {
                         let path = std::path::PathBuf::from(p);
                         if let Ok(opened) = crate::open_as_document(&path) {
                             let cfg = w.cfg.borrow().clone();
-                            w.ws.open(maybe_vim(EditorState::from_opened(opened), &cfg));
+                            opened_docs.push(maybe_vim(EditorState::from_opened(opened), &cfg));
                             changed = true;
                         }
                     }
@@ -356,6 +668,9 @@ fn ipc_tick(w: &mut WindowState) -> bool {
                 notty_ipc::Message::NewTemp | notty_ipc::Message::NewPermanent => {}
             }
         }
+    }
+    for st in opened_docs {
+        open_tab(w, hwnd, st);
     }
     if download_tick(w) {
         changed = true;
@@ -559,6 +874,13 @@ fn update_panel_content(update: &crate::UpdateState) -> Option<crate::UpdatePane
         status_line,
         show_actualizar: !downloading,
     })
+}
+
+/// Contenido de "Acerca de notty": versión y enlace al repositorio (si `repo` no es
+/// el marcador de posición de las compilaciones sin configurar).
+fn about_content(repo: &str) -> crate::AboutContent {
+    let url = (!repo.is_empty() && !repo.starts_with("OWNER/")).then(|| format!("https://github.com/{repo}"));
+    crate::AboutContent { version: env!("CARGO_PKG_VERSION").to_string(), url }
 }
 
 /// Resuelve `Prompt::Conflict`: `M` conserva lo escrito en notty y lo guarda, `D`
@@ -808,11 +1130,6 @@ fn run_inner(
         ws.active_mut().viewport = Viewport::new(renderer.line_height(), body.height());
         update_title(hwnd, ws.active());
 
-        let ui_keymap = {
-            let mut m = notty_input::default_ui_keymap();
-            notty_input::apply_overrides(&mut m, &cfg);
-            m
-        };
         let cfg = Rc::new(RefCell::new(cfg));
 
         let window_state = Box::new(WindowState {
@@ -821,7 +1138,6 @@ fn run_inner(
             mouse_down: false,
             selection_anchor: 0,
             cfg,
-            ui_keymap,
             menu_visible: false,
             hover: Hit::None,
             pressed: Hit::None,
@@ -832,6 +1148,11 @@ fn run_inner(
             animations_enabled: system_animations_enabled(),
             popup_open_anim: None,
             tab_switch_anim: None,
+            last_bands: None,
+            chrome_from: None,
+            chrome_fade_anim: None,
+            last_dark: None,
+            theme_anim: None,
             anim_timer_running: false,
             update: crate::UpdateState::default(),
             download_rx: None,
@@ -839,6 +1160,11 @@ fn run_inner(
             pubkey,
             repo: repo.clone(),
             tour: None,
+            ctx_menu: None,
+            menu_sel: None,
+            tab_anims: Default::default(),
+            about_open: false,
+            swallow_char: false,
         });
         let ptr = Box::into_raw(window_state);
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, ptr as isize);
@@ -972,9 +1298,67 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             WM_PAINT => {
                 if let Some(w) = ptr.as_mut() {
                     let ui = w.render_ui();
+                    // Bandas de esta pasada de pintado, para detectar si un cambio de
+                    // ajuste (desde Ajustes u otra vía) acaba de hacer aparecer/
+                    // desaparecer una banda entera de la interfaz (barra de menús,
+                    // pestañas, atajos, línea de comandos fusionada...) y fundirla en
+                    // vez de que salte de golpe (Task 3 del plan de animaciones,
+                    // extensión de `start_tab_switch_anim`). Comparación estructural
+                    // barata (`Bands` es un puñado de `bool`), una vez por pintado.
+                    let bands = Renderer::resolve_bands(&ui, w.ws.len(), w.menu_bar_visible());
+                    if let Some(prev) = w.last_bands {
+                        if prev != bands {
+                            // Si ya había una transición en marcha (hacia `prev`), la nueva
+                            // arranca desde el punto exacto en que iba, no desde su final:
+                            // pulsar Alt varias veces seguidas invierte la animación sin saltos.
+                            let now = std::time::Instant::now();
+                            let current = match (w.chrome_from, w.chrome_fade_anim) {
+                                (Some(from), Some(a)) => from.lerp(layout::BandFrac::of(prev), a.value(now, 0.0, 1.0)),
+                                _ => layout::BandFrac::of(prev),
+                            };
+                            w.chrome_from = Some(current);
+                            w.chrome_fade_anim =
+                                Some(crate::Anim::new_maybe(now, std::time::Duration::from_millis(300), w.animations_enabled));
+                            ensure_anim_timer(w, hwnd);
+                        }
+                    }
+                    w.last_bands = Some(bands);
+                    // `visible_lines` depende del alto del cuerpo, que cambia no solo con
+                    // `WM_SIZE` sino al aparecer/desaparecer bandas o al cambiar de pestaña.
+                    let (body, _) = w.body_and_gutter();
+                    w.ws.active_mut().viewport.visible_lines = layout::visible_lines(body);
+                    let dark = crate::is_dark(w.cfg.borrow().ui.theme, system_uses_dark_mode());
+                    if let Some(prev) = w.last_dark {
+                        if prev != dark {
+                            let from = match w.theme_anim {
+                                // A medio fundido: se parte del tema más cercano a lo que se ve.
+                                Some((f, a)) if a.value(std::time::Instant::now(), 0.0, 1.0) < 0.5 => f,
+                                _ => prev,
+                            };
+                            w.theme_anim = Some((
+                                from,
+                                crate::Anim::new_maybe(
+                                    std::time::Instant::now(),
+                                    std::time::Duration::from_millis(350),
+                                    w.animations_enabled,
+                                ),
+                            ));
+                            ensure_anim_timer(w, hwnd);
+                        }
+                    }
+                    w.last_dark = Some(dark);
                     let view = w.view_state(hwnd);
                     w.renderer.set_update_notice(w.update.notice_text());
                     w.renderer.set_update_panel(update_panel_content(&w.update));
+                    w.renderer.set_context_menu(w.ctx_menu.clone());
+                    if w.open_menu.is_some() {
+                        w.renderer.set_menu_keys(crate::menu::shortcut_labels(&w.cfg.borrow()));
+                    }
+                    w.renderer.set_tab_anim(w.tab_anims.frame(std::time::Instant::now()));
+                    w.renderer.set_about(if w.about_open { Some(about_content(&w.repo)) } else { None });
+                    if w.tour.is_some() {
+                        w.renderer.hold_next_frame();
+                    }
                     w.renderer.paint(&w.ws, &ui, &view);
                     if w.tour.is_some() {
                         // Se pinta último (capa por encima de todo lo demás), en una
@@ -991,13 +1375,26 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             }
             WM_SIZE => {
                 if let Some(w) = ptr.as_mut() {
+                    if wparam.0 as u32 == SIZE_MINIMIZED {
+                        return LRESULT(0);
+                    }
                     let width = (lparam.0 as u32) & 0xFFFF;
                     let height = ((lparam.0 as u32) >> 16) & 0xFFFF;
+                    w.ctx_menu = None;
                     w.renderer.resize(width, height);
                     let (body, _gutter_w) = w.body_and_gutter();
                     w.ws.active_mut().viewport.visible_lines = layout::visible_lines(body);
                     let _ = InvalidateRect(Some(hwnd), None, false);
                 }
+                LRESULT(0)
+            }
+            WM_GETMINMAXINFO => {
+                // Tamaño mínimo en DIPs, escalado al DPI del monitor en el que está.
+                let info = &mut *(lparam.0 as *mut MINMAXINFO);
+                let dpi = GetDpiForWindow(hwnd);
+                let scale = if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 };
+                info.ptMinTrackSize.x = (layout::MIN_WINDOW_W * scale).round() as i32;
+                info.ptMinTrackSize.y = (layout::MIN_WINDOW_H * scale).round() as i32;
                 LRESULT(0)
             }
             WM_NCCALCSIZE if wparam.0 != 0 => {
@@ -1120,6 +1517,10 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             WM_ACTIVATE => {
                 if let Some(w) = ptr.as_mut() {
                     w.active_window = (wparam.0 & 0xFFFF) != 0;
+                    if !w.active_window {
+                        w.ctx_menu = None;
+                        w.menu_sel = None;
+                    }
                     let _ = InvalidateRect(Some(hwnd), None, false);
                 }
                 LRESULT(0)
@@ -1156,16 +1557,15 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 if let Some(w) = ptr.as_mut() {
                     let vk = wparam.0 as u32;
 
-                    // El recorrido guiado, si hay uno activo, se queda con todas las
-                    // teclas antes que cualquier otro manejador (Esc lo cierra; el
-                    // resto no hace nada, pero no debe llegarle a la edición de
-                    // debajo mientras el foco está puesto).
+                    // Con el recorrido activo, Esc lo cierra; el resto de teclas siguen
+                    // hasta la app para que los atajos que enseña funcionen de verdad.
                     if let Some(tour) = w.tour.as_mut() {
                         if tour.handle_key(vk) == crate::tour::TourInput::Closed {
                             w.tour = None;
+                            let _ = InvalidateRect(Some(hwnd), None, false);
+                            return LRESULT(0);
                         }
                         let _ = InvalidateRect(Some(hwnd), None, false);
-                        return LRESULT(0);
                     }
 
                     let alt_down = (GetKeyState(VK_MENU.0 as i32) as u16 & 0x8000) != 0;
@@ -1175,9 +1575,18 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         alt: alt_down,
                     };
 
-                    if w.open_menu.is_some() && vk == 0x1B {
-                        w.open_menu = None;
+                    if handle_menu_key(w, hwnd, vk) {
+                        return LRESULT(0);
+                    }
+                    if w.about_open && (vk == 0x1B || vk == 0x0D) {
+                        w.about_open = false;
                         let _ = InvalidateRect(Some(hwnd), None, false);
+                        return LRESULT(0);
+                    }
+                    // Tecla Menú (VK_APPS): menú contextual bajo el cursor de texto. Si
+                    // Windows manda además `WM_CONTEXTMENU`, allí se ignora (ya abierto).
+                    if vk == 0x5D {
+                        open_context_menu_at_caret(w, hwnd);
                         return LRESULT(0);
                     }
 
@@ -1188,52 +1597,56 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     }
 
                     let ui_mods = notty_input::Modifiers { ctrl: mods.ctrl, shift: mods.shift, alt: alt_down };
-                    if let Some(cmd) = w.ui_keymap.get(&(vk, ui_mods)).copied() {
+                    // Atajos reasignables: se leen de `[keys]` en vivo en cada pulsación, así
+                    // un cambio hecho en Ajustes → Teclado vale al instante.
+                    let remapped = notty_input::command_for_key(&w.cfg.borrow(), vk, ui_mods);
+                    if let Some(cmd) = remapped {
                         match cmd {
-                            notty_input::UiCommand::NewTab => {
+                            notty_input::Command::NewTab => {
                                 let cfg = w.cfg.borrow().clone();
-                                w.ws.open(maybe_vim(crate::EditorState::new_empty(), &cfg));
+                                open_tab(w, hwnd, maybe_vim(crate::EditorState::new_empty(), &cfg));
                             }
-                            notty_input::UiCommand::NewTempTab => {
+                            notty_input::Command::ToggleVim => {
+                                let st = w.ws.active_mut();
+                                st.vim = if st.vim.is_some() { None } else { Some(crate::VimState::default()) };
+                            }
+                            notty_input::Command::ToggleRaw => toggle_raw(w),
+                            notty_input::Command::NewTempTab => {
                                 let cfg = w.cfg.borrow().clone();
-                                w.ws.open(maybe_vim(
-                                    crate::EditorState::new_temp(cfg.files.temp_mode, &cfg.files.default_extension),
-                                    &cfg,
-                                ));
+                                open_tab(
+                                    w,
+                                    hwnd,
+                                    maybe_vim(
+                                        crate::EditorState::new_temp(cfg.files.temp_mode, &cfg.files.default_extension),
+                                        &cfg,
+                                    ),
+                                );
                             }
-                            notty_input::UiCommand::NextTab => {
+                            notty_input::Command::NextTab => {
                                 w.ws.next();
                                 start_tab_switch_anim(w, hwnd);
                             }
-                            notty_input::UiCommand::PrevTab => {
+                            notty_input::Command::PrevTab => {
                                 w.ws.prev();
                                 start_tab_switch_anim(w, hwnd);
                             }
-                            notty_input::UiCommand::CloseTab => {
-                                w.ws.close_active();
+                            notty_input::Command::CloseTab => {
+                                let i = w.ws.active_index();
+                                close_tab(w, hwnd, i);
                             }
-                            notty_input::UiCommand::OpenSettings => open_settings(w, hwnd),
+                            notty_input::Command::OpenSettings => open_settings(w, hwnd),
                         }
                         update_title(hwnd, w.ws.active());
                         let _ = InvalidateRect(Some(hwnd), None, false);
                         return LRESULT(0);
                     }
-                    let action = crate::action_for_vk(vk, mods);
-
-                    // ToggleVim/ToggleRaw funcionan siempre, esté vim/raw activo o no.
-                    if matches!(action, crate::EditorAction::ToggleVim) {
-                        let st = w.ws.active_mut();
-                        st.vim = if st.vim.is_some() { None } else { Some(crate::VimState::default()) };
-                        update_title(hwnd, w.ws.active());
-                        let _ = InvalidateRect(Some(hwnd), None, false);
-                        return LRESULT(0);
-                    }
-                    if matches!(action, crate::EditorAction::ToggleRaw) {
-                        toggle_raw(w);
-                        update_title(hwnd, w.ws.active());
-                        let _ = InvalidateRect(Some(hwnd), None, false);
-                        return LRESULT(0);
-                    }
+                    // Vim/raw ya se resolvieron arriba con su atajo en vigor: el fijo de
+                    // `action_for_vk` (Ctrl+Alt+V / Ctrl+Shift+H) no debe seguir
+                    // disparando tras reasignarlos.
+                    let action = match crate::action_for_vk(vk, mods) {
+                        crate::EditorAction::ToggleVim | crate::EditorAction::ToggleRaw => crate::EditorAction::None,
+                        a => a,
+                    };
 
                     if w.ws.active().raw.is_some() {
                         handle_raw_keydown(w, vk, action);
@@ -1260,23 +1673,12 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     match action {
                         crate::EditorAction::None => {}
                         crate::EditorAction::Copy | crate::EditorAction::Cut => {
-                            let sel = w.ws.active_mut().doc.selection();
-                            if !sel.is_empty() {
-                                let text = w.ws.active_mut().doc.buffer().slice(sel.range());
-                                let _ = crate::clipboard::set_clipboard_text(hwnd, &text);
-                                if matches!(action, crate::EditorAction::Cut) {
-                                    w.ws.active_mut().doc.backspace(std::time::Instant::now());
-                                }
-                            }
+                            clipboard_copy(w, hwnd, matches!(action, crate::EditorAction::Cut));
                             update_title(hwnd, w.ws.active());
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                         crate::EditorAction::Paste => {
-                            if let Ok(text) = crate::clipboard::get_clipboard_text(hwnd) {
-                                if !text.is_empty() {
-                                    w.ws.active_mut().doc.insert(&text, std::time::Instant::now());
-                                }
-                            }
+                            clipboard_paste(w, hwnd);
                             update_title(hwnd, w.ws.active());
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
@@ -1320,6 +1722,9 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             }
             WM_CHAR => {
                 if let Some(w) = ptr.as_mut() {
+                    if std::mem::take(&mut w.swallow_char) {
+                        return LRESULT(0);
+                    }
                     if let Some(ch) = char::from_u32(wparam.0 as u32) {
                         if !matches!(w.ws.prompt, crate::Prompt::None) {
                             handle_prompt_char(w, ch);
@@ -1353,25 +1758,70 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     let scale = w.renderer.scale();
                     let (x, y) = (x / scale, y / scale);
 
-                    // Igual que en `WM_KEYDOWN`: con el recorrido activo, el clic es
-                    // suyo antes que de cualquier `Hit` de la ventana (clic fuera del
-                    // foco lo cierra; dentro, no hace nada — no le roba el clic a la
-                    // app de debajo).
-                    if w.tour.is_some() {
-                        let ui = w.render_ui();
-                        let frame = w.renderer.current_frame(&ui, w.ws.len(), w.menu_bar_visible());
-                        let tour = w.tour.as_mut().expect("comprobado con is_some justo arriba");
-                        if tour.handle_click(x, y, &frame, std::time::Instant::now()) == crate::tour::TourInput::Closed {
-                            w.tour = None;
+                    // Con el recorrido activo, los clics en su globo son suyos; el resto
+                    // llegan a la app como siempre (ya no lo cierra un clic cualquiera).
+                    if let Some(tour) = w.tour.as_mut() {
+                        match tour.handle_click(x, y, std::time::Instant::now()) {
+                            crate::tour::TourInput::Pass => {}
+                            crate::tour::TourInput::Closed => {
+                                w.tour = None;
+                                let _ = InvalidateRect(Some(hwnd), None, false);
+                                return LRESULT(0);
+                            }
+                            crate::tour::TourInput::None => {
+                                ensure_anim_timer(w, hwnd);
+                                let _ = InvalidateRect(Some(hwnd), None, false);
+                                return LRESULT(0);
+                            }
+                        }
+                    }
+
+                    let hit = w.renderer.hit(x, y);
+
+                    // Con un menú contextual abierto, un clic fuera solo lo cierra (se
+                    // traga, como los menús de Windows); dentro, ejecuta el elemento.
+                    if w.ctx_menu.is_some() {
+                        match hit {
+                            Hit::CtxItem(j) => activate_menu_row(w, hwnd, j),
+                            Hit::PopupBox => {}
+                            _ => close_menus(w),
+                        }
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                        return LRESULT(0);
+                    }
+                    if w.about_open {
+                        match hit {
+                            Hit::AboutLink => {
+                                shell_open(hwnd, &about_content(&w.repo).url.unwrap_or_default(), None);
+                            }
+                            Hit::PopupBox => {}
+                            _ => w.about_open = false,
                         }
                         let _ = InvalidateRect(Some(hwnd), None, false);
                         return LRESULT(0);
                     }
 
-                    let hit = w.renderer.hit(x, y);
                     match hit {
                         Hit::Min | Hit::Close => {
                             w.pressed = hit;
+                            let _ = InvalidateRect(Some(hwnd), None, false);
+                        }
+                        Hit::PopupBox => {}
+                        Hit::TabScrollLeft | Hit::TabScrollRight => {
+                            if let Some(i) = w.renderer.tab_scroll_target(hit == Hit::TabScrollLeft) {
+                                w.ws.activate(i);
+                                start_tab_switch_anim(w, hwnd);
+                                update_title(hwnd, w.ws.active());
+                            }
+                            let _ = InvalidateRect(Some(hwnd), None, false);
+                        }
+                        Hit::Overwrite(k) => {
+                            let choice = match k {
+                                0 => crate::OverwriteChoice::Overwrite,
+                                1 => crate::OverwriteChoice::OpenExisting,
+                                _ => crate::OverwriteChoice::Cancel,
+                            };
+                            answer_overwrite(w, hwnd, choice);
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                         crate::Hit::Pencil if w.ws.active().raw.is_some() => {
@@ -1427,25 +1877,26 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                         crate::Hit::TabClose(i) => {
-                            w.ws.close(i);
+                            close_tab(w, hwnd, i);
+                            update_title(hwnd, w.ws.active());
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                         crate::Hit::NewTab => {
                             let cfg = w.cfg.borrow().clone();
-                            w.ws.open(maybe_vim(crate::EditorState::new_empty(), &cfg));
+                            open_tab(w, hwnd, maybe_vim(crate::EditorState::new_empty(), &cfg));
+                            update_title(hwnd, w.ws.active());
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                         crate::Hit::Menu(i) => {
                             w.open_menu = if w.open_menu == Some(i) { None } else { Some(i) };
+                            w.menu_sel = None;
                             if w.open_menu.is_some() {
                                 start_popup_anim(w, hwnd);
                             }
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                         crate::Hit::MenuItem(j) => {
-                            if let Some(i) = w.open_menu.take() {
-                                run_menu_item(w, hwnd, i, j);
-                            }
+                            activate_menu_row(w, hwnd, j);
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                         crate::Hit::Body if w.ws.active().raw.is_none() => {
@@ -1482,6 +1933,11 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     let hit = w.renderer.hit(x, y);
                     if hit != w.hover {
                         w.hover = hit;
+                        // El resaltado del teclado sigue al ratón, para que las flechas
+                        // continúen desde el elemento señalado.
+                        if let Hit::CtxItem(j) | Hit::MenuItem(j) = hit {
+                            w.menu_sel = Some(j);
+                        }
                         let mut tme = TRACKMOUSEEVENT {
                             cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
                             dwFlags: TME_LEAVE,
@@ -1522,6 +1978,58 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 let _ = ReleaseCapture();
                 LRESULT(0)
             }
+            WM_RBUTTONDOWN => {
+                if let Some(w) = ptr.as_mut() {
+                    let (x, y) = point_from_lparam(lparam);
+                    let scale = w.renderer.scale();
+                    let (x, y) = (x / scale, y / scale);
+                    let hit = w.renderer.hit(x, y);
+                    if !matches!(hit, Hit::CtxItem(_) | Hit::PopupBox) {
+                        close_menus(w);
+                        w.about_open = false;
+                    }
+                    // Como en cualquier editor: clic derecho fuera de la selección mueve
+                    // el cursor ahí; dentro de ella, la conserva (para copiar/buscar).
+                    if hit == Hit::Body && w.ws.active().raw.is_none() {
+                        let (body, gutter_w) = w.body_and_gutter();
+                        let idx = w.renderer.char_index_at(w.ws.active(), body, gutter_w, x, y);
+                        let sel = w.ws.active().doc.selection();
+                        let r = sel.range();
+                        if sel.is_empty() || idx < r.start || idx > r.end {
+                            w.ws.active_mut().doc.set_cursor(idx);
+                            w.selection_anchor = idx;
+                        }
+                    }
+                    let _ = InvalidateRect(Some(hwnd), None, false);
+                }
+                LRESULT(0)
+            }
+            // `WM_RBUTTONUP` se deja a `DefWindowProcW`, que manda `WM_CONTEXTMENU`.
+            WM_RBUTTONUP => DefWindowProcW(hwnd, msg, wparam, lparam),
+            WM_CONTEXTMENU => {
+                if let Some(w) = ptr.as_mut() {
+                    let sx = (lparam.0 as i16) as i32;
+                    let sy = ((lparam.0 >> 16) as i16) as i32;
+                    if sx == -1 && sy == -1 {
+                        // Teclado (Shift+F10 / tecla Menú): si ya se abrió desde
+                        // `WM_KEYDOWN`/`WM_SYSKEYDOWN`, no se vuelve a abrir.
+                        if w.ctx_menu.is_none() {
+                            open_context_menu_at_caret(w, hwnd);
+                        }
+                    } else {
+                        let mut pt = windows::Win32::Foundation::POINT { x: sx, y: sy };
+                        let _ = windows::Win32::Graphics::Gdi::ScreenToClient(hwnd, &mut pt);
+                        let scale = w.renderer.scale();
+                        let (x, y) = (pt.x as f32 / scale, pt.y as f32 / scale);
+                        match w.renderer.hit(x, y) {
+                            Hit::Tab(i) | Hit::TabClose(i) => open_context_menu(w, hwnd, CtxTarget::Tab(i), x, y),
+                            Hit::Body if w.ws.active().raw.is_none() => open_context_menu(w, hwnd, CtxTarget::Body, x, y),
+                            _ => {}
+                        }
+                    }
+                }
+                LRESULT(0)
+            }
             WM_SETCURSOR => {
                 // El hit-test de `WM_NCHITTEST` ya decide bordes/barra de título; aquí solo
                 // hace falta el I-beam sobre el documento (`Hit::Body`), y la flecha en el
@@ -1543,6 +2051,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 if let Some(w) = ptr.as_mut() {
                     let delta = ((wparam.0 >> 16) as i16) as i32;
                     let notches = delta / WHEEL_DELTA as i32;
+                    w.ctx_menu = None;
                     if let crate::Prompt::Path(p) = &mut w.ws.prompt {
                         p.scroll_by(-notches);
                     } else {
@@ -1560,6 +2069,12 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         let _ = InvalidateRect(Some(hwnd), None, false);
                         return LRESULT(0);
                     }
+                    // Shift+F10 (F10 llega siempre como tecla de sistema).
+                    let shift = (GetKeyState(VK_SHIFT.0 as i32) as u16 & 0x8000) != 0;
+                    if vk == 0x79 && shift {
+                        open_context_menu_at_caret(w, hwnd);
+                        return LRESULT(0);
+                    }
                 }
                 DefWindowProcW(hwnd, msg, wparam, lparam)
             }
@@ -1573,7 +2088,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 }
                 if wparam.0 == ID_IPC_TIMER {
                     if let Some(w) = ptr.as_mut() {
-                        if ipc_tick(w) {
+                        if ipc_tick(w, hwnd) {
                             update_title(hwnd, w.ws.active());
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
@@ -1589,7 +2104,21 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         if w.tab_switch_anim.is_some_and(|a| a.is_done(now)) {
                             w.tab_switch_anim = None;
                         }
-                        let still_animating = w.popup_open_anim.is_some() || w.tab_switch_anim.is_some();
+                        if w.chrome_fade_anim.is_some_and(|a| a.is_done(now)) {
+                            w.chrome_fade_anim = None;
+                            w.chrome_from = None;
+                        }
+                        if w.theme_anim.is_some_and(|(_, a)| a.is_done(now)) {
+                            w.theme_anim = None;
+                        }
+                        w.tab_anims.prune(now);
+                        let tour_animating = w.tour.as_ref().is_some_and(|t| t.is_animating(now));
+                        let still_animating = w.tab_anims.is_animating()
+                            || w.popup_open_anim.is_some()
+                            || w.tab_switch_anim.is_some()
+                            || w.chrome_fade_anim.is_some()
+                            || w.theme_anim.is_some()
+                            || tour_animating;
                         if !still_animating {
                             let _ = KillTimer(Some(hwnd), ID_ANIM_TIMER);
                             w.anim_timer_running = false;
@@ -1653,7 +2182,7 @@ fn run_menu_item(w: &mut WindowState, hwnd: HWND, menu_idx: usize, item_idx: usi
     match cmd {
         MenuCmd::New => {
             let cfg = w.cfg.borrow().clone();
-            w.ws.open(maybe_vim(crate::EditorState::new_empty(), &cfg));
+            open_tab(w, hwnd, maybe_vim(crate::EditorState::new_empty(), &cfg));
         }
         MenuCmd::Open => {
             let initial = w.ws.active().path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
@@ -1674,7 +2203,8 @@ fn run_menu_item(w: &mut WindowState, hwnd: HWND, menu_idx: usize, item_idx: usi
         }
         MenuCmd::Settings => open_settings(w, hwnd),
         MenuCmd::CloseTab => {
-            w.ws.close_active();
+            let i = w.ws.active_index();
+            close_tab(w, hwnd, i);
         }
         MenuCmd::Undo => {
             w.ws.active_mut().doc.undo();
@@ -1703,9 +2233,12 @@ fn run_menu_item(w: &mut WindowState, hwnd: HWND, menu_idx: usize, item_idx: usi
         }
         MenuCmd::NewTemp => {
             let cfg = w.cfg.borrow().clone();
-            w.ws.open(maybe_vim(crate::EditorState::new_temp(cfg.files.temp_mode, &cfg.files.default_extension), &cfg));
+            open_tab(w, hwnd, maybe_vim(crate::EditorState::new_temp(cfg.files.temp_mode, &cfg.files.default_extension), &cfg));
         }
-        MenuCmd::Shortcuts | MenuCmd::About => {}
+        // `settings_window::open` todavía no sabe abrir directamente una sección
+        // concreta (Teclado): de momento abre Ajustes por el principio.
+        MenuCmd::Shortcuts => open_settings_at(w, hwnd, "teclado"),
+        MenuCmd::About => w.about_open = true,
     }
     unsafe {
         update_title(hwnd, w.ws.active());
@@ -1801,6 +2334,19 @@ fn path_ctx(w: &WindowState) -> notty_io::PathContext {
 }
 
 fn handle_prompt_keydown(w: &mut WindowState, hwnd: HWND, vk: u32, mods: Modifiers) {
+    // Pregunta "ya existe" pendiente: solo cuentan sus teclas (Esc = cancelar la
+    // pregunta, no cerrar el prompt entero).
+    if let crate::Prompt::Path(p) = &w.ws.prompt {
+        if p.ask_overwrite {
+            if let Some(choice) = crate::OverwriteChoice::from_vk(vk) {
+                // La S/A/C también genera su `WM_CHAR`: que no acabe escrita en el
+                // documento (o en la ruta) una vez respondida la pregunta.
+                w.swallow_char = true;
+                answer_overwrite(w, hwnd, choice);
+            }
+            return;
+        }
+    }
     // Esc cierra cualquier prompt.
     if vk == 0x1B {
         w.ws.close_prompt();
@@ -1835,21 +2381,49 @@ fn handle_prompt_char(w: &mut WindowState, ch: char) {
 fn handle_path_char(w: &mut WindowState, ch: char) {
     let ctx = path_ctx(w);
     if let crate::Prompt::Path(p) = &mut w.ws.prompt {
-        let raw = format!("{}{ch}", p.value);
-        p.type_text(&raw, &ctx);
+        if !p.ask_overwrite {
+            p.type_char(ch, &ctx);
+        }
     }
 }
 
 fn handle_path_backspace(w: &mut WindowState) {
     let ctx = path_ctx(w);
     if let crate::Prompt::Path(p) = &mut w.ws.prompt {
-        let mut raw = p.value.clone();
-        raw.pop();
-        p.type_text(&raw, &ctx);
+        p.backspace(&ctx);
     }
 }
 
+/// Ctrl+A/C/X/V/Z sobre la línea de ruta (el `WM_CHAR` de control que generan se
+/// descarta en `handle_prompt_char`). `true` si era una de ellas.
+fn handle_path_clipboard_key(w: &mut WindowState, hwnd: HWND, vk: u32) -> bool {
+    let ctx = path_ctx(w);
+    let pasted = if vk == 0x56 { crate::clipboard::get_clipboard_text(hwnd).ok() } else { None };
+    let crate::Prompt::Path(p) = &mut w.ws.prompt else { return false };
+    match vk {
+        0x41 => p.select_all(),
+        0x43 => {
+            let _ = crate::clipboard::set_clipboard_text(hwnd, &p.copy_text());
+        }
+        0x58 => {
+            let text = p.cut(&ctx);
+            let _ = crate::clipboard::set_clipboard_text(hwnd, &text);
+        }
+        0x56 => {
+            if let Some(text) = pasted {
+                p.paste(&text, &ctx);
+            }
+        }
+        0x5A => p.undo(&ctx),
+        _ => return false,
+    }
+    true
+}
+
 fn handle_path_key(w: &mut WindowState, hwnd: HWND, vk: u32, mods: Modifiers) {
+    if mods.ctrl && !mods.alt && handle_path_clipboard_key(w, hwnd, vk) {
+        return;
+    }
     match vk {
         0x08 => handle_path_backspace(w), // Backspace
         0x09 => {
@@ -1893,6 +2467,54 @@ fn open_native_dialog(w: &mut WindowState, hwnd: HWND) {
 /// `Enter` sobre la línea de ruta: valida, crea carpetas que falten si hace falta y,
 /// según `Purpose`, abre o guarda. Ver Task 7 Step 3 del plan para el detalle de cada caso.
 fn commit_path_prompt(w: &mut WindowState, hwnd: HWND) {
+    commit_path_prompt_with(w, hwnd, false);
+}
+
+/// Respuesta a la pregunta "ya existe" de la línea de ruta (tecla o clic en su botón).
+fn answer_overwrite(w: &mut WindowState, hwnd: HWND, choice: crate::OverwriteChoice) {
+    let value = match &mut w.ws.prompt {
+        crate::Prompt::Path(p) if p.ask_overwrite => {
+            p.ask_overwrite = false;
+            p.value.clone()
+        }
+        _ => return,
+    };
+    match choice {
+        crate::OverwriteChoice::Overwrite => commit_path_prompt_with(w, hwnd, true),
+        crate::OverwriteChoice::Cancel => {}
+        crate::OverwriteChoice::OpenExisting => {
+            let path = std::path::PathBuf::from(&value);
+            match crate::open_as_document(&path) {
+                Ok(opened) => {
+                    let cfg = w.cfg.borrow().clone();
+                    let state = maybe_vim(crate::EditorState::from_opened(opened), &cfg);
+                    // Si el documento nuevo está vacío y sin tocar, el abierto ocupa su
+                    // sitio en vez de dejar una pestaña vacía detrás.
+                    let st = w.ws.active();
+                    let blank = st.path.is_none() && !st.doc.is_dirty() && st.doc.buffer().len_chars() == 0;
+                    if blank {
+                        let visible_lines = st.viewport.visible_lines;
+                        let slot = w.ws.active_mut();
+                        *slot = state;
+                        slot.viewport.visible_lines = visible_lines;
+                    } else {
+                        open_tab(w, hwnd, state);
+                    }
+                    notty_io::record_path_use(&path);
+                    w.ws.close_prompt();
+                    unsafe { update_title(hwnd, w.ws.active()) };
+                }
+                Err(e) => {
+                    if let crate::Prompt::Path(p) = &mut w.ws.prompt {
+                        p.last_error = Some(e.to_string());
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn commit_path_prompt_with(w: &mut WindowState, hwnd: HWND, force_overwrite: bool) {
     let (value, purpose, invalid) = match &w.ws.prompt {
         crate::Prompt::Path(p) => (p.value.clone(), p.purpose, p.is_invalid()),
         _ => return,
@@ -1922,11 +2544,19 @@ fn commit_path_prompt(w: &mut WindowState, hwnd: HWND) {
         notty_io::Hint::Exists if purpose == crate::Purpose::Open => match crate::open_as_document(&path) {
             Ok(opened) => {
                 let cfg = w.cfg.borrow().clone();
-                w.ws.open(maybe_vim(crate::EditorState::from_opened(opened), &cfg));
+                open_tab(w, hwnd, maybe_vim(crate::EditorState::from_opened(opened), &cfg));
                 done = true;
             }
             Err(e) => error = Some(e.to_string()),
         },
+        // Guardar un documento que aún no tenía ruta encima de un archivo que ya
+        // existe: antes de escribir encima, se pregunta (ver `answer_overwrite`).
+        notty_io::Hint::Exists if purpose == crate::Purpose::Save && w.ws.active().path.is_none() && !force_overwrite => {
+            if let crate::Prompt::Path(p) = &mut w.ws.prompt {
+                p.ask_overwrite = true;
+            }
+            return;
+        }
         notty_io::Hint::Exists | notty_io::Hint::New | notty_io::Hint::DirNew => {
             match notty_io::create_parent_dirs(&path) {
                 Ok(_) => match purpose {
@@ -1936,7 +2566,7 @@ fn commit_path_prompt(w: &mut WindowState, hwnd: HWND) {
                         let mut state = crate::EditorState::new_empty();
                         state.path = Some(path.clone());
                         let cfg = w.cfg.borrow().clone();
-                        w.ws.open(maybe_vim(state, &cfg));
+                        open_tab(w, hwnd, maybe_vim(state, &cfg));
                         done = true;
                     }
                     crate::Purpose::Save => {
@@ -1959,6 +2589,7 @@ fn commit_path_prompt(w: &mut WindowState, hwnd: HWND) {
     }
 
     if done {
+        notty_io::record_path_use(&path);
         w.ws.close_prompt();
         unsafe {
             update_title(hwnd, w.ws.active());
@@ -1996,11 +2627,13 @@ fn commit_vim_cmdline(w: &mut WindowState, hwnd: HWND) {
             try_save(w);
         }
         crate::VimCmd::Quit => {
-            w.ws.close_active();
+            let i = w.ws.active_index();
+            close_tab(w, hwnd, i);
         }
         crate::VimCmd::SaveAndQuit => {
             try_save(w);
-            w.ws.close_active();
+            let i = w.ws.active_index();
+            close_tab(w, hwnd, i);
         }
         crate::VimCmd::Substitute { pattern, replacement, global, ignore_case } => {
             // `replace_all` ya sustituye todas las apariciones de cada línea, que es lo que

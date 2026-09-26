@@ -1,5 +1,5 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
-  <Package Name="notty" Manufacturer="notty" Version="!(bind.FileVersion.notty.exe)"
+  <Package Name="notty" Manufacturer="notty" Version="$(var.ProductVersion)"
            UpgradeCode="6F1B7C2E-6E2F-4E2A-9B1F-2C3D4E5F6A7B" Scope="perMachine">
 
     <MajorUpgrade DowngradeErrorMessage="Ya hay una versión más reciente de notty instalada." />
@@ -7,10 +7,18 @@
     <Property Id="ARPPRODUCTICON" Value="notty.exe" />
     <Property Id="INSTALLFOLDER" Secure="yes" />
 
-    <StandardDirectory Id="ProgramFilesFolder">
+    <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="notty">
         <Component Id="CoreFiles" Guid="*">
           <File Id="notty.exe" Source="$(var.NottyExePath)" KeyPath="yes" />
+        </Component>
+        <Component Id="CoreCapabilities" Guid="*">
+          <RegistryValue Root="HKLM" Key="SOFTWARE\RegisteredApplications" Name="notty"
+            Value="SOFTWARE\notty\Capabilities" Type="string" KeyPath="yes" />
+          <RegistryValue Root="HKLM" Key="SOFTWARE\notty\Capabilities" Name="ApplicationName"
+            Value="notty" Type="string" />
+          <RegistryValue Root="HKLM" Key="SOFTWARE\notty\Capabilities" Name="ApplicationDescription"
+            Value="Un bloc de notas ligero para Windows." Type="string" />
         </Component>
         <Component Id="CoreLegacyFile" Guid="*">
           <File Id="notepad_legacy.exe" Source="$(var.NottyLegacyExePath)" KeyPath="yes" />
@@ -25,6 +33,8 @@
         <Component Id="ContextMenuReg" Guid="*">
           <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\*\shell\notty"
             Value="Abrir con notty" Type="string" KeyPath="yes" />
+          <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\*\shell\notty" Name="Icon"
+            Value="[INSTALLFOLDER]notty.exe" Type="string" />
           <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\*\shell\notty\command"
             Value="&quot;[INSTALLFOLDER]notty.exe&quot; &quot;%1&quot;" Type="string" />
         </Component>
@@ -43,10 +53,8 @@
             <Extension Id="log" />
             <Extension Id="text" />
           </ProgId>
-          <RegistryValue Root="HKLM" Key="SOFTWARE\RegisteredApplications" Name="notty"
-            Value="SOFTWARE\notty\Capabilities" Type="string" KeyPath="yes" />
           <RegistryValue Root="HKLM" Key="SOFTWARE\notty\Capabilities\FileAssociations"
-            Name=".txt" Value="notty.txt" Type="string" />
+            Name=".txt" Value="notty.txt" Type="string" KeyPath="yes" />
           <RegistryValue Root="HKLM" Key="SOFTWARE\notty\Capabilities\FileAssociations"
             Name=".log" Value="notty.txt" Type="string" />
           <RegistryValue Root="HKLM" Key="SOFTWARE\notty\Capabilities\FileAssociations"
@@ -111,7 +119,7 @@
         <Shortcut Id="StartMenuNotty" Name="notty" Target="[INSTALLFOLDER]notty.exe"
           WorkingDirectory="INSTALLFOLDER" />
         <RemoveFolder Id="RemoveStartMenuDir" On="uninstall" />
-        <RegistryValue Root="HKCU" Key="Software\notty" Name="startmenu" Type="integer" Value="1" KeyPath="yes" />
+        <RegistryValue Root="HKLM" Key="SOFTWARE\notty" Name="startmenu" Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </StandardDirectory>
 
@@ -119,13 +127,14 @@
       <Component Id="DesktopShortcut" Guid="*">
         <Shortcut Id="DesktopNotty" Name="notty" Target="[INSTALLFOLDER]notty.exe"
           WorkingDirectory="INSTALLFOLDER" />
-        <RegistryValue Root="HKCU" Key="Software\notty" Name="desktop" Type="integer" Value="1" KeyPath="yes" />
+        <RegistryValue Root="HKLM" Key="SOFTWARE\notty" Name="desktop" Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </StandardDirectory>
 
     <Feature Id="Core" Title="notty (núcleo)" Level="1" AllowAbsent="no" Display="hidden">
       <ComponentRef Id="CoreFiles" />
       <ComponentRef Id="CoreLegacyFile" />
+      <ComponentRef Id="CoreCapabilities" />
     </Feature>
     <Feature Id="NotepadReplace" Title="Sustituir el Bloc de notas" Level="1">
       <ComponentRef Id="NotepadReplaceReg" />

@@ -1,3 +1,6 @@
 /workflow/
 /.superpowers/
 /target/
+/installer/notty.msi
+/installer/*.wixpdb
+/.claude/worktrees/

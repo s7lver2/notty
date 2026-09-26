@@ -2,13 +2,6 @@
 # plan del instalador) + notty-setup.exe firmado con notty-sign, subidos a
 # GitHub Releases con `gh`. Uso: pwsh tools/release.ps1 -Tag v1.3.0 -NotesFile CHANGELOG.md
 #
-# Prerequisito de una sola vez, manual (ver Task 1 del plan del actualizador,
-# docs/superpowers/plans/2026-09-26-actualizador.md): crear el repo de GitHub y
-# el remoto `origin` con `gh repo create <owner>/notty ...`. Este script no lo
-# hace por ti — requiere decidir visibilidad y tener `gh auth login` hecho.
-#
-# PLACEHOLDER: $Repo de abajo (y la constante REPO de crates/notty/src/main.rs)
-# deben sustituirse por el owner/repo real antes de la primera release de verdad.
 param(
     [Parameter(Mandatory=$true)][string]$Tag,   # e.g. v1.3.0
     [string]$NotesFile
@@ -16,9 +9,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# PLACEHOLDER: reemplázalo por el owner/repo real (ver constante REPO en
-# crates/notty/src/main.rs, que debe cambiarse a la vez que esto).
-$Repo = "OWNER/notty"
+$Repo = "s7lver2/notty"
 
 # Compara un tag ("v1.3.0") con la versión de Cargo.toml ("1.3.0"), sin el
 # prefijo "v". Extraída a función aparte (en vez de una comparación inline en
@@ -42,7 +33,8 @@ if (-not (Test-TagMatchesVersion -Tag $Tag -CargoVersion $cargoVersion)) {
 cargo build --release -p notty -p notty-legacy
 if ($LASTEXITCODE -ne 0) { throw "Fallo compilando notty/notty-legacy" }
 
-wix build installer\notty.wxs `
+wix build installer\notty.wxs -arch x64 `
+    -d ProductVersion=$version `
     -d NottyExePath=target\release\notty.exe `
     -d NottyLegacyExePath=target\release\notepad_legacy.exe `
     -o installer\notty.msi

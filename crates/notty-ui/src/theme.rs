@@ -12,6 +12,29 @@ impl Rgba {
     pub fn faded(self, factor: f32) -> Self {
         Self(self.0, self.1, self.2, self.3 * factor.clamp(0.0, 1.0))
     }
+
+    pub fn mix(self, to: Rgba, t: f32) -> Self {
+        let t = t.clamp(0.0, 1.0);
+        Self(
+            self.0 + (to.0 - self.0) * t,
+            self.1 + (to.1 - self.1) * t,
+            self.2 + (to.2 - self.2) * t,
+            self.3 + (to.3 - self.3) * t,
+        )
+    }
+}
+
+impl Palette {
+    /// Paleta intermedia entre `self` y `to`: el fundido al cambiar de tema.
+    pub fn mix(&self, to: &Palette, t: f32) -> Palette {
+        macro_rules! m {
+            ($($f:ident),*) => { Palette { $($f: self.$f.mix(to.$f, t)),* } };
+        }
+        m!(
+            chrome, chrome_hi, surface, surface_2, cmd, hover, press, line, text, text_2, text_3, text_hint, accent,
+            accent_soft, on_accent, danger, warn, ok, mark, mark_cur, close_hover, close_hover_fg, shadow, shadow_ring
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

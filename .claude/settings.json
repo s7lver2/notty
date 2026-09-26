@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash E:/notty/workflow/hooks/session-start.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

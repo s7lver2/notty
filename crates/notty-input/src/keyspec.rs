@@ -38,6 +38,7 @@ fn key_code(lower: &str, original: &str) -> Option<u32> {
             '0'..='9' => Some(c as u32),
             ',' => Some(0xBC),
             '.' => Some(0xBE),
+            '-' => Some(0xBD),
             _ => None,
         };
     }
@@ -54,8 +55,57 @@ fn key_code(lower: &str, original: &str) -> Option<u32> {
         "down" => Some(0x28),
         "backspace" => Some(0x08),
         "delete" | "del" => Some(0x2E),
+        "insert" | "ins" => Some(0x2D),
+        "pageup" | "pgup" => Some(0x21),
+        "pagedown" | "pgdn" => Some(0x22),
         _ => None,
     }
+}
+
+/// Inverso de `parse_key_spec`: "Ctrl+Shift+N". `None` si la tecla no tiene nombre
+/// en `[keys]` (o es un modificador suelto), para no guardar algo que luego no se lee.
+pub fn format_key_spec(vk: u32, m: Modifiers) -> Option<String> {
+    let key = key_name(vk)?;
+    let mut s = String::new();
+    if m.ctrl {
+        s.push_str("Ctrl+");
+    }
+    if m.alt {
+        s.push_str("Alt+");
+    }
+    if m.shift {
+        s.push_str("Shift+");
+    }
+    s.push_str(&key);
+    Some(s)
+}
+
+/// Nombre de la tecla `vk` tal y como lo escribe `format_key_spec` ("N", "F3", "Tab").
+pub fn key_name(vk: u32) -> Option<String> {
+    let name = match vk {
+        0x41..=0x5A | 0x30..=0x39 => return char::from_u32(vk).map(|c| c.to_string()),
+        0x70..=0x7B => return Some(format!("F{}", vk - 0x6F)),
+        0xBC => ",",
+        0xBE => ".",
+        0xBD => "-",
+        0x09 => "Tab",
+        0x0D => "Enter",
+        0x1B => "Esc",
+        0x20 => "Space",
+        0x24 => "Home",
+        0x23 => "End",
+        0x25 => "Left",
+        0x27 => "Right",
+        0x26 => "Up",
+        0x28 => "Down",
+        0x08 => "Backspace",
+        0x2E => "Delete",
+        0x2D => "Insert",
+        0x21 => "PageUp",
+        0x22 => "PageDown",
+        _ => return None,
+    };
+    Some(name.to_string())
 }
 
 #[cfg(test)]
@@ -100,6 +150,20 @@ mod tests {
     #[test]
     fn unknown_key_name_is_none() {
         assert_eq!(parse_key_spec("Ctrl+Nope"), None);
+    }
+
+    #[test]
+    fn format_round_trips_through_parse() {
+        for spec in ["Ctrl+N", "Ctrl+Shift+Tab", "Ctrl+Alt+V", "Ctrl+,", "F3", "Shift+F12", "Alt+PageDown", "Ctrl+-"] {
+            let (vk, m) = parse_key_spec(spec).unwrap();
+            assert_eq!(format_key_spec(vk, m).as_deref(), Some(spec));
+        }
+    }
+
+    #[test]
+    fn format_rejects_unnamed_keys() {
+        assert_eq!(format_key_spec(0x11, m(true, false, false)), None);
+        assert_eq!(format_key_spec(0xDE, m(true, false, false)), None);
     }
 
     #[test]

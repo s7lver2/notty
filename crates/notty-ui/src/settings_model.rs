@@ -3,6 +3,7 @@
 //! dibujar ni de Win32/Direct2D.
 
 use notty_config::{Config, Files, HotkeyMechanism, MenuBar, Preset, TabsPosition, TempMode, Theme};
+use notty_input::Command;
 
 /// Qué ajuste toca una fila interactiva (`Seg`/`Select`/`Toggle`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,6 +47,9 @@ pub enum Row {
     Toggle { title: &'static str, desc: &'static str, key: SettingKey },
     /// Atajo de solo lectura (no se puede reasignar desde aquí): `.kbd`.
     Kbd { title: &'static str, keys: &'static str },
+    /// Atajo reasignable: al pulsarlo se abre la captura de teclas. El título y la
+    /// combinación salen de `cmd` y de `[keys]`.
+    Binding { cmd: Command },
     /// Enlace de acción, no de ajuste: `.link`.
     Link { title: &'static str, desc: &'static str, label: &'static str, action: LinkAction },
     /// Cabecera de subgrupo dentro de una sección: `.sgroup`.
@@ -139,11 +143,18 @@ const VENTANA: &[Row] = &[
 
 const TECLADO: &[Row] = &[
     Row::Toggle { title: "Modo vim siempre", desc: "Cada ventana arranca en modo vim.", key: SettingKey::VimAlways },
-    Row::Kbd { title: "Alternar vim en esta ventana", keys: "Ctrl+Alt+V" },
-    Row::Kbd { title: "Ver como raw", keys: "Ctrl+Shift+H" },
+    Row::Group("Atajos · haz clic en uno para cambiarlo"),
+    Row::Binding { cmd: Command::NewTab },
+    Row::Binding { cmd: Command::NewTempTab },
+    Row::Binding { cmd: Command::CloseTab },
+    Row::Binding { cmd: Command::NextTab },
+    Row::Binding { cmd: Command::PrevTab },
+    Row::Binding { cmd: Command::OpenSettings },
+    Row::Binding { cmd: Command::ToggleVim },
+    Row::Binding { cmd: Command::ToggleRaw },
     Row::Link {
         title: "Todos los atajos",
-        desc: "Cada acción es un comando con nombre. Reasigna cualquiera en config.toml, sección [keys].",
+        desc: "Cada acción es un comando con nombre. También puedes reasignarlos en config.toml, sección [keys].",
         label: "Abrir [keys]",
         action: LinkAction::OpenKeys,
     },
@@ -305,6 +316,13 @@ mod tests {
     #[test]
     fn teclado_ends_with_the_shortcuts_link() {
         assert!(matches!(TECLADO.last(), Some(Row::Link { label: "Abrir [keys]", .. })));
+    }
+
+    #[test]
+    fn teclado_lists_every_remappable_command() {
+        for cmd in Command::ALL {
+            assert!(TECLADO.iter().any(|r| matches!(r, Row::Binding { cmd: c } if c == cmd)), "{cmd:?}");
+        }
     }
 
     #[test]

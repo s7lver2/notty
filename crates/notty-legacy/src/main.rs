@@ -1,3 +1,4 @@
+#![windows_subsystem = "windows"]
 use std::os::windows::ffi::OsStrExt;
 use std::ffi::OsStr;
 use windows::Win32::Foundation::CloseHandle;

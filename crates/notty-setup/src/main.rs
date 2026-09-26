@@ -1,32 +1,38 @@
 //! Punto de entrada de `notty-setup`: crea la ventana del asistente (o, con
 //! `--update`, la pantalla de actualización de Task 7) y dirige la instalación real a
 //! través de `msi_driver` en un hilo aparte.
+#![windows_subsystem = "windows"]
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{
-    DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmExtendFrameIntoClientArea, DwmSetWindowAttribute,
+    DWMWA_BORDER_COLOR, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmExtendFrameIntoClientArea,
+    DwmSetWindowAttribute,
 };
 use windows::Win32::Graphics::Gdi::InvalidateRect;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::{
     CREATE_UNICODE_ENVIRONMENT, CreateProcessW, PROCESS_INFORMATION, STARTUPINFOW,
 };
-use windows::Win32::UI::HiDpi::GetDpiForWindow;
+use windows::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext};
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CS_DROPSHADOW, CreateWindowExW, DefWindowProcW, DispatchMessageW, GWLP_USERDATA, GetMessageW, GetWindowLongPtrW,
     HTCAPTION, HTCLIENT, IDC_ARROW, LoadCursorW, MSG, PostMessageW, PostQuitMessage, RegisterClassExW, SW_SHOW,
-    SWP_NOZORDER, SetTimer, SetWindowLongPtrW, SetWindowPos, ShowWindow, TranslateMessage, WM_APP, WM_DESTROY,
-    WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCHITTEST, WM_PAINT, WM_TIMER, WNDCLASSEXW,
-    WS_CLIPSIBLINGS, WS_POPUP, WS_VISIBLE,
+    SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetTimer, SetWindowLongPtrW, SetWindowPos, ShowWindow,
+    TranslateMessage, WM_APP, WM_CLOSE, WM_DESTROY, WM_DPICHANGED, WM_GETMINMAXINFO, WM_KEYDOWN, WM_LBUTTONDOWN,
+    WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCALCSIZE, WM_NCHITTEST, WM_PAINT, WM_SIZE, WM_TIMER, WNDCLASSEXW,
+    WS_CAPTION, WS_CLIPSIBLINGS, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_POPUP, WS_SYSMENU, WS_THICKFRAME,
+    WS_VISIBLE,
 };
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, ReleaseCapture, SetCapture, VK_CONTROL};
 use windows::core::{PCWSTR, Result, w};
 
 use notty_setup::features::{self, FeatureToggles};
 use notty_setup::msi_driver::{self, InstallEvent};
-use notty_setup::ui::{self, Hit, State, Step, WIN_H, WIN_W};
+use notty_setup::ui::{self, Hit, MIN_H, MIN_W, State, Step, WIN_H, WIN_W, primary_button, secondary_button};
+use notty_ui::welcome_window::adaptive;
 
 const ID_ANIM_TIMER: usize = 1;
 /// Un `InstallEvent` recién llegado del hilo de instalación (puntero a un
@@ -50,6 +56,11 @@ fn to_wide(s: &str) -> Vec<u16> {
 }
 
 fn main() {
+    // Per-monitor v2 (como `notty`): sin esto Windows escala el mapa de bits de la
+    // ventana (borroso) y nunca llega `WM_DPICHANGED` al cambiar de monitor.
+    unsafe {
+        let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    }
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "--update") {
         let relaunch = args.iter().any(|a| a == "--relaunch");
@@ -101,6 +112,47 @@ fn launch_unelevated(exe: &Path) -> windows::core::Result<()> {
     Ok(())
 }
 
+fn shell_open(target: &str) {
+    unsafe {
+        let verb = to_wide("open");
+        let file = to_wide(target);
+        let _ = ShellExecuteW(None, PCWSTR(verb.as_ptr()), PCWSTR(file.as_ptr()), None, None, windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL);
+    }
+}
+
+/// Selector de carpetas nativo (`IFileOpenDialog` con `FOS_PICKFOLDERS`). Si la carpeta
+/// elegida no se llama ya "notty", se instala en una subcarpeta "notty" dentro de ella,
+/// como hacen los instaladores de Windows.
+fn pick_install_folder(hwnd: HWND, current: &Path) -> Option<PathBuf> {
+    use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize};
+    use windows::Win32::UI::Shell::{FOS_FORCEFILESYSTEM, FOS_PICKFOLDERS, FileOpenDialog, IFileOpenDialog, SHCreateItemFromParsingName, IShellItem, SIGDN_FILESYSPATH};
+    unsafe {
+        let init = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let result = (|| {
+            let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER).ok()?;
+            let opts = dialog.GetOptions().ok()?;
+            dialog.SetOptions(opts | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM).ok()?;
+            let title = to_wide("Carpeta de instalación de notty");
+            let _ = dialog.SetTitle(PCWSTR(title.as_ptr()));
+            if let Some(parent) = current.parent() {
+                let wide = to_wide(&parent.display().to_string());
+                if let Ok(item) = SHCreateItemFromParsingName::<_, _, IShellItem>(PCWSTR(wide.as_ptr()), None) {
+                    let _ = dialog.SetFolder(&item);
+                }
+            }
+            dialog.Show(Some(hwnd)).ok()?;
+            let item = dialog.GetResult().ok()?;
+            let path = PathBuf::from(item.GetDisplayName(SIGDN_FILESYSPATH).ok()?.to_string().ok()?);
+            let is_notty = path.file_name().is_some_and(|n| n.eq_ignore_ascii_case("notty"));
+            Some(if is_notty { path } else { path.join("notty") })
+        })();
+        if init.is_ok() {
+            CoUninitialize();
+        }
+        result
+    }
+}
+
 fn open_default_apps() {
     unsafe {
         let verb = to_wide("open");
@@ -123,12 +175,21 @@ fn spawn_install(hwnd: HWND, toggles: FeatureToggles, install_folder: PathBuf) {
         // no lo es) al ver `send_hwnd.0` más abajo.
         let send_hwnd = send_hwnd;
         let hwnd = send_hwnd.0;
+        let fail = |msg: String, code: i32| unsafe {
+            let _ = PostMessageW(Some(hwnd), WM_INSTALL_EVENT, WPARAM(0), LPARAM(Box::into_raw(Box::new(InstallEvent::Error(msg))) as isize));
+            let _ = PostMessageW(Some(hwnd), WM_INSTALL_FAILED, WPARAM(code as usize), LPARAM(0));
+        };
+        if MSI_BYTES.is_empty() {
+            fail(
+                "Este notty-setup se compiló sin el paquete MSI dentro (falta installer\\notty.msi al compilar). Construye el MSI con tools/release.ps1 y vuelve a compilar notty-setup.".into(),
+                1620,
+            );
+            return;
+        }
         let msi_path = match extract_embedded_msi() {
             Ok(p) => p,
             Err(e) => {
-                unsafe {
-                    let _ = PostMessageW(Some(hwnd), WM_INSTALL_EVENT, WPARAM(0), LPARAM(Box::into_raw(Box::new(InstallEvent::Error(e.to_string()))) as isize));
-                }
+                fail(format!("No se pudo extraer el paquete a la carpeta temporal: {e}"), 1619);
                 return;
             }
         };
@@ -174,30 +235,16 @@ fn run_wizard() -> Result<()> {
         };
         RegisterClassExW(&wc);
 
-        // Ventana temporal para conocer el DPI del monitor antes de crear la real,
-        // igual que hace `settings_window::open` con `parent`; aquí no hay ventana
-        // "padre" (notty-setup es su propio proceso), así que se usa el escritorio.
-        let desktop = windows::Win32::UI::WindowsAndMessaging::GetDesktopWindow();
-        let dpi = GetDpiForWindow(desktop).max(96);
-        let scale = dpi as f32 / 96.0;
-        let (w_px, h_px) = ((WIN_W * scale) as i32, (WIN_H * scale) as i32);
-
-        let mut work_area = RECT::default();
-        let _ = windows::Win32::UI::WindowsAndMessaging::SystemParametersInfoW(
-            windows::Win32::UI::WindowsAndMessaging::SPI_GETWORKAREA,
-            0,
-            Some(&mut work_area as *mut _ as *mut _),
-            Default::default(),
-        );
-        let x = work_area.left + ((work_area.right - work_area.left) - w_px) / 2;
-        let y = work_area.top + ((work_area.bottom - work_area.top) - h_px) / 2;
+        let (x, y, w_px, h_px, dpi) = centered_on_cursor_monitor(WIN_W, WIN_H);
 
         let title = to_wide("Instalar notty");
+        // Ventana con barra de título nativa (que `WM_NCCALCSIZE` quita) en vez de
+        // `WS_POPUP`: así Windows le da su animación de apertura y de minimizar.
         let hwnd = CreateWindowExW(
             Default::default(),
             class_name,
             PCWSTR(title.as_ptr()),
-            WS_POPUP | WS_CLIPSIBLINGS | WS_VISIBLE,
+            WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_CLIPSIBLINGS,
             x,
             y,
             w_px,
@@ -207,15 +254,7 @@ fn run_wizard() -> Result<()> {
             Some(instance.into()),
             None,
         )?;
-
-        let prefer_round = DWMWCP_ROUND;
-        let _ = DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &prefer_round as *const _ as *const _, std::mem::size_of_val(&prefer_round) as u32);
-        let margins = windows::Win32::UI::Controls::MARGINS { cxLeftWidth: 0, cxRightWidth: 0, cyTopHeight: 1, cyBottomHeight: 0 };
-        let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
-        // Las maquetas del instalador solo definen el tema oscuro (ver
-        // `notty_setup::palette`): se fuerza oscuro en vez de seguir
-        // `system_uses_dark_mode()` hasta que exista una maqueta clara.
-        notty_ui::window::apply_dark_mode(hwnd, true);
+        setup_chrome(hwnd);
 
         let renderer = notty_ui::Renderer::new(hwnd, dpi)?;
         let animations_enabled = notty_ui::window::system_animations_enabled();
@@ -238,6 +277,72 @@ fn run_wizard() -> Result<()> {
     Ok(())
 }
 
+/// `(x, y, ancho, alto, dpi)` de una ventana de `w_dip`×`h_dip` centrada en el monitor
+/// bajo el ratón, recortada a su área de trabajo (pantallas pequeñas, escalados altos).
+fn centered_on_cursor_monitor(w_dip: f32, h_dip: f32) -> (i32, i32, i32, i32, u32) {
+    let monitor = adaptive::monitor_under_cursor();
+    let dpi = adaptive::monitor_dpi(monitor);
+    let work: RECT = adaptive::work_area(monitor);
+    let center = ((work.left + work.right) / 2, (work.top + work.bottom) / 2);
+    let (x, y, w, h) = adaptive::initial_rect(w_dip, h_dip, dpi, work, center);
+    (x, y, w, h, dpi)
+}
+
+/// Mensajes de marco comunes al asistente y a la pantalla de actualización: bordes de
+/// redimensionado, maximizado, tamaño mínimo y cambio de DPI. `None` si `msg` no es
+/// uno de ellos. `renderer` es `None` mientras la ventana aún no tiene estado.
+unsafe fn frame_message(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    renderer: Option<&mut notty_ui::Renderer>,
+    min: (f32, f32),
+) -> Option<LRESULT> {
+    unsafe {
+        match msg {
+            WM_NCCALCSIZE if wparam.0 != 0 => Some(adaptive::nc_calc_size(hwnd, lparam)),
+            WM_GETMINMAXINFO => {
+                adaptive::min_max_info(hwnd, lparam, min.0, min.1);
+                Some(LRESULT(0))
+            }
+            WM_DPICHANGED => {
+                // El DPI va antes que el tamaño: el `WM_SIZE` que dispara `SetWindowPos`
+                // ya redimensiona el render target con la escala nueva.
+                if let Some(r) = renderer {
+                    r.set_dpi(adaptive::dpi_from_wparam(wparam));
+                }
+                adaptive::apply_suggested_rect(hwnd, lparam);
+                let _ = InvalidateRect(Some(hwnd), None, false);
+                Some(LRESULT(0))
+            }
+            WM_SIZE => {
+                if let Some(r) = renderer {
+                    r.resize((lparam.0 as u32) & 0xFFFF, ((lparam.0 as u32) >> 16) & 0xFFFF);
+                    let _ = InvalidateRect(Some(hwnd), None, false);
+                }
+                Some(LRESULT(0))
+            }
+            _ => None,
+        }
+    }
+}
+
+/// Esquinas redondeadas, sombra, tema oscuro y el borde de 1px `#34353a` de la maqueta.
+/// Las maquetas del instalador solo definen el tema oscuro.
+unsafe fn setup_chrome(hwnd: HWND) {
+    unsafe {
+        let prefer_round = DWMWCP_ROUND;
+        let _ = DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &prefer_round as *const _ as *const _, std::mem::size_of_val(&prefer_round) as u32);
+        let margins = windows::Win32::UI::Controls::MARGINS { cxLeftWidth: 0, cxRightWidth: 0, cyTopHeight: 1, cyBottomHeight: 0 };
+        let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
+        notty_ui::window::apply_dark_mode(hwnd, true);
+        let border: u32 = 0x003A_3534; // COLORREF 0x00BBGGRR de #34353a
+        let _ = DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, &border as *const _ as *const _, std::mem::size_of::<u32>() as u32);
+        let _ = SetWindowPos(hwnd, None, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER);
+    }
+}
+
 fn point_from_lparam(lparam: LPARAM) -> (f32, f32) {
     let x = (lparam.0 as i16) as f32;
     let y = ((lparam.0 >> 16) as i16) as f32;
@@ -247,6 +352,9 @@ fn point_from_lparam(lparam: LPARAM) -> (f32, f32) {
 extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     unsafe {
         let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut State;
+        if let Some(res) = frame_message(hwnd, msg, wparam, lparam, ptr.as_mut().map(|st| &mut st.renderer), (MIN_W, MIN_H)) {
+            return res;
+        }
         match msg {
             WM_PAINT => {
                 if let Some(st) = ptr.as_mut() {
@@ -262,6 +370,9 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 let def = DefWindowProcW(hwnd, msg, wparam, lparam);
                 if def.0 as u32 != HTCLIENT {
                     return def;
+                }
+                if let Some(edge) = adaptive::edge_hit(hwnd, lparam) {
+                    return edge;
                 }
                 if let Some(st) = ptr.as_mut() {
                     let x = (lparam.0 as i16) as i32;
@@ -280,9 +391,12 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 if let Some(st) = ptr.as_mut() {
                     let (x, y) = point_from_lparam(lparam);
                     let scale = st.renderer.scale();
-                    let hit = ui::hit_test(st, x / scale, y / scale);
-                    if hit != st.hover {
-                        st.hover = hit;
+                    if st.drag.is_some() {
+                        st.drag_to(y / scale);
+                        ensure_anim_timer(st, hwnd);
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                    } else if st.set_hover(ui::hit_test(st, x / scale, y / scale)) {
+                        ensure_anim_timer(st, hwnd);
                         let _ = InvalidateRect(Some(hwnd), None, false);
                     }
                 }
@@ -292,16 +406,58 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 if let Some(st) = ptr.as_mut() {
                     let (x, y) = point_from_lparam(lparam);
                     let scale = st.renderer.scale();
-                    handle_click(hwnd, st, x / scale, y / scale);
+                    let hit = ui::hit_test(st, x / scale, y / scale);
+                    st.pressed = hit;
+                    if hit == Hit::ScrollThumb {
+                        st.begin_drag(y / scale);
+                        SetCapture(hwnd);
+                    }
+                    let _ = InvalidateRect(Some(hwnd), None, false);
                 }
                 LRESULT(0)
             }
-            WM_LBUTTONUP => LRESULT(0),
+            WM_LBUTTONUP => {
+                if let Some(st) = ptr.as_mut() {
+                    let (x, y) = point_from_lparam(lparam);
+                    let scale = st.renderer.scale();
+                    if st.drag.take().is_some() {
+                        let _ = ReleaseCapture();
+                    } else if ui::hit_test(st, x / scale, y / scale) == st.pressed {
+                        handle_click(hwnd, st, st.pressed);
+                    }
+                    st.pressed = Hit::None;
+                    let _ = InvalidateRect(Some(hwnd), None, false);
+                }
+                LRESULT(0)
+            }
+            WM_MOUSEWHEEL => {
+                if let Some(st) = ptr.as_mut() {
+                    if st.step == Step::Options {
+                        let delta = ((wparam.0 >> 16) as i16) as f32;
+                        st.scroll_by(-delta / 120.0 * 48.0);
+                        ensure_anim_timer(st, hwnd);
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                    }
+                }
+                LRESULT(0)
+            }
+            WM_CLOSE => {
+                // Con MSI trabajando no se cierra: Windows Installer ya no se puede parar
+                // limpiamente desde aquí y la ventana es la que recibe su progreso.
+                if let Some(st) = ptr.as_ref() {
+                    if st.step == Step::Installing && matches!(st.install, ui::InstallPhase::Running { .. }) {
+                        return LRESULT(0);
+                    }
+                }
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
             WM_KEYDOWN => {
                 if let Some(st) = ptr.as_mut() {
+                    let ctrl = GetKeyState(VK_CONTROL.0 as i32) < 0;
                     match wparam.0 as u32 {
-                        0x0D => activate_primary(hwnd, st), // Enter
+                        0x0D => activate_primary(hwnd, st),   // Enter
                         0x1B => activate_secondary(hwnd, st), // Esc
+                        0x43 if ctrl => copy_details(hwnd, st), // Ctrl+C
                         _ => {}
                     }
                 }
@@ -357,13 +513,20 @@ fn close_window(hwnd: HWND) {
     }
 }
 
+fn failed(st: &State) -> bool {
+    st.step == Step::Installing && matches!(st.install, ui::InstallPhase::Error(..) | ui::InstallPhase::Busy)
+}
+
 fn activate_primary(hwnd: HWND, st: &mut State) {
     match st.step {
         Step::Welcome => st.go_to(Step::Options),
         Step::Options => start_install(hwnd, st),
+        Step::Installing if matches!(st.install, ui::InstallPhase::Busy) => start_install(hwnd, st),
+        Step::Installing if failed(st) => back_to_options(st),
         Step::Installing => {}
         Step::Done => open_notty_and_exit(hwnd, st),
     }
+    ensure_anim_timer(st, hwnd);
     unsafe {
         let _ = InvalidateRect(Some(hwnd), None, false);
     }
@@ -373,17 +536,35 @@ fn activate_secondary(hwnd: HWND, st: &mut State) {
     match st.step {
         Step::Options => st.go_to(Step::Welcome),
         Step::Welcome => close_window(hwnd),
+        Step::Installing if failed(st) => back_to_options(st),
         _ => {}
     }
+    ensure_anim_timer(st, hwnd);
     unsafe {
         let _ = InvalidateRect(Some(hwnd), None, false);
     }
 }
 
+fn back_to_options(st: &mut State) {
+    st.reset_install();
+    st.go_to(Step::Options);
+}
+
 fn start_install(hwnd: HWND, st: &mut State) {
+    st.reset_install();
     st.go_to(Step::Installing);
     spawn_install(hwnd, st.toggles, st.install_folder.clone());
     ensure_anim_timer(st, hwnd);
+}
+
+fn copy_details(hwnd: HWND, st: &mut State) {
+    if failed(st) && notty_ui::clipboard::set_clipboard_text(hwnd, &st.error_details()).is_ok() {
+        st.copied_at = Some(Instant::now());
+        ensure_anim_timer(st, hwnd);
+        unsafe {
+            let _ = InvalidateRect(Some(hwnd), None, false);
+        }
+    }
 }
 
 fn open_notty_and_exit(hwnd: HWND, st: &mut State) {
@@ -392,10 +573,20 @@ fn open_notty_and_exit(hwnd: HWND, st: &mut State) {
     close_window(hwnd);
 }
 
-fn handle_click(hwnd: HWND, st: &mut State, x: f32, y: f32) {
-    let hit = ui::hit_test(st, x, y);
+fn handle_click(hwnd: HWND, st: &mut State, hit: Hit) {
     match hit {
+        Hit::ChangeFolder => {
+            if let Some(folder) = pick_install_folder(hwnd, &st.install_folder) {
+                st.install_folder = folder;
+            }
+        }
+        Hit::OpenLog => shell_open(&msi_driver::log_path().display().to_string()),
+        Hit::CopyDetails => copy_details(hwnd, st),
+        Hit::FolderRow | Hit::ScrollThumb => {}
         Hit::Close => close_window(hwnd),
+        Hit::Minimize => unsafe {
+            let _ = ShowWindow(hwnd, windows::Win32::UI::WindowsAndMessaging::SW_MINIMIZE);
+        },
         Hit::Back => activate_secondary(hwnd, st),
         Hit::Next => activate_primary(hwnd, st),
         Hit::GroupHeader(i) => {
@@ -412,6 +603,7 @@ fn handle_click(hwnd: HWND, st: &mut State, x: f32, y: f32) {
         Hit::Retry => start_install(hwnd, st),
         Hit::None | Hit::Caption => {}
     }
+    ensure_anim_timer(st, hwnd);
     unsafe {
         let _ = InvalidateRect(Some(hwnd), None, false);
     }
@@ -441,26 +633,15 @@ fn run_update_screen(from: &str, to: &str, relaunch: bool) -> Result<()> {
         };
         RegisterClassExW(&wc);
 
-        let desktop = windows::Win32::UI::WindowsAndMessaging::GetDesktopWindow();
-        let dpi = GetDpiForWindow(desktop).max(96);
-        let scale = dpi as f32 / 96.0;
-        let (w_px, h_px) = ((520.0 * scale) as i32, (300.0 * scale) as i32);
-        let mut work_area = RECT::default();
-        let _ = windows::Win32::UI::WindowsAndMessaging::SystemParametersInfoW(
-            windows::Win32::UI::WindowsAndMessaging::SPI_GETWORKAREA,
-            0,
-            Some(&mut work_area as *mut _ as *mut _),
-            Default::default(),
-        );
-        let x = work_area.left + ((work_area.right - work_area.left) - w_px) / 2;
-        let y = work_area.top + ((work_area.bottom - work_area.top) - h_px) / 2;
+        let (x, y, w_px, h_px, dpi) = centered_on_cursor_monitor(UPDATE_W, UPDATE_H);
 
         let title = to_wide("Actualizar notty");
+        // `WS_THICKFRAME` para poder redimensionarla; su marco lo quita `WM_NCCALCSIZE`.
         let hwnd = CreateWindowExW(
             Default::default(),
             class_name,
             PCWSTR(title.as_ptr()),
-            WS_POPUP | WS_CLIPSIBLINGS | WS_VISIBLE,
+            WS_POPUP | WS_THICKFRAME | WS_CLIPSIBLINGS | WS_VISIBLE,
             x,
             y,
             w_px,
@@ -475,6 +656,9 @@ fn run_update_screen(from: &str, to: &str, relaunch: bool) -> Result<()> {
         let margins = windows::Win32::UI::Controls::MARGINS { cxLeftWidth: 0, cxRightWidth: 0, cyTopHeight: 1, cyBottomHeight: 0 };
         let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
         notty_ui::window::apply_dark_mode(hwnd, true);
+        // `.win{border:1px solid #34353a}` (COLORREF es 0x00BBGGRR).
+        let border: u32 = 0x003A_3534;
+        let _ = DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, &border as *const _ as *const _, std::mem::size_of::<u32>() as u32);
 
         let renderer = notty_ui::Renderer::new(hwnd, dpi)?;
         let state = Box::new(UpdateState {
@@ -491,7 +675,7 @@ fn run_update_screen(from: &str, to: &str, relaunch: bool) -> Result<()> {
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, ptr as isize);
 
         let _ = ShowWindow(hwnd, SW_SHOW);
-        let _ = SetWindowPos(hwnd, None, x, y, w_px, h_px, SWP_NOZORDER);
+        let _ = SetWindowPos(hwnd, None, x, y, w_px, h_px, SWP_NOZORDER | SWP_FRAMECHANGED);
 
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
@@ -513,64 +697,100 @@ struct UpdateState {
     installing: bool,
 }
 
+const UPDATE_W: f32 = 520.0;
+const UPDATE_H: f32 = 372.0;
+const UPDATE_MIN_W: f32 = 380.0;
+const UPDATE_MIN_H: f32 = 300.0;
+const UPDATE_NOTES: &str = "· Barra de título más compacta\n· Sombras suaves en los desplegables\n· Cursor de bloque en vim Normal";
+
+/// Barra de título de 32px: icono, título y botones "—"/"✕" de 46px (`.tb` de la maqueta).
+fn draw_titlebar(r: &notty_ui::Renderer, title: &str, w: f32, hover: Hit, hits: &mut Vec<(notty_ui::layout::Rect, Hit)>) {
+    use notty_ui::layout::{Rect, TITLEBAR_H};
+    let pal = notty_setup::palette::DARK;
+    let cy = TITLEBAR_H / 2.0;
+    r.stroke_round_rect(Rect::new(12.6, cy - 6.4, 25.4, cy + 6.4), 3.0, 1.2, pal.titlebar_text);
+    r.text(title, &r.fonts().ui_12, Rect::new(34.0, 0.0, w - 92.0, TITLEBAR_H), pal.titlebar_text);
+    let min_r = Rect::new(w - 92.0, 0.0, w - 46.0, TITLEBAR_H);
+    let close_r = Rect::new(w - 46.0, 0.0, w, TITLEBAR_H);
+    if hover == Hit::Minimize {
+        r.fill(min_r, pal.caption_hover);
+    }
+    if hover == Hit::Close {
+        r.fill(close_r, pal.close_hover);
+    }
+    r.text_center("—", &r.fonts().ui_11, min_r, pal.text_3);
+    r.text_center("✕", &r.fonts().ui_11, close_r, if hover == Hit::Close { pal.text } else { pal.text_3 });
+    hits.push((Rect::new(0.0, 0.0, w, TITLEBAR_H), Hit::Caption));
+    hits.push((min_r, Hit::Minimize));
+    hits.push((close_r, Hit::Close));
+}
+
 fn paint_update(st: &mut UpdateState) {
     use notty_ui::layout::{Rect, TITLEBAR_H};
     let pal = notty_setup::palette::DARK;
     let (w, h) = st.renderer.size_dips();
     let r = &st.renderer;
-    st.hits.clear();
+    let mut hits = Vec::new();
 
     r.begin_paint(pal.win);
-    let titlebar = Rect::new(0.0, 0.0, w, TITLEBAR_H);
-    r.text("Actualizar notty", &r.fonts().ui_12, Rect::new(12.0, 0.0, w - 46.0, TITLEBAR_H), pal.titlebar_text);
-    let close_r = Rect::new(w - 46.0, 0.0, w, TITLEBAR_H);
-    let ccx = close_r.left + close_r.width() / 2.0;
-    let ccy = close_r.top + close_r.height() / 2.0;
-    r.stroke_line(ccx - 5.0, ccy - 5.0, ccx + 5.0, ccy + 5.0, 1.0, pal.text_3);
-    r.stroke_line(ccx + 5.0, ccy - 5.0, ccx - 5.0, ccy + 5.0, 1.0, pal.text_3);
-    st.hits.push((titlebar, Hit::Caption));
-    st.hits.push((close_r, Hit::Close));
+    draw_titlebar(r, "Actualizar notty", w, st.hover, &mut hits);
 
-    let x = 32.0;
-    let mut y = TITLEBAR_H + 24.0;
-    r.text("Actualización disponible", &r.fonts().ui_20_semibold, Rect::new(x, y, w - 32.0, y + 28.0), pal.text);
-    y += 34.0;
-    r.text(&format!("{} → {} · firma verificada ✓", st.from, st.to), &r.fonts().mono_12, Rect::new(x, y, w - 32.0, y + 18.0), pal.text_2);
-    y += 30.0;
-    let notes = Rect::new(x, y, w - 32.0, y + 60.0);
-    r.fill_round(notes, 6.0, pal.group);
-    r.text(
-        "· Barra de título más compacta\n· Sombras suaves en los desplegables\n· Cursor de bloque en vim Normal",
-        &r.fonts().ui_12,
-        Rect::new(notes.left + 10.0, notes.top + 8.0, notes.right - 10.0, notes.bottom - 8.0),
-        pal.text_2,
-    );
-    y += 70.0;
-    r.text("Tus pestañas y borradores se restaurarán al terminar.", &r.fonts().ui_11, Rect::new(x, y, w - 32.0, y + 16.0), pal.text_3);
+    // `.body{padding:14px 32px 0}` (menos margen si la ventana es estrecha). Recortado
+    // encima del pie para que nada lo pise aunque la ventana sea baja.
+    let pad = if w < 460.0 { 20.0 } else { 32.0 };
+    let x = pad;
+    let right = w - pad;
+    let foot_top = h - notty_setup::ui::FOOT_H;
+    r.push_clip(Rect::new(0.0, TITLEBAR_H, w, foot_top));
+    let mut y = TITLEBAR_H + 14.0;
+    adaptive::text_fit(r, "Actualización disponible", &r.fonts().ui_20_semibold, Rect::new(x, y, right, y + 27.0), pal.text);
+    y += 27.0 + 6.0;
 
-    let foot = Rect::new(0.0, h - 56.0, w, h);
+    // `.ver`: "1.2.0 → <b>1.3.0</b> · firma verificada ✓"
+    let mono = &r.fonts().mono_12;
+    let bold = &r.fonts().mono_12_semibold;
+    let head = format!("{} → ", st.from);
+    let tail = " · firma verificada ✓";
+    let head_w = r.measure(&head, mono);
+    let to_w = r.measure(&st.to, bold).min((right - x - head_w).max(0.0));
+    r.text(&head, mono, Rect::new(x, y, right, y + 18.0), pal.text_2);
+    adaptive::text_fit(r, &st.to, bold, Rect::new(x + head_w, y, (x + head_w + to_w).min(right), y + 18.0), pal.text);
+    // `mono_12` ya recorta con «…» por sí mismo.
+    r.text(tail, mono, Rect::new(x + head_w + to_w, y, right, y + 18.0), pal.text_2);
+    y += 18.0 + 12.0;
+
+    // `.notes{padding:10px 12px;line-height:1.65}`
+    let line_h = 12.0 * 1.65;
+    let text_w = right - x - 24.0;
+    let notes_h = r.measure_wrapped(UPDATE_NOTES, &r.fonts().ui_12, text_w, Some(line_h)) + 20.0;
+    let notes = Rect::new(x, y, right, y + notes_h);
+    r.fill_round(notes, 6.0, pal.field_bg);
+    r.stroke_round_rect(notes, 6.0, 1.0, pal.foot_border);
+    r.text_wrapped(UPDATE_NOTES, &r.fonts().ui_12, Rect::new(x + 12.0, y + 10.0, right - 12.0, notes.bottom), pal.scene_text, Some(line_h));
+    y += notes_h + 10.0;
+    let hint = "Tus pestañas y borradores se restaurarán al terminar.";
+    let hint_h = r.measure_wrapped(hint, &r.fonts().ui_11_5, right - x, None).max(16.0);
+    r.text_wrapped(hint, &r.fonts().ui_11_5, Rect::new(x, y, right, y + hint_h), pal.text_3, None);
+    r.pop_clip();
+
+    // `.foot{padding:14px 20px}`
+    let foot = Rect::new(0.0, foot_top, w, h);
+    let cy = foot.top + foot.height() / 2.0;
     r.fill(foot, pal.foot);
-    r.stroke_line(0.0, foot.top, w, foot.top, 1.0, pal.foot_border);
+    r.stroke_line(0.0, foot.top + 0.5, w, foot.top + 0.5, 1.0, pal.foot_border);
     if !st.installing {
-        let later = Rect::new(foot.left + 18.0, foot.top + 10.0, foot.left + 18.0 + 90.0, foot.bottom - 10.0);
-        r.fill_round(later, 4.0, pal.btn2);
-        r.stroke_round_rect(later, 4.0, 1.0, pal.btn2_border);
-        r.text("Más tarde", &r.fonts().ui_12_5, later, pal.text);
-        st.hits.push((later, Hit::Back));
-
-        let label = "Actualizar";
-        let bw = r.measure(label, &r.fonts().ui_12_5) + 52.0;
-        let update_btn = Rect::new(foot.right - 18.0 - bw, foot.top + 10.0, foot.right - 18.0, foot.bottom - 10.0);
-        r.fill_round(update_btn, 4.0, pal.accent);
-        r.stroke_round_rect(update_btn, 4.0, 1.0, pal.accent_border);
-        r.fill_round(Rect::new(update_btn.left + 16.0, update_btn.top + 8.0, update_btn.left + 24.0, update_btn.top + 20.0), 2.0, pal.on_accent);
-        r.text(label, &r.fonts().ui_12_5, Rect::new(update_btn.left + 34.0, update_btn.top, update_btn.right - 14.0, update_btn.bottom), pal.on_accent);
-        st.hits.push((update_btn, Hit::Next));
+        let update_btn = primary_button(r, foot.right - 20.0, cy, "Actualizar", true, st.hover == Hit::Next);
+        let later = secondary_button(r, update_btn.left - 6.0, cy, "Más tarde", st.hover == Hit::Back);
+        hits.push((later, Hit::Back));
+        hits.push((update_btn, Hit::Next));
     } else if let ui::InstallPhase::Running { progress, .. } = &st.install {
-        r.text(&format!("Actualizando… {progress} %"), &r.fonts().ui_12_5, Rect::new(foot.left + 18.0, foot.top, foot.right - 18.0, foot.bottom), pal.text_2);
+        let pct = *progress as f32 / 100.0;
+        r.fill(Rect::new(0.0, foot.top, w * pct, foot.top + 2.0), pal.accent);
+        r.text(&format!("Actualizando… {progress} %"), &r.fonts().ui_12, Rect::new(20.0, foot.top, foot.right - 20.0, foot.bottom), pal.text_3);
     }
 
     r.end_paint();
+    st.hits = hits;
 }
 
 fn update_hit_test(st: &UpdateState, x: f32, y: f32) -> Hit {
@@ -585,6 +805,11 @@ fn update_hit_test(st: &UpdateState, x: f32, y: f32) -> Hit {
 extern "system" fn update_wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     unsafe {
         let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut UpdateState;
+        if let Some(res) =
+            frame_message(hwnd, msg, wparam, lparam, ptr.as_mut().map(|st| &mut st.renderer), (UPDATE_MIN_W, UPDATE_MIN_H))
+        {
+            return res;
+        }
         match msg {
             WM_PAINT => {
                 if let Some(st) = ptr.as_mut() {
@@ -597,6 +822,9 @@ extern "system" fn update_wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 let def = DefWindowProcW(hwnd, msg, wparam, lparam);
                 if def.0 as u32 != HTCLIENT {
                     return def;
+                }
+                if let Some(edge) = adaptive::edge_hit(hwnd, lparam) {
+                    return edge;
                 }
                 if let Some(st) = ptr.as_mut() {
                     let x = (lparam.0 as i16) as i32;
@@ -629,6 +857,9 @@ extern "system" fn update_wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                     let hit = update_hit_test(st, x / scale, y / scale);
                     match hit {
                         Hit::Close | Hit::Back => close_window(hwnd),
+                        Hit::Minimize => {
+                            let _ = ShowWindow(hwnd, windows::Win32::UI::WindowsAndMessaging::SW_MINIMIZE);
+                        }
                         Hit::Next => {
                             st.installing = true;
                             let install_folder = PathBuf::from(r"C:\Program Files\notty");

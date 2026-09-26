@@ -1,4 +1,5 @@
 //! Punto de entrada de notty: interpreta argv, carga la configuración y abre la ventana.
+#![windows_subsystem = "windows"]
 
 pub(crate) mod daemon;
 pub(crate) mod shortcut;
@@ -7,7 +8,7 @@ pub(crate) mod shortcut;
 /// (Task 4/6 del plan del actualizador). PLACEHOLDER: reemplázalo por el repo real
 /// en cuanto exista (`gh repo create <owner>/notty ...`, paso manual que no
 /// ejecuta el agente) — usado también por `tools/release.ps1`.
-pub(crate) const REPO: &str = "OWNER/notty";
+pub(crate) const REPO: &str = "s7lver2/notty";
 
 /// Clave pública Ed25519 contra la que se verifica `notty-setup.exe` antes de
 /// ejecutarlo (Task 4, Step 5 del plan del actualizador). Todo-cero hasta que se

@@ -1,54 +1,63 @@
 //! Envoltura sobre `MsiInstallProductW` + `MsiSetExternalUIRecord` (msi.dll) para
-//! conducir la instalación real desde la UI Direct2D de `notty-setup` (Task 6),
-//! sin usar los diálogos propios de Windows Installer (`INSTALLUILEVEL_NONE`).
+//! conducir la instalación real desde la UI Direct2D de `notty-setup`, sin usar los
+//! diálogos propios de Windows Installer (`INSTALLUILEVEL_NONE`).
 //!
-//! Nota de implementación: la variante "Record" de `MsiSetExternalUIRecord` entrega
-//! el mensaje como un `MSIHANDLE` (un *record* MSI), no como texto ya formateado
-//! (`PCWSTR`) -- eso es lo que hace la variante más antigua `MsiSetExternalUI`. El
-//! texto se obtiene con `MsiFormatRecordW` sobre ese handle.
+//! La variante "Record" entrega cada mensaje como un `MSIHANDLE` (un *record* MSI),
+//! no como texto ya formateado: el texto sale de `MsiFormatRecordW`/`MsiRecordGetStringW`.
 use windows::Win32::System::ApplicationInstallationAndServicing::{
-    INSTALLLOGMODE, INSTALLMESSAGE_ACTIONSTART, INSTALLMESSAGE_ERROR, INSTALLMESSAGE_PROGRESS,
-    INSTALLUILEVEL_NONE, MSIHANDLE, MsiEnableLogW, MsiFormatRecordW, MsiInstallProductW,
-    MsiRecordGetInteger, MsiSetExternalUIRecord, MsiSetInternalUI,
+    INSTALLLOGMODE, INSTALLMESSAGE_ACTIONSTART, INSTALLMESSAGE_ERROR, INSTALLMESSAGE_PROGRESS, INSTALLUILEVEL,
+    INSTALLUILEVEL_NONE, INSTALLUILEVEL_UACONLY,
+    MSIHANDLE, MsiEnableLogW, MsiFormatRecordW, MsiInstallProductW, MsiRecordGetInteger, MsiRecordGetStringW,
+    MsiSetExternalUIRecord, MsiSetInternalUI,
 };
 use windows::core::PCWSTR;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
 pub enum InstallEvent {
     Progress(u8),
     ActionText(String),
+    /// Texto de un error de MSI. No termina la instalación por sí solo: el código final
+    /// llega aparte, cuando `install` devuelve `Err`.
     Error(String),
     Done,
 }
 
 thread_local! {
     static CALLBACK: std::cell::RefCell<Option<Box<dyn FnMut(InstallEvent)>>> = std::cell::RefCell::new(None);
-    // Estado de MsiMessage(INSTALLMESSAGE_PROGRESS) necesario para traducir sus campos
-    // (que son deltas/tipo de paso, no un porcentaje) en un 0..=100 utilizable. Ver
-    // "Progress messages sent by internal UI" en la documentación de MSI.
-    static PROGRESS: std::cell::Cell<ProgressState> = std::cell::Cell::new(ProgressState::new());
+    static PROGRESS: std::cell::Cell<ProgressState> = const { std::cell::Cell::new(ProgressState::new()) };
 }
 
+/// MSI manda dos tandas de progreso: la generación del script (rápida) y su ejecución
+/// (la de verdad). Cada una reinicia sus contadores, así que se reparten el 0..100 de
+/// la barra en vez de hacerla retroceder: 0..20 el script, 20..100 la ejecución.
 #[derive(Clone, Copy)]
 struct ProgressState {
     total: i32,
     current: i32,
     forward: bool,
+    scripting: bool,
+    shown: u8,
 }
 
 impl ProgressState {
     const fn new() -> Self {
-        Self { total: 0, current: 0, forward: true }
+        Self { total: 0, current: 0, forward: true, scripting: true, shown: 0 }
     }
 
     fn percent(&self) -> u8 {
         if self.total <= 0 {
-            return 0;
+            return self.shown;
         }
         let done = if self.forward { self.current } else { self.total - self.current };
-        ((done.max(0) as i64 * 100 / self.total as i64).clamp(0, 100)) as u8
+        let frac = (done.max(0) as f64 / self.total as f64).clamp(0.0, 1.0);
+        let (lo, hi) = if self.scripting { (0.0, 20.0) } else { (20.0, 100.0) };
+        ((lo + (hi - lo) * frac) as u8).max(self.shown)
     }
+}
+
+pub fn log_path() -> PathBuf {
+    std::env::temp_dir().join("notty-install.log")
 }
 
 fn to_wide(s: &str) -> Vec<u16> {
@@ -58,25 +67,53 @@ fn to_wide(s: &str) -> Vec<u16> {
 fn format_record(hrecord: MSIHANDLE) -> String {
     unsafe {
         let mut len: u32 = 0;
-        // Primera llamada con buffer nulo: devuelve en `len` el tamaño (sin el nul)
-        // necesario, tal y como documenta MsiFormatRecordW.
         let _ = MsiFormatRecordW(MSIHANDLE(0), hrecord, None, Some(&mut len));
         if len == 0 {
             return String::new();
         }
         let mut buf = vec![0u16; len as usize + 1];
         let mut cap = buf.len() as u32;
-        let result = MsiFormatRecordW(
-            MSIHANDLE(0),
-            hrecord,
-            Some(windows::core::PWSTR(buf.as_mut_ptr())),
-            Some(&mut cap),
-        );
-        if result != 0 {
+        if MsiFormatRecordW(MSIHANDLE(0), hrecord, Some(windows::core::PWSTR(buf.as_mut_ptr())), Some(&mut cap)) != 0 {
             return String::new();
         }
         String::from_utf16_lossy(&buf[..cap as usize])
     }
+}
+
+fn record_string(hrecord: MSIHANDLE, field: u32) -> String {
+    unsafe {
+        let mut buf = vec![0u16; 256];
+        let mut cap = buf.len() as u32;
+        if MsiRecordGetStringW(hrecord, field, Some(windows::core::PWSTR(buf.as_mut_ptr())), Some(&mut cap)) != 0 {
+            return String::new();
+        }
+        String::from_utf16_lossy(&buf[..cap as usize])
+    }
+}
+
+/// Traduce el nombre interno de una acción estándar de MSI a lo que se enseña bajo la
+/// barra de progreso. Las acciones que no aparecen aquí no cambian el texto.
+pub fn action_label(action: &str) -> Option<&'static str> {
+    Some(match action {
+        "InstallValidate" | "InstallInitialize" | "CostInitialize" | "FileCost" | "CostFinalize"
+        | "LaunchConditions" | "FindRelatedProducts" | "AppSearch" | "MigrateFeatureStates" | "ValidateProductID" => {
+            "Preparando la instalación"
+        }
+        "RemoveExistingProducts" => "Quitando la versión anterior",
+        "InstallFiles" | "RemoveFiles" | "MoveFiles" | "DuplicateFiles" => "Copiando archivos",
+        "WriteRegistryValues" | "RemoveRegistryValues" => "Escribiendo en el registro",
+        "RegisterClassInfo" | "RegisterExtensionInfo" | "RegisterProgIdInfo" | "RegisterMIMEInfo"
+        | "UnregisterClassInfo" | "UnregisterExtensionInfo" | "UnregisterProgIdInfo" | "UnregisterMIMEInfo" => {
+            "Registrando asociaciones de archivo"
+        }
+        "CreateShortcuts" | "RemoveShortcuts" => "Creando accesos directos",
+        "WriteEnvironmentStrings" | "RemoveEnvironmentStrings" => "Actualizando el PATH",
+        "RegisterUser" | "RegisterProduct" | "PublishFeatures" | "PublishProduct" | "UnpublishFeatures" => {
+            "Registrando notty en Windows"
+        }
+        "InstallFinalize" => "Terminando",
+        _ => return None,
+    })
 }
 
 pub fn install(
@@ -88,24 +125,21 @@ pub fn install(
     CALLBACK.with(|c| *c.borrow_mut() = Some(Box::new(on_event)));
     PROGRESS.with(|p| p.set(ProgressState::new()));
 
-    let log_path = std::env::temp_dir().join("notty-install.log");
-    let log_wide = to_wide(&log_path.display().to_string());
+    let log_wide = to_wide(&log_path().display().to_string());
 
     unsafe {
-        // Todos los tipos de mensaje (ver INSTALLLOGMODE_*): necesitamos progreso,
-        // texto de acción y errores como mínimo.
         let _ = MsiEnableLogW(INSTALLLOGMODE(0x03FF_FFFF), PCWSTR(log_wide.as_ptr()), 0);
 
-        MsiSetInternalUI(INSTALLUILEVEL_NONE, None);
+        // Sin interfaz de MSI (la pone notty-setup) salvo el aviso de UAC: con
+        // `INSTALLUILEVEL_NONE` a secas, MSI no puede pedir elevación y una instalación
+        // para todo el equipo falla con 1603 por falta de permisos.
+        MsiSetInternalUI(INSTALLUILEVEL(INSTALLUILEVEL_NONE.0 | INSTALLUILEVEL_UACONLY.0), None);
         let ok = MsiSetExternalUIRecord(Some(external_ui_handler), 0x03FF_FFFF, None, None);
         if ok != 0 {
             return Err(ok as i32);
         }
 
-        let props = format!(
-            "ADDLOCAL={addlocal} INSTALLFOLDER=\"{}\"",
-            install_folder.display()
-        );
+        let props = format!("ADDLOCAL={addlocal} INSTALLFOLDER=\"{}\"", install_folder.display());
         let msi_wide = to_wide(&msi_path.display().to_string());
         let props_wide = to_wide(&props);
 
@@ -122,56 +156,79 @@ pub fn install(
     Ok(())
 }
 
-unsafe extern "system" fn external_ui_handler(
-    _context: *mut core::ffi::c_void,
-    message_type: u32,
-    hrecord: MSIHANDLE,
-) -> i32 {
-    // El byte alto de `message_type` es el INSTALLMESSAGE_*; el resto son banderas de
-    // estilo de caja de diálogo, que no aplican aquí (INSTALLUILEVEL_NONE).
+fn emit(event: InstallEvent) {
+    CALLBACK.with(|c| {
+        if let Some(cb) = c.borrow_mut().as_mut() {
+            cb(event);
+        }
+    });
+}
+
+unsafe extern "system" fn external_ui_handler(_context: *mut core::ffi::c_void, message_type: u32, hrecord: MSIHANDLE) -> i32 {
     let category = (message_type & 0xFF00_0000) as i32;
 
-    let event = if category == INSTALLMESSAGE_PROGRESS.0 {
-        // Campos del record de progreso (1-indexados): [1]=subtipo, [2..]=valores.
-        // Subtipo 0: reset (campo 2=total de "ticks", campo 3=dirección: 0=adelante,
-        // 1=atrás, campo 4=ignorar). Subtipo 1: increment por acción. Subtipo 2:
-        // progreso real (campo 2=cantidad completada en esta llamada).
+    if category == INSTALLMESSAGE_PROGRESS.0 {
+        // [1] subtipo. 0 = reinicio ([2] total, [3] dirección, [4] 1 = generando el
+        // script); 2 = avance ([2] ticks hechos). El 1 solo configura ActionData.
         let subtype = unsafe { MsiRecordGetInteger(hrecord, 1) };
         match subtype {
             0 => {
                 let total = unsafe { MsiRecordGetInteger(hrecord, 2) };
                 let forward = unsafe { MsiRecordGetInteger(hrecord, 3) } == 0;
-                PROGRESS.with(|p| p.set(ProgressState { total, current: 0, forward }));
-                None
+                let scripting = unsafe { MsiRecordGetInteger(hrecord, 4) } == 1;
+                PROGRESS.with(|p| {
+                    let shown = p.get().shown;
+                    p.set(ProgressState { total, current: 0, forward, scripting, shown });
+                });
             }
-            1 | 2 => {
+            2 => {
                 let amount = unsafe { MsiRecordGetInteger(hrecord, 2) };
                 let pct = PROGRESS.with(|p| {
                     let mut s = p.get();
                     s.current += amount;
+                    s.shown = s.percent();
                     p.set(s);
-                    s.percent()
+                    s.shown
                 });
-                Some(InstallEvent::Progress(pct))
+                emit(InstallEvent::Progress(pct));
             }
-            _ => None,
+            _ => {}
         }
     } else if category == INSTALLMESSAGE_ACTIONSTART.0 {
-        let text = format_record(hrecord);
-        if text.is_empty() { None } else { Some(InstallEvent::ActionText(text)) }
+        if let Some(label) = action_label(&record_string(hrecord, 1)) {
+            emit(InstallEvent::ActionText(label.to_string()));
+        }
     } else if category == INSTALLMESSAGE_ERROR.0 {
         let text = format_record(hrecord);
-        Some(InstallEvent::Error(text))
-    } else {
-        None
-    };
-
-    if let Some(event) = event {
-        CALLBACK.with(|c| {
-            if let Some(cb) = c.borrow_mut().as_mut() {
-                cb(event);
-            }
-        });
+        if !text.is_empty() {
+            emit(InstallEvent::Error(text));
+        }
     }
     1 // IDOK: dejar que MSI continúe
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn progress_splits_script_and_execution() {
+        let script = ProgressState { total: 100, current: 50, forward: true, scripting: true, shown: 0 };
+        assert_eq!(script.percent(), 10);
+        let exec = ProgressState { total: 100, current: 50, forward: true, scripting: false, shown: 20 };
+        assert_eq!(exec.percent(), 60);
+    }
+
+    #[test]
+    fn progress_never_goes_back() {
+        let s = ProgressState { total: 100, current: 0, forward: true, scripting: false, shown: 35 };
+        assert_eq!(s.percent(), 35);
+    }
+
+    #[test]
+    fn known_actions_are_translated() {
+        assert_eq!(action_label("InstallFiles"), Some("Copiando archivos"));
+        assert_eq!(action_label("RegisterExtensionInfo"), Some("Registrando asociaciones de archivo"));
+        assert_eq!(action_label("SomethingCustom"), None);
+    }
 }

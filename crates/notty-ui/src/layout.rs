@@ -109,7 +109,69 @@ pub struct Frame {
 /// botones de ventana (min/max/cerrar), para que no parezca uno de ellos.
 pub const SETTINGS_BTN_W: f32 = 40.0;
 
+/// Cuánto de cada banda se ve (`0.0` oculta, `1.0` entera) a mitad de una transición.
+/// A diferencia de `Bands`, admite valores intermedios: así una transición nueva
+/// (p.ej. pulsar Alt otra vez mientras la barra de menús aún se está desplegando)
+/// arranca desde donde está ahora en vez de saltar al final de la anterior.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct BandFrac {
+    pub tabs_in_title: f32,
+    pub menubar: f32,
+    pub tabs_below: f32,
+    /// Barra de atajos propia (ya descontado el caso de línea de comandos fusionada).
+    pub hints: f32,
+    pub merged_status: f32,
+}
+
+impl BandFrac {
+    pub fn of(b: Bands) -> Self {
+        let f = |v: bool| if v { 1.0 } else { 0.0 };
+        Self {
+            tabs_in_title: f(b.tabs_in_title),
+            menubar: f(b.menubar),
+            tabs_below: f(b.tabs_below),
+            hints: f(b.hints && !b.merged_status),
+            merged_status: f(b.merged_status),
+        }
+    }
+
+    pub fn lerp(self, to: Self, t: f32) -> Self {
+        let m = |a: f32, b: f32| a + (b - a) * t;
+        Self {
+            tabs_in_title: m(self.tabs_in_title, to.tabs_in_title),
+            menubar: m(self.menubar, to.menubar),
+            tabs_below: m(self.tabs_below, to.tabs_below),
+            hints: m(self.hints, to.hints),
+            merged_status: m(self.merged_status, to.merged_status),
+        }
+    }
+}
+
+/// Como `frame`, pero con bandas a medio aparecer/desaparecer: cada una ocupa la
+/// fracción de su altura que diga `f`, en vez de saltar.
+pub fn frame_frac(w: f32, h: f32, f: BandFrac) -> Frame {
+    frame_with(
+        w,
+        h,
+        MENUBAR_H * f.menubar,
+        TABS_BELOW_H * f.tabs_below,
+        HINTS_H * f.hints,
+        STATUS_H + (STATUS_MERGED_H - STATUS_H) * f.merged_status,
+    )
+}
+
 pub fn frame(w: f32, h: f32, bands: Bands) -> Frame {
+    frame_with(
+        w,
+        h,
+        if bands.menubar { MENUBAR_H } else { 0.0 },
+        if bands.tabs_below { TABS_BELOW_H } else { 0.0 },
+        if bands.hints && !bands.merged_status { HINTS_H } else { 0.0 },
+        if bands.merged_status { STATUS_MERGED_H } else { STATUS_H },
+    )
+}
+
+fn frame_with(w: f32, h: f32, menubar_h: f32, tabs_h: f32, hints_h: f32, status_h: f32) -> Frame {
     let titlebar = Rect::new(0.0, 0.0, w, TITLEBAR_H);
     let close = Rect::new(w - CAPTION_BTN_W, 0.0, w, TITLEBAR_H);
     let max = Rect::new(close.left - CAPTION_BTN_W, 0.0, close.left, TITLEBAR_H);
@@ -117,28 +179,23 @@ pub fn frame(w: f32, h: f32, bands: Bands) -> Frame {
     let settings_btn = Rect::new(min.left - SETTINGS_BTN_W, 0.0, min.left, TITLEBAR_H);
 
     let mut y = TITLEBAR_H;
-    let menubar = if bands.menubar {
-        let r = Rect::new(0.0, y, w, y + MENUBAR_H);
-        y += MENUBAR_H;
+    let menubar = if menubar_h > 0.0 {
+        let r = Rect::new(0.0, y, w, y + menubar_h);
+        y += menubar_h;
         r
     } else {
         Rect::default()
     };
-    let tabs_below = if bands.tabs_below {
-        let r = Rect::new(0.0, y, w, y + TABS_BELOW_H);
-        y += TABS_BELOW_H;
+    let tabs_below = if tabs_h > 0.0 {
+        let r = Rect::new(0.0, y, w, y + tabs_h);
+        y += tabs_h;
         r
     } else {
         Rect::default()
     };
 
-    let status_h = if bands.merged_status { STATUS_MERGED_H } else { STATUS_H };
     let status = Rect::new(0.0, (h - status_h).max(y), w, h);
-    let hints = if bands.hints && !bands.merged_status {
-        Rect::new(0.0, (status.top - HINTS_H).max(y), w, status.top)
-    } else {
-        Rect::default()
-    };
+    let hints = if hints_h > 0.0 { Rect::new(0.0, (status.top - hints_h).max(y), w, status.top) } else { Rect::default() };
     let body_bottom = if hints.is_empty() { status.top } else { hints.top };
     let body = Rect::new(0.0, y, w, body_bottom.max(y));
 
@@ -157,9 +214,25 @@ pub fn visible_lines(body: Rect) -> usize {
     (((body.height() - TEXT_PAD_T).max(0.0)) / LINE_H).floor().max(1.0) as usize
 }
 
+/// Tamaño mínimo de la ventana principal en DIPs (`WM_GETMINMAXINFO`): por debajo de
+/// esto la barra de título ya no tiene sitio para icono + pestañas + botones, ni el
+/// cuerpo para un par de líneas con la barra de estado.
+pub const MIN_WINDOW_W: f32 = 480.0;
+pub const MIN_WINDOW_H: f32 = 320.0;
+
+/// Ancho mínimo al que se encogen las pestañas cuando no caben todas a su ancho
+/// natural: aún deja ver unas letras del nombre y la ✕.
+pub const TAB_MIN_W: f32 = 72.0;
+/// Botones ‹ › que aparecen a los lados de la fila cuando ni encogidas caben todas.
+pub const TAB_SCROLL_W: f32 = 20.0;
+/// Hueco libre que se reserva a la derecha de las pestañas de la barra de título para
+/// poder arrastrar la ventana aunque haya muchas pestañas abiertas.
+pub const TITLE_DRAG_MIN: f32 = 40.0;
+
 /// Geometría de una pestaña ya colocada.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TabGeom {
+    /// Rectángulo que ocupa de verdad (encogido mientras entra/sale animada).
     pub rect: Rect,
     /// Dónde empieza el nombre y cuánto ancho tiene disponible (se recorta con «…»).
     pub name_x: f32,
@@ -169,37 +242,115 @@ pub struct TabGeom {
     pub close: Rect,
 }
 
+/// Una pestaña a colocar: ancho medido del nombre, si lleva ●, y escala horizontal
+/// (`1.0` normal; entre 0 y 1 mientras crece al abrirse o encoge al cerrarse).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TabSlot {
+    pub name_w: f32,
+    pub dirty: bool,
+    pub scale: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TabsLayout {
+    /// Una entrada por `TabSlot`; `None` si queda fuera de la parte visible.
+    pub tabs: Vec<Option<TabGeom>>,
+    pub plus: Rect,
+    /// Botones ‹ / › (solo si hay pestañas ocultas hacia ese lado).
+    pub scroll_left: Option<Rect>,
+    pub scroll_right: Option<Rect>,
+}
+
+fn tab_fixed(dirty: bool, dot_w: f32) -> f32 {
+    let dot_extra = if dirty { TAB_INNER_GAP + dot_w } else { 0.0 };
+    TAB_PAD_L + dot_extra + TAB_INNER_GAP + TAB_CLOSE + TAB_PAD_R
+}
+
 /// Coloca las pestañas de izquierda a derecha empezando en `x0`, con su borde
-/// inferior en `bottom`. `name_w[i]` es el ancho medido del nombre, `dirty[i]` si
-/// lleva ●, `dot_w` el ancho medido de «●». Se detiene (sin dibujar a medias) al
-/// llegar a `max_right`. Devuelve también el rectángulo del botón `+`.
-pub fn tabs(x0: f32, bottom: f32, max_right: f32, name_w: &[f32], dirty: &[bool], dot_w: f32) -> (Vec<TabGeom>, Rect) {
-    let mut out = Vec::with_capacity(name_w.len());
-    let mut x = x0;
+/// inferior en `bottom`, sin pasar nunca de `max_right` (ni ellas ni el botón `+`).
+/// Si no caben a su ancho natural se encogen todas por igual (hasta `TAB_MIN_W`); si
+/// ni así caben, se muestra el tramo que contiene `focus` (la pestaña activa) con
+/// botones ‹ › a los lados.
+pub fn tabs_fit(x0: f32, bottom: f32, max_right: f32, slots: &[TabSlot], focus: usize, dot_w: f32) -> TabsLayout {
     let top = bottom - TAB_H;
-    for (i, &nw) in name_w.iter().enumerate() {
-        let dot_extra = if dirty.get(i).copied().unwrap_or(false) { TAB_INNER_GAP + dot_w } else { 0.0 };
-        let fixed = TAB_PAD_L + dot_extra + TAB_INNER_GAP + TAB_CLOSE + TAB_PAD_R;
-        let width = (fixed + nw).min(TAB_MAX_W);
-        if x + width > max_right {
-            break;
+    let natural: Vec<f32> = slots.iter().map(|s| (tab_fixed(s.dirty, dot_w) + s.name_w).min(TAB_MAX_W)).collect();
+    let scale = |i: usize| slots[i].scale.clamp(0.0, 1.0);
+    let plus_space = PLUS_ML + PLUS_W;
+    let avail = (max_right - x0 - plus_space).max(0.0);
+    let row_w = |cap: f32, range: std::ops::Range<usize>| -> f32 {
+        let sum: f32 = range.map(|i| (natural[i].min(cap) + TAB_GAP) * scale(i)).sum();
+        (sum - TAB_GAP).max(0.0)
+    };
+
+    let n = slots.len();
+    let (cap, first, last, overflow) = if row_w(TAB_MAX_W, 0..n) <= avail {
+        (TAB_MAX_W, 0, n, false)
+    } else if row_w(TAB_MIN_W, 0..n) <= avail {
+        let (mut lo, mut hi) = (TAB_MIN_W, TAB_MAX_W);
+        for _ in 0..24 {
+            let mid = (lo + hi) / 2.0;
+            if row_w(mid, 0..n) <= avail { lo = mid } else { hi = mid }
         }
-        let rect = Rect::new(x, top, x + width, bottom);
-        let close_left = rect.right - TAB_PAD_R - TAB_CLOSE;
+        (lo, 0, n, false)
+    } else {
+        let avail2 = (avail - TAB_SCROLL_W * 2.0).max(0.0);
+        let k = (((avail2 + TAB_GAP) / (TAB_MIN_W + TAB_GAP)).floor() as usize).clamp(1, n.max(1));
+        let focus = focus.min(n.saturating_sub(1));
+        let first = if focus < k { 0 } else { focus + 1 - k };
+        let first = first.min(n.saturating_sub(k));
+        (TAB_MIN_W, first, (first + k).min(n), true)
+    };
+
+    let mut out = vec![None; n];
+    let mut x = if overflow { x0 + TAB_SCROLL_W } else { x0 };
+    let mut last_gap = 0.0;
+    for (i, slot) in slots.iter().enumerate().take(last).skip(first) {
+        let s = scale(i);
+        let content_w = natural[i].min(cap);
+        let fixed = tab_fixed(slot.dirty, dot_w);
+        let rect = Rect::new(x, top, x + content_w * s, bottom);
+        let content_right = rect.left + content_w;
+        let close_left = content_right - TAB_PAD_R - TAB_CLOSE;
         let close_top = top + (TAB_H - TAB_CLOSE) / 2.0;
         let close = Rect::new(close_left, close_top, close_left + TAB_CLOSE, close_top + TAB_CLOSE);
         let name_x = rect.left + TAB_PAD_L;
-        let name_w = (width - fixed).max(0.0);
-        let dot_x = if dot_extra > 0.0 { Some(name_x + name_w + TAB_INNER_GAP) } else { None };
-        out.push(TabGeom { rect, name_x, name_w, dot_x, close });
-        x = rect.right + TAB_GAP;
+        let name_w = (content_w - fixed).max(0.0);
+        let dot_x = if slot.dirty { Some(name_x + name_w + TAB_INNER_GAP) } else { None };
+        out[i] = Some(TabGeom { rect, name_x, name_w, dot_x, close });
+        last_gap = TAB_GAP * s;
+        x = rect.right + last_gap;
     }
-    let plus_left = (x - TAB_GAP) + PLUS_ML;
+    let tabs_end = x - last_gap;
+
+    let (scroll_left, scroll_right, plus_left) = if overflow {
+        let l = Rect::new(x0, top, x0 + TAB_SCROLL_W, bottom);
+        let r = Rect::new(tabs_end, top, tabs_end + TAB_SCROLL_W, bottom);
+        (if first > 0 { Some(l) } else { None }, if last < n { Some(r) } else { None }, r.right + PLUS_ML)
+    } else {
+        (None, None, tabs_end + PLUS_ML)
+    };
+    let plus_left = plus_left.min(max_right - PLUS_W).max(x0);
     // .plus{align-self:center;margin-top:2px}: centrado en la fila de 34 px, 1 px más abajo.
     let row_top = bottom - TITLEBAR_H.max(TAB_H);
     let plus_top = row_top + (TITLEBAR_H - PLUS_H) / 2.0 + 1.0;
     let plus = Rect::new(plus_left, plus_top, plus_left + PLUS_W, plus_top + PLUS_H);
-    (out, plus)
+    TabsLayout { tabs: out, plus, scroll_left, scroll_right }
+}
+
+/// Rectángulo final de un popup de `w`×`h` que se quiere abrir con su esquina
+/// superior izquierda en `(x, y)`, sin salirse de `bounds`: se desplaza a la izquierda
+/// si no cabe a la derecha, y se abre hacia arriba (terminando en `flip_y`) si no cabe
+/// por debajo.
+pub fn clamp_popup(x: f32, y: f32, w: f32, h: f32, flip_y: f32, bounds: Rect) -> Rect {
+    let left = x.min(bounds.right - w).max(bounds.left);
+    let top = if y + h <= bounds.bottom {
+        y
+    } else if flip_y - h >= bounds.top {
+        flip_y - h
+    } else {
+        (bounds.bottom - h).max(bounds.top)
+    };
+    Rect::new(left, top, left + w, top + h)
 }
 
 #[cfg(test)]
@@ -243,6 +394,18 @@ mod tests {
     }
 
     #[test]
+    fn frame_frac_matches_frame_at_the_ends_and_retargets_from_the_middle() {
+        let a = Bands { hints: true, ..Default::default() };
+        let b = Bands { hints: true, menubar: true, ..Default::default() };
+        assert_eq!(frame_frac(920.0, 600.0, BandFrac::of(a)), frame(920.0, 600.0, a));
+        assert_eq!(frame_frac(920.0, 600.0, BandFrac::of(b)), frame(920.0, 600.0, b));
+        let half = BandFrac::of(a).lerp(BandFrac::of(b), 0.5);
+        assert_eq!(frame_frac(920.0, 600.0, half).menubar.height(), MENUBAR_H / 2.0);
+        // Volver a `a` desde la mitad empieza en la mitad, no en `b`.
+        assert_eq!(half.lerp(BandFrac::of(a), 0.0).menubar, 0.5);
+    }
+
+    #[test]
     fn tiny_window_never_inverts_rects() {
         let f = frame(100.0, 40.0, Bands { menubar: true, tabs_below: true, hints: true, ..Default::default() });
         assert!(f.body.height() >= 0.0);
@@ -256,36 +419,93 @@ mod tests {
         assert!(gutter_width(100_000, 7.8) > 52.0);
     }
 
+    fn slots(names: &[f32], dirty: bool) -> Vec<TabSlot> {
+        names.iter().map(|&name_w| TabSlot { name_w, dirty, scale: 1.0 }).collect()
+    }
+
+    fn geoms(l: &TabsLayout) -> Vec<TabGeom> {
+        l.tabs.iter().flatten().copied().collect()
+    }
+
     #[test]
     fn tab_width_is_padding_plus_name_plus_close() {
-        let (t, _) = tabs(36.0, 34.0, 700.0, &[50.0], &[false], 6.0);
+        let l = tabs_fit(36.0, 34.0, 700.0, &slots(&[50.0], false), 0, 6.0);
+        let t = geoms(&l);
         assert_eq!(t[0].rect, Rect::new(36.0, 6.0, 36.0 + 12.0 + 50.0 + 6.0 + 18.0 + 6.0, 34.0));
         assert_eq!(t[0].name_x, 48.0);
         assert_eq!(t[0].close.width(), 18.0);
         assert_eq!(t[0].close.right, t[0].rect.right - 6.0);
         assert!(t[0].dot_x.is_none());
+        assert!(l.scroll_left.is_none() && l.scroll_right.is_none());
     }
 
     #[test]
     fn dirty_tab_reserves_room_for_the_dot() {
-        let (t, _) = tabs(36.0, 34.0, 700.0, &[50.0], &[true], 6.0);
+        let t = geoms(&tabs_fit(36.0, 34.0, 700.0, &slots(&[50.0], true), 0, 6.0));
         assert_eq!(t[0].rect.width(), 12.0 + 50.0 + 6.0 + 6.0 + 6.0 + 18.0 + 6.0);
         assert_eq!(t[0].dot_x, Some(48.0 + 50.0 + 6.0));
     }
 
     #[test]
     fn long_names_are_capped_at_190() {
-        let (t, _) = tabs(36.0, 34.0, 700.0, &[400.0], &[false], 6.0);
+        let t = geoms(&tabs_fit(36.0, 34.0, 700.0, &slots(&[400.0], false), 0, 6.0));
         assert_eq!(t[0].rect.width(), 190.0);
         assert_eq!(t[0].name_w, 190.0 - (12.0 + 6.0 + 18.0 + 6.0));
     }
 
     #[test]
-    fn tabs_stop_before_max_right_and_plus_follows_last() {
-        let (t, plus) = tabs(36.0, 34.0, 250.0, &[50.0, 50.0, 50.0], &[false; 3], 6.0);
-        assert_eq!(t.len(), 2);
+    fn plus_follows_the_last_tab() {
+        let l = tabs_fit(36.0, 34.0, 700.0, &slots(&[50.0, 50.0], false), 0, 6.0);
+        let t = geoms(&l);
         assert_eq!(t[1].rect.left, t[0].rect.right + 2.0);
-        assert_eq!(plus.left, t[1].rect.right + 2.0);
-        assert_eq!(plus.height(), 24.0);
+        assert_eq!(l.plus.left, t[1].rect.right + 2.0);
+        assert_eq!(l.plus.height(), 24.0);
+    }
+
+    #[test]
+    fn crowded_tabs_shrink_instead_of_disappearing() {
+        let l = tabs_fit(36.0, 34.0, 500.0, &slots(&[150.0; 4], false), 0, 6.0);
+        let t = geoms(&l);
+        assert_eq!(t.len(), 4);
+        assert!(t[0].rect.width() < TAB_MAX_W && t[0].rect.width() >= TAB_MIN_W);
+        assert!(l.plus.right <= 500.0 + 0.01);
+        assert!(l.scroll_left.is_none() && l.scroll_right.is_none());
+    }
+
+    #[test]
+    fn overflowing_tabs_keep_the_focused_one_visible_and_stay_in_bounds() {
+        let many = slots(&[150.0; 20], false);
+        for focus in [0, 7, 19] {
+            let l = tabs_fit(36.0, 34.0, 400.0, &many, focus, 6.0);
+            assert!(l.tabs[focus].is_some(), "la pestaña {focus} debe verse");
+            for g in geoms(&l) {
+                assert!(g.rect.right <= 400.0 && g.rect.width() >= TAB_MIN_W - 0.01);
+            }
+            assert!(l.plus.right <= 400.0 + 0.01);
+        }
+        let l = tabs_fit(36.0, 34.0, 400.0, &many, 19, 6.0);
+        assert!(l.scroll_left.is_some() && l.scroll_right.is_none());
+        let l = tabs_fit(36.0, 34.0, 400.0, &many, 0, 6.0);
+        assert!(l.scroll_left.is_none() && l.scroll_right.is_some());
+    }
+
+    #[test]
+    fn zero_scale_tab_takes_no_room() {
+        let mut s = slots(&[50.0, 50.0], false);
+        s[0].scale = 0.0;
+        let l = tabs_fit(36.0, 34.0, 700.0, &s, 1, 6.0);
+        let t = geoms(&l);
+        assert_eq!(t[0].rect.width(), 0.0);
+        assert_eq!(t[1].rect.left, 36.0);
+    }
+
+    #[test]
+    fn popups_are_clamped_inside_the_bounds() {
+        let b = Rect::new(0.0, 0.0, 400.0, 300.0);
+        assert_eq!(clamp_popup(10.0, 10.0, 100.0, 50.0, 10.0, b), Rect::new(10.0, 10.0, 110.0, 60.0));
+        let r = clamp_popup(380.0, 280.0, 100.0, 50.0, 280.0, b);
+        assert_eq!(r, Rect::new(300.0, 230.0, 400.0, 280.0));
+        let r = clamp_popup(10.0, 20.0, 100.0, 500.0, 20.0, b);
+        assert_eq!(r.top, 0.0);
     }
 }
