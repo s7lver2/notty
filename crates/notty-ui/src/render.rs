@@ -986,7 +986,13 @@ impl Renderer {
     /// la maqueta: barra de título propia (icono, pestañas o título, botones), barra
     /// de menús, pestañas debajo, canal de números, documento y barra de atajos. La
     /// barra de estado / prompts y la vista raw llegan en las Tasks 8-9.
-    pub fn paint(&mut self, ws: &Workspace, ui: &UiConfig, view: &ViewState) {
+    pub fn paint(
+        &mut self,
+        ws: &Workspace,
+        ui: &UiConfig,
+        view: &ViewState,
+        ligature_overrides: &std::collections::BTreeMap<String, String>,
+    ) {
         self.hits.clear();
         self.pending_dropdown = None;
         let pal_mixed;
@@ -1073,6 +1079,8 @@ impl Renderer {
             } else {
                 Vec::new()
             };
+            let ligature_table =
+                if ui.ligatures { crate::ligature::resolve(ligature_overrides) } else { Vec::new() };
             // Un pincel por color de `syntax::NAMES`, creado la primera vez que hace falta.
             let mut syn_brushes: Vec<Option<ID2D1SolidColorBrush>> = vec![None; crate::syntax::NAMES.len()];
             let mut y = frame.body.top + layout::TEXT_PAD_T;
@@ -1081,7 +1089,11 @@ impl Renderer {
                 let full_end = if line + 1 < total_lines { buf.line_start(line + 1) } else { buf.len_chars() };
                 let text: String = buf.slice(start..full_end).trim_end_matches(['\r', '\n']).to_string();
                 let text_end = start + text.chars().count();
-                let w16 = wide(&text);
+                // Ligaduras: mismo número de caracteres que `text` (rellena con espacios),
+                // así que las posiciones que calcula `hit_test_x` sobre `text` (cursor,
+                // selección, búsqueda) siguen valiendo tal cual sobre este layout.
+                let display = if ligature_table.is_empty() { text.clone() } else { crate::ligature::display_text(&text, &ligature_table) };
+                let w16 = wide(&display);
 
                 let text_layout = if w16.is_empty() {
                     None

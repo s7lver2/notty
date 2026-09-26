@@ -1427,7 +1427,8 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     if w.tour.is_some() {
                         w.renderer.hold_next_frame();
                     }
-                    w.renderer.paint(&w.ws, &ui, &view);
+                    let ligature_overrides = w.cfg.borrow().ligature_overrides.clone();
+                    w.renderer.paint(&w.ws, &ui, &view, &ligature_overrides);
                     if w.tour.is_some() {
                         // Se pinta último (capa por encima de todo lo demás), en una
                         // segunda pasada de dibujo sobre el mismo `ID2D1HwndRenderTarget`
