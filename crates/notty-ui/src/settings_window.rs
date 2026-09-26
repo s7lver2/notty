@@ -60,7 +60,8 @@ enum Hit {
     Close,
     Nav(usize),
     EditConfig,
-    OpenKeys,
+    /// Fila `row` (índice dentro de la sección activa), control `Link`.
+    Link(usize),
     /// Fila `row` (índice dentro de la sección activa), control `Toggle`.
     Toggle(usize),
     /// Fila `row`, opción `opt` de un `Seg`.
@@ -75,6 +76,7 @@ struct State {
     cfg: Rc<RefCell<Config>>,
     on_change: Box<dyn Fn()>,
     on_open_path: Box<dyn Fn(std::path::PathBuf)>,
+    on_repeat_tutorial: Box<dyn Fn()>,
     renderer: Renderer,
     active_section: usize,
     hover: Hit,
@@ -126,6 +128,7 @@ pub fn open(
     cfg: Rc<RefCell<Config>>,
     on_change: Box<dyn Fn()>,
     on_open_path: Box<dyn Fn(std::path::PathBuf)>,
+    on_repeat_tutorial: Box<dyn Fn()>,
 ) -> Result<()> {
     unsafe {
         let instance = GetModuleHandleW(None)?;
@@ -188,6 +191,7 @@ pub fn open(
             cfg,
             on_change,
             on_open_path,
+            on_repeat_tutorial,
             renderer,
             active_section: 0,
             hover: Hit::None,
@@ -370,8 +374,28 @@ fn handle_click(hwnd: HWND, st: &mut State, x: f32, y: f32) {
         Hit::EditConfig => {
             (st.on_open_path)(notty_config::default_path());
         }
-        Hit::OpenKeys => {
-            (st.on_open_path)(notty_config::default_path());
+        Hit::Link(row) => {
+            let action = crate::settings_model::sections(&st.cfg.borrow())[st.active_section].rows.get(row).and_then(
+                |r| match r {
+                    Row::Link { action, .. } => Some(*action),
+                    _ => None,
+                },
+            );
+            match action {
+                Some(crate::settings_model::LinkAction::OpenKeys) => (st.on_open_path)(notty_config::default_path()),
+                Some(crate::settings_model::LinkAction::RepeatTutorial) => {
+                    (st.on_repeat_tutorial)();
+                    unsafe {
+                        let _ = windows::Win32::UI::WindowsAndMessaging::PostMessageW(
+                            Some(hwnd),
+                            windows::Win32::UI::WindowsAndMessaging::WM_CLOSE,
+                            WPARAM(0),
+                            LPARAM(0),
+                        );
+                    }
+                }
+                None => {}
+            }
         }
         Hit::Toggle(row) => {
             toggle_row(st, row, hwnd);
@@ -637,19 +661,19 @@ fn paint(st: &mut State) {
                 r.text(keys, &r.fonts().mono_11, Rect::new(kr.left + 5.0, kr.top, kr.right - 5.0, kr.bottom), pal.text_2);
                 ry += rr.height() + 3.0;
             }
-            Row::Link { title, desc, label } => {
+            Row::Link { title, desc, label, .. } => {
                 let rr = Rect::new(row_left, ry, row_right, ry + row_height(desc));
                 r.fill_round(rr, 6.0, pal.surface_2);
                 draw_row_text(r, rr, title, desc, pal);
                 let lw = r.measure(label, &r.fonts().ui_13);
                 let lr = Rect::new(rr.right - 12.0 - lw, rr.top, rr.right - 12.0, rr.bottom);
                 r.text(label, &r.fonts().ui_13, lr, pal.accent);
-                if st.hover == Hit::OpenKeys {
+                if st.hover == Hit::Link(i) {
                     // Mismo subrayado al pasar el ratón que el pie de la navegación.
                     let uy = (lr.top + lr.bottom) / 2.0 + 8.0;
                     r.stroke_line(lr.left, uy, lr.right, uy, 1.0, pal.accent);
                 }
-                st.hits.push((rr, Hit::OpenKeys));
+                st.hits.push((rr, Hit::Link(i)));
                 ry += rr.height() + 3.0;
             }
         }

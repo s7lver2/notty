@@ -86,6 +86,11 @@ struct WindowState {
     tab_switch_anim: Option<crate::Anim>,
     /// Si el `SetTimer` de animación (`ID_ANIM_TIMER`) está corriendo.
     anim_timer_running: bool,
+    /// Recorrido guiado en curso (Task 4 del plan de tutorial), `None` en reposo.
+    /// Mientras hay uno, `WM_KEYDOWN`/`WM_LBUTTONDOWN` se lo ofrecen antes que a
+    /// cualquier otro manejador, y `WM_PAINT` lo dibuja el último (por encima de
+    /// todo lo demás).
+    tour: Option<crate::tour::Tour>,
 }
 
 impl WindowState {
@@ -235,7 +240,23 @@ fn open_settings(w: &WindowState, hwnd: HWND) {
             let _ = InvalidateRect(Some(hwnd), None, false);
         }),
         Box::new(move |path| open_config_as_document(hwnd, path)),
+        Box::new(move || start_tour(hwnd)),
     );
+}
+
+/// Arranca el recorrido guiado sobre la ventana `hwnd`: Ajustes → Ayuda → "Repetir
+/// tutorial" y el paso Listo de `welcome_window` llegan aquí. Vuelve a buscar el
+/// `WindowState` por `GWLP_USERDATA` (igual que `open_config_as_document`) porque
+/// quien llama a esto es un `Box<dyn Fn()>` que vive más allá del `&WindowState`
+/// original.
+fn start_tour(hwnd: HWND) {
+    unsafe {
+        let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState;
+        if let Some(w) = ptr.as_mut() {
+            w.tour = Some(crate::tour::Tour::start(w.animations_enabled));
+            let _ = InvalidateRect(Some(hwnd), None, false);
+        }
+    }
 }
 
 /// Guarda el documento activo, pero antes comprueba si el archivo cambió en disco
@@ -563,6 +584,7 @@ fn run_inner(
             popup_open_anim: None,
             tab_switch_anim: None,
             anim_timer_running: false,
+            tour: None,
         });
         let ptr = Box::into_raw(window_state);
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, ptr as isize);
@@ -573,6 +595,26 @@ fn run_inner(
         let _ = ShowWindow(hwnd, SW_SHOW);
         let _ = SetTimer(Some(hwnd), ID_AUTOSAVE_TIMER, 1000, None);
         let _ = SetTimer(Some(hwnd), ID_IPC_TIMER, 150, None);
+
+        // Primer arranque: la ventana de bienvenida (no la del recorrido directamente,
+        // ver Task 4 Step 5 del plan de tutorial) — no modal, flota sobre esta ventana
+        // sin bloquear su bucle de mensajes (que es justo el que la va a atender).
+        if let Some(w) = ptr.as_ref() {
+            if !w.cfg.borrow().first_run_done {
+                let cfg_for_welcome = w.cfg.clone();
+                let cfg_for_theme = w.cfg.clone();
+                let _ = crate::welcome_window::show(
+                    hwnd,
+                    cfg_for_welcome,
+                    Box::new(move || {
+                        let dark = crate::is_dark(cfg_for_theme.borrow().ui.theme, system_uses_dark_mode());
+                        apply_dark_mode(hwnd, dark);
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                    }),
+                    Box::new(move || start_tour(hwnd)),
+                );
+            }
+        }
 
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
@@ -678,6 +720,15 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     let ui = w.render_ui();
                     let view = w.view_state(hwnd);
                     w.renderer.paint(&w.ws, &ui, &view);
+                    if w.tour.is_some() {
+                        // Se pinta último (capa por encima de todo lo demás), en una
+                        // segunda pasada de dibujo sobre el mismo `ID2D1HwndRenderTarget`
+                        // (`begin_overlay` no repite el `Clear`, así que no borra lo que
+                        // `paint` ya dejó).
+                        let frame = w.renderer.current_frame(&ui, w.ws.len(), w.menu_bar_visible());
+                        let tour = w.tour.as_mut().expect("comprobado con is_some justo arriba");
+                        tour.draw(&w.renderer, &frame, view.dark, std::time::Instant::now());
+                    }
                 }
                 let _ = ValidateRect(Some(hwnd), None);
                 LRESULT(0)
@@ -848,6 +899,19 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             WM_KEYDOWN => {
                 if let Some(w) = ptr.as_mut() {
                     let vk = wparam.0 as u32;
+
+                    // El recorrido guiado, si hay uno activo, se queda con todas las
+                    // teclas antes que cualquier otro manejador (Esc lo cierra; el
+                    // resto no hace nada, pero no debe llegarle a la edición de
+                    // debajo mientras el foco está puesto).
+                    if let Some(tour) = w.tour.as_mut() {
+                        if tour.handle_key(vk) == crate::tour::TourInput::Closed {
+                            w.tour = None;
+                        }
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                        return LRESULT(0);
+                    }
+
                     let alt_down = (GetKeyState(VK_MENU.0 as i32) as u16 & 0x8000) != 0;
                     let mods = Modifiers {
                         ctrl: (GetKeyState(VK_CONTROL.0 as i32) as u16 & 0x8000) != 0,
@@ -1032,6 +1096,22 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     let (x, y) = point_from_lparam(lparam);
                     let scale = w.renderer.scale();
                     let (x, y) = (x / scale, y / scale);
+
+                    // Igual que en `WM_KEYDOWN`: con el recorrido activo, el clic es
+                    // suyo antes que de cualquier `Hit` de la ventana (clic fuera del
+                    // foco lo cierra; dentro, no hace nada — no le roba el clic a la
+                    // app de debajo).
+                    if w.tour.is_some() {
+                        let ui = w.render_ui();
+                        let frame = w.renderer.current_frame(&ui, w.ws.len(), w.menu_bar_visible());
+                        let tour = w.tour.as_mut().expect("comprobado con is_some justo arriba");
+                        if tour.handle_click(x, y, &frame, std::time::Instant::now()) == crate::tour::TourInput::Closed {
+                            w.tour = None;
+                        }
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                        return LRESULT(0);
+                    }
+
                     let hit = w.renderer.hit(x, y);
                     match hit {
                         Hit::Min | Hit::Close => {

@@ -46,9 +46,19 @@ pub enum Row {
     /// Atajo de solo lectura (no se puede reasignar desde aquí): `.kbd`.
     Kbd { title: &'static str, keys: &'static str },
     /// Enlace de acción, no de ajuste: `.link`.
-    Link { title: &'static str, desc: &'static str, label: &'static str },
+    Link { title: &'static str, desc: &'static str, label: &'static str, action: LinkAction },
     /// Cabecera de subgrupo dentro de una sección: `.sgroup`.
     Group(&'static str),
+}
+
+/// Qué hace un `Row::Link` al pulsarlo — hacía falta distinguirlo en cuanto hubo más
+/// de un enlace de acción en toda la ventana (antes solo existía "Abrir [keys]").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkAction {
+    OpenKeys,
+    /// Ajustes → Ayuda → "Repetir tutorial": arranca el recorrido guiado directamente
+    /// (no vuelve a mostrar la ventana de bienvenida).
+    RepeatTutorial,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -131,6 +141,7 @@ const TECLADO: &[Row] = &[
         title: "Todos los atajos",
         desc: "Cada acción es un comando con nombre. Reasigna cualquiera en config.toml, sección [keys].",
         label: "Abrir [keys]",
+        action: LinkAction::OpenKeys,
     },
 ];
 
@@ -166,12 +177,20 @@ const ATAJO_GLOBAL: &[Row] = &[
     Row::Toggle { title: "Iniciar con Windows", desc: "", key: SettingKey::StartWithWindows },
 ];
 
+const AYUDA: &[Row] = &[Row::Link {
+    title: "Repetir tutorial",
+    desc: "Vuelve a mostrar el recorrido guiado por la ventana principal (no la ventana de bienvenida).",
+    label: "Repetir tutorial",
+    action: LinkAction::RepeatTutorial,
+}];
+
 pub const SECTIONS: &[Section] = &[
     Section { id: "apariencia", name: "Apariencia", rows: APARIENCIA },
     Section { id: "ventana", name: "Ventana", rows: VENTANA },
     Section { id: "teclado", name: "Teclado", rows: TECLADO },
     Section { id: "archivos", name: "Archivos", rows: ARCHIVOS },
     Section { id: "atajo_global", name: "Atajo global", rows: ATAJO_GLOBAL },
+    Section { id: "ayuda", name: "Ayuda", rows: AYUDA },
 ];
 
 /// Las secciones son estáticas (no dependen de `cfg`): el parámetro está para que la
@@ -231,7 +250,12 @@ mod tests {
     #[test]
     fn archivos_and_atajo_global_sections_exist() {
         let names: Vec<&str> = SECTIONS.iter().map(|s| s.name).collect();
-        assert_eq!(names, ["Apariencia", "Ventana", "Teclado", "Archivos", "Atajo global"]);
+        assert_eq!(names, ["Apariencia", "Ventana", "Teclado", "Archivos", "Atajo global", "Ayuda"]);
+    }
+
+    #[test]
+    fn ayuda_has_the_repeat_tutorial_link() {
+        assert!(matches!(AYUDA[0], Row::Link { action: LinkAction::RepeatTutorial, .. }));
     }
 
     #[test]
