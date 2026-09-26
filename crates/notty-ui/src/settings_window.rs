@@ -61,10 +61,8 @@ enum Hit {
     Nav(usize),
     EditConfig,
     /// Clic en un `Row::Link` de la sección activa (`row` = su índice): qué acción
-    /// dispara se decide en `handle_click` según el `label` de esa fila (p.ej.
-    /// "Abrir [keys]" reutiliza `on_open_path`; "Buscar ahora" llama a
-    /// `on_check_updates`, Task 4 del plan del actualizador).
-    OpenLink(usize),
+    /// dispara se decide en `handle_click` según el `action` de esa fila.
+    Link(usize),
     /// Fila `row` (índice dentro de la sección activa), control `Toggle`.
     Toggle(usize),
     /// Fila `row`, opción `opt` de un `Seg`.
@@ -83,6 +81,7 @@ struct State {
     /// dispara el mismo chequeo que el automático, pero en caliente y siempre con
     /// un mensaje (nunca en silencio, a diferencia del chequeo de arranque).
     on_check_updates: Box<dyn Fn()>,
+    on_repeat_tutorial: Box<dyn Fn()>,
     renderer: Renderer,
     active_section: usize,
     hover: Hit,
@@ -135,6 +134,7 @@ pub fn open(
     on_change: Box<dyn Fn()>,
     on_open_path: Box<dyn Fn(std::path::PathBuf)>,
     on_check_updates: Box<dyn Fn()>,
+    on_repeat_tutorial: Box<dyn Fn()>,
 ) -> Result<()> {
     unsafe {
         let instance = GetModuleHandleW(None)?;
@@ -198,6 +198,7 @@ pub fn open(
             on_change,
             on_open_path,
             on_check_updates,
+            on_repeat_tutorial,
             renderer,
             active_section: 0,
             hover: Hit::None,
@@ -380,14 +381,28 @@ fn handle_click(hwnd: HWND, st: &mut State, x: f32, y: f32) {
         Hit::EditConfig => {
             (st.on_open_path)(notty_config::default_path());
         }
-        Hit::OpenLink(row) => {
-            let label = crate::settings_model::sections(&st.cfg.borrow())[st.active_section]
-                .rows
-                .get(row)
-                .and_then(|r| if let Row::Link { label, .. } = r { Some(*label) } else { None });
-            match label {
-                Some("Buscar ahora") => (st.on_check_updates)(),
-                _ => (st.on_open_path)(notty_config::default_path()),
+        Hit::Link(row) => {
+            let action = crate::settings_model::sections(&st.cfg.borrow())[st.active_section].rows.get(row).and_then(
+                |r| match r {
+                    Row::Link { action, .. } => Some(*action),
+                    _ => None,
+                },
+            );
+            match action {
+                Some(crate::settings_model::LinkAction::OpenKeys) => (st.on_open_path)(notty_config::default_path()),
+                Some(crate::settings_model::LinkAction::CheckUpdatesNow) => (st.on_check_updates)(),
+                Some(crate::settings_model::LinkAction::RepeatTutorial) => {
+                    (st.on_repeat_tutorial)();
+                    unsafe {
+                        let _ = windows::Win32::UI::WindowsAndMessaging::PostMessageW(
+                            Some(hwnd),
+                            windows::Win32::UI::WindowsAndMessaging::WM_CLOSE,
+                            WPARAM(0),
+                            LPARAM(0),
+                        );
+                    }
+                }
+                None => {}
             }
         }
         Hit::Toggle(row) => {
@@ -657,19 +672,19 @@ fn paint(st: &mut State) {
                 r.text(keys, &r.fonts().mono_11, Rect::new(kr.left + 5.0, kr.top, kr.right - 5.0, kr.bottom), pal.text_2);
                 ry += rr.height() + 3.0;
             }
-            Row::Link { title, desc, label } => {
+            Row::Link { title, desc, label, .. } => {
                 let rr = Rect::new(row_left, ry, row_right, ry + row_height(desc));
                 r.fill_round(rr, 6.0, pal.surface_2);
                 draw_row_text(r, rr, title, desc, pal);
                 let lw = r.measure(label, &r.fonts().ui_13);
                 let lr = Rect::new(rr.right - 12.0 - lw, rr.top, rr.right - 12.0, rr.bottom);
                 r.text(label, &r.fonts().ui_13, lr, pal.accent);
-                if st.hover == Hit::OpenLink(i) {
+                if st.hover == Hit::Link(i) {
                     // Mismo subrayado al pasar el ratón que el pie de la navegación.
                     let uy = (lr.top + lr.bottom) / 2.0 + 8.0;
                     r.stroke_line(lr.left, uy, lr.right, uy, 1.0, pal.accent);
                 }
-                st.hits.push((rr, Hit::OpenLink(i)));
+                st.hits.push((rr, Hit::Link(i)));
                 ry += rr.height() + 3.0;
             }
         }

@@ -5,9 +5,9 @@
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Direct2D::Common::{D2D1_COLOR_F, D2D_RECT_F, D2D_SIZE_U};
 use windows::Win32::Graphics::Direct2D::{
-    D2D1_BRUSH_PROPERTIES, D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_ELLIPSE, D2D1_FACTORY_TYPE_SINGLE_THREADED,
-    D2D1_HWND_RENDER_TARGET_PROPERTIES, D2D1_RENDER_TARGET_PROPERTIES, D2D1_ROUNDED_RECT, D2D1CreateFactory,
-    ID2D1Factory, ID2D1HwndRenderTarget, ID2D1SolidColorBrush,
+    D2D1_BRUSH_PROPERTIES, D2D1_COMBINE_MODE_EXCLUDE, D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_ELLIPSE,
+    D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_HWND_RENDER_TARGET_PROPERTIES, D2D1_RENDER_TARGET_PROPERTIES,
+    D2D1_ROUNDED_RECT, D2D1CreateFactory, ID2D1Factory, ID2D1HwndRenderTarget, ID2D1SolidColorBrush,
 };
 use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL,
@@ -352,6 +352,48 @@ impl Renderer {
         }
     }
 
+    /// `BeginDraw` sin `Clear`: para pintar una capa por encima de lo que ya se
+    /// dibujó en el `paint()` normal de esta misma pasada (el recorrido guiado,
+    /// ver `tour.rs`), en vez de repetir todo el dibujo del documento.
+    pub(crate) fn begin_overlay(&self) {
+        unsafe {
+            self.target.BeginDraw();
+        }
+    }
+
+    /// Vela oscura sobre `full` con un agujero de esquinas redondeadas en `hole`
+    /// (`tour.rs`, mockup: `box-shadow:0 0 0 2px #73b6fa,0 0 0 9999px rgba(...)`)
+    /// más el anillo de acento alrededor del agujero. Se resuelve con una resta de
+    /// geometrías D2D (rectángulo completo menos rectángulo redondeado) en vez de
+    /// cuatro franjas rectangulares, para que las esquinas del foco queden redondeadas
+    /// de verdad en vez de en escuadra.
+    pub(crate) fn fill_veil_with_hole(&self, full: Rect, hole: Rect, hole_radius: f32, veil: Rgba, ring: Rgba) {
+        unsafe {
+            let Ok(outer) = self._d2d.CreateRectangleGeometry(&rect_of(full)) else { return };
+            let Ok(inner) = self._d2d.CreateRoundedRectangleGeometry(&D2D1_ROUNDED_RECT {
+                rect: rect_of(hole),
+                radiusX: hole_radius,
+                radiusY: hole_radius,
+            }) else {
+                return;
+            };
+            let Ok(path) = self._d2d.CreatePathGeometry() else { return };
+            if let Ok(sink) = path.Open() {
+                let _ = outer.CombineWithGeometry(&inner, D2D1_COMBINE_MODE_EXCLUDE, None, 0.25, &sink);
+                let _ = sink.Close();
+            }
+            self.brush.SetColor(&color(veil.faded(self.fade.get())));
+            let _ = self.target.FillGeometry(&path, &self.brush, None);
+            self.brush.SetColor(&color(ring.faded(self.fade.get())));
+            self.target.DrawRoundedRectangle(
+                &D2D1_ROUNDED_RECT { rect: rect_of(hole), radiusX: hole_radius, radiusY: hole_radius },
+                &self.brush,
+                2.0,
+                None,
+            );
+        }
+    }
+
     pub fn end_paint(&self) {
         unsafe {
             let _ = self.target.EndDraw(None, None);
@@ -544,6 +586,15 @@ impl Renderer {
         let gutter_w =
             if ui.line_numbers && !is_raw { layout::gutter_width(total_lines, self.digit_width()) } else { 0.0 };
         (frame.body, gutter_w)
+    }
+
+    /// El `Frame` completo (todas las franjas, no solo `body`) para el tamaño y
+    /// config actuales: lo usa `tour.rs` para saber dónde está cada elemento
+    /// señalado, sin repetir la resolución de `Bands` que ya hace `paint`.
+    pub fn current_frame(&self, ui: &UiConfig, doc_count: usize, menu_bar_visible: bool) -> layout::Frame {
+        let (w, h) = self.size_dips();
+        let bands = Self::resolve_bands(ui, doc_count, menu_bar_visible);
+        layout::frame(w, h, bands)
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {

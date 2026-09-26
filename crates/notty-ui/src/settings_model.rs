@@ -47,9 +47,22 @@ pub enum Row {
     /// Atajo de solo lectura (no se puede reasignar desde aquí): `.kbd`.
     Kbd { title: &'static str, keys: &'static str },
     /// Enlace de acción, no de ajuste: `.link`.
-    Link { title: &'static str, desc: &'static str, label: &'static str },
+    Link { title: &'static str, desc: &'static str, label: &'static str, action: LinkAction },
     /// Cabecera de subgrupo dentro de una sección: `.sgroup`.
     Group(&'static str),
+}
+
+/// Qué hace un `Row::Link` al pulsarlo — hacía falta distinguirlo en cuanto hubo más
+/// de un enlace de acción en toda la ventana (antes solo existía "Abrir [keys]").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkAction {
+    OpenKeys,
+    /// Ajustes → Ayuda → "Repetir tutorial": arranca el recorrido guiado directamente
+    /// (no vuelve a mostrar la ventana de bienvenida).
+    RepeatTutorial,
+    /// Ajustes → Acerca de → "Comprobar ahora": fuerza el chequeo de actualizaciones
+    /// ya mismo, sin esperar a que toque el de una vez al día.
+    CheckUpdatesNow,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -132,6 +145,7 @@ const TECLADO: &[Row] = &[
         title: "Todos los atajos",
         desc: "Cada acción es un comando con nombre. Reasigna cualquiera en config.toml, sección [keys].",
         label: "Abrir [keys]",
+        action: LinkAction::OpenKeys,
     },
 ];
 
@@ -177,8 +191,16 @@ const ACERCA_DE: &[Row] = &[
         title: "Comprobar ahora",
         desc: "Fuerza el chequeo ya mismo, sin esperar al de una vez al día.",
         label: "Buscar ahora",
+        action: LinkAction::CheckUpdatesNow,
     },
 ];
+
+const AYUDA: &[Row] = &[Row::Link {
+    title: "Repetir tutorial",
+    desc: "Vuelve a mostrar el recorrido guiado por la ventana principal (no la ventana de bienvenida).",
+    label: "Repetir tutorial",
+    action: LinkAction::RepeatTutorial,
+}];
 
 pub const SECTIONS: &[Section] = &[
     Section { id: "apariencia", name: "Apariencia", rows: APARIENCIA },
@@ -187,6 +209,7 @@ pub const SECTIONS: &[Section] = &[
     Section { id: "archivos", name: "Archivos", rows: ARCHIVOS },
     Section { id: "atajo_global", name: "Atajo global", rows: ATAJO_GLOBAL },
     Section { id: "acerca_de", name: "Acerca de", rows: ACERCA_DE },
+    Section { id: "ayuda", name: "Ayuda", rows: AYUDA },
 ];
 
 /// Las secciones son estáticas (no dependen de `cfg`): el parámetro está para que la
@@ -250,7 +273,7 @@ mod tests {
     #[test]
     fn archivos_and_atajo_global_sections_exist() {
         let names: Vec<&str> = SECTIONS.iter().map(|s| s.name).collect();
-        assert_eq!(names, ["Apariencia", "Ventana", "Teclado", "Archivos", "Atajo global", "Acerca de"]);
+        assert_eq!(names, ["Apariencia", "Ventana", "Teclado", "Archivos", "Atajo global", "Acerca de", "Ayuda"]);
     }
 
     #[test]
@@ -260,6 +283,11 @@ mod tests {
         apply(&mut cfg, SettingKey::UpdatesCheck, SettingValue::Bool(true));
         assert!(cfg.updates.check);
         assert_eq!(cfg.ui.preset, preset_before);
+    }
+
+    #[test]
+    fn ayuda_has_the_repeat_tutorial_link() {
+        assert!(matches!(AYUDA[0], Row::Link { action: LinkAction::RepeatTutorial, .. }));
     }
 
     #[test]

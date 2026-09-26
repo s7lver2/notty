@@ -131,6 +131,9 @@ impl Default for HotkeyConfig {
     }
 }
 
+/// Si notty consulta (una vez al día, sin identificadores) si hay versión nueva
+/// en GitHub. Apagado por defecto: la única forma de encenderlo son el paso
+/// Privacidad de `welcome_window` o Ajustes → Acerca de.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct UpdatesConfig {
@@ -151,11 +154,43 @@ pub struct Config {
     pub files: FilesConfig,
     pub hotkey: HotkeyConfig,
     pub updates: UpdatesConfig,
+    /// Si la ventana de bienvenida (`welcome_window`) ya se mostró una vez. No se
+    /// repite sola nunca más; solo vuelve a verse desde Ajustes → Ayuda si el usuario
+    /// lo pide expresamente (eso arranca el recorrido directamente, no esta ventana).
+    #[serde(default)]
+    pub first_run_done: bool,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn updates_config_defaults_to_check_disabled() {
+        assert!(!UpdatesConfig::default().check);
+        assert!(!Config::default().updates.check);
+    }
+
+    #[test]
+    fn updates_check_round_trips_through_toml() {
+        let cfg = Config { updates: UpdatesConfig { check: true, ..UpdatesConfig::default() }, ..Config::default() };
+        let s = toml::to_string_pretty(&cfg).unwrap();
+        let back: Config = toml::from_str(&s).unwrap();
+        assert!(back.updates.check);
+    }
+
+    #[test]
+    fn first_run_done_defaults_to_false() {
+        assert!(!Config::default().first_run_done);
+    }
+
+    #[test]
+    fn first_run_done_round_trips_through_toml() {
+        let cfg = Config { first_run_done: true, ..Config::default() };
+        let s = toml::to_string_pretty(&cfg).unwrap();
+        let back: Config = toml::from_str(&s).unwrap();
+        assert!(back.first_run_done);
+    }
 
     #[test]
     fn default_config_matches_moderna() {
