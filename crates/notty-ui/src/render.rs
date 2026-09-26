@@ -1302,18 +1302,11 @@ impl Renderer {
         unsafe {
             self.fill(frame.titlebar, pal.chrome);
 
-            // Icono de la app ("trazo + punto": docs/mockups/notty_icon_candidates,
-            // opción A), en los primeros 36px. Mismo trazo grueso con extremos
-            // redondeados y punto que assets/notty.ico, a escala de 16px.
+            // Icono de la app (el "n_" de assets/notty.ico) en los primeros 36px.
             let icon_x = (layout::APPICON_W - layout::APPICON_SIZE) / 2.0;
             let icon_y = (layout::TITLEBAR_H - layout::APPICON_SIZE) / 2.0;
-            self.stroke_line(
-                icon_x + 4.5, icon_y + 10.8,
-                icon_x + 9.6, icon_y + 5.8,
-                2.2,
-                pal.accent,
-            );
-            self.fill_circle(icon_x + 11.5, icon_y + 4.3, 1.7, pal.accent);
+            let icon = layout::Rect::new(icon_x, icon_y, icon_x + layout::APPICON_SIZE, icon_y + layout::APPICON_SIZE);
+            self.draw_logo(icon, pal.accent, pal.on_accent, 1.0);
 
             let bands = Self::resolve_bands(ui, ws.len(), view.menu_bar_visible);
             let tabs_frac = Self::chrome_frac(view, bands).map(|f| f.tabs_in_title).unwrap_or(if bands.tabs_in_title { 1.0 } else { 0.0 });

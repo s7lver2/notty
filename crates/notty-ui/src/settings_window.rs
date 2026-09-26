@@ -10,7 +10,6 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
-use windows::Win32::Graphics::Direct2D::ID2D1Bitmap;
 use windows::Win32::Graphics::Dwm::{
     DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmExtendFrameIntoClientArea, DwmSetWindowAttribute,
 };
@@ -120,8 +119,6 @@ struct State {
     preview: Preview,
     syn_pick: usize,
     syn_pick_at: Instant,
-    logo: Option<ID2D1Bitmap>,
-    logo_px: i32,
 }
 
 fn ensure_anim_timer(st: &mut State, hwnd: HWND) {
@@ -272,8 +269,6 @@ pub fn open(
             preview: Preview::default(),
             syn_pick: 0,
             syn_pick_at: Instant::now(),
-            logo: None,
-            logo_px: 0,
         });
         if start_page == Page::Fuentes {
             state.fonts = state.renderer.monospace_families();
@@ -407,7 +402,6 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             WM_DPICHANGED => {
                 if let Some(st) = ptr.as_mut() {
                     st.renderer.set_dpi((wparam.0 & 0xFFFF) as u32);
-                    st.logo = None;
                     let suggested = &*(lparam.0 as *const RECT);
                     let _ = SetWindowPos(
                         hwnd,
@@ -940,6 +934,7 @@ fn run_link(st: &mut State, hwnd: HWND, action: LinkAction) {
             }
         }
         LinkAction::OpenRepo => shell_open(hwnd, &format!("https://github.com/{repo}"), None),
+        LinkAction::OpenIssues => shell_open(hwnd, &format!("https://github.com/{repo}/issues/new"), None),
         LinkAction::OpenChangelog => shell_open(hwnd, &format!("https://github.com/{repo}/releases"), None),
         LinkAction::OpenConfigFolder => {
             let path = notty_config::default_path();
@@ -967,7 +962,6 @@ fn set_value(st: &mut State, hwnd: HWND, key: SettingKey, value: SettingValue) {
     let now_dark = is_dark(st.cfg.borrow().ui.theme, system_dark);
     if now_dark != was_dark {
         st.theme_from = Some((was_dark, Instant::now()));
-        st.logo = None;
         unsafe { crate::window::apply_dark_mode(hwnd, now_dark) };
     }
 }
@@ -1112,11 +1106,6 @@ fn paint(st: &mut State) {
         _ => theme::palette(dark),
     };
     let (w, h) = st.renderer.size_dips();
-    let logo_px = (64.0 * st.renderer.scale()).round() as i32;
-    if st.page == Page::AcercaDe && (st.logo.is_none() || st.logo_px != logo_px) {
-        st.logo = st.renderer.app_icon_bitmap(logo_px);
-        st.logo_px = logo_px;
-    }
     let update = (st.update_info)();
     let caret_on = st.focus.is_some() && (now.saturating_duration_since(st.caret_since).as_millis() % 1060) < 530;
 
@@ -1139,7 +1128,7 @@ fn paint(st: &mut State) {
     // Barra de título.
     let titlebar = Rect::new(0.0, 0.0, w, TITLEBAR_H);
     r.fill(titlebar, pal.chrome);
-    r.fill_round(Rect::new(12.0, 10.0, 24.0, 22.0), 3.0, pal.accent);
+    r.draw_logo(Rect::new(11.0, 9.0, 25.0, 23.0), pal.accent, pal.on_accent, 1.0);
     ui.text("Ajustes · notty", 12.0, false, Rect::new(32.0, 0.0, w - CLOSE_W, TITLEBAR_H), pal.text_2);
     let close_r = Rect::new(w - CLOSE_W, 0.0, w, TITLEBAR_H);
     let ch = ui.hover_t(Hit::Close, 120);
@@ -1167,7 +1156,6 @@ fn paint(st: &mut State) {
         preview: &st.preview,
         syn_pick: st.syn_pick,
         syn_pick_at: st.syn_pick_at,
-        logo: st.logo.as_ref(),
         system_dark,
     };
     let area = Rect::new(panel.left, panel.top - scroll, panel.right, panel.bottom - scroll);

@@ -1,21 +1,19 @@
 //! Piezas de dibujo que solo usa (por ahora) la ventana de Ajustes: iconos de trazo
 //! a partir de un `d` de SVG, formatos de texto a demanda, la lista de fuentes
-//! monoespaciadas instaladas y el icono de la app como mapa de bits.
+//! monoespaciadas instaladas y el logo de notty.
 
 use windows::Win32::Graphics::Direct2D::Common::{
-    D2D_RECT_F, D2D_SIZE_F, D2D_SIZE_U, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_BEZIER_SEGMENT, D2D1_FIGURE_BEGIN_HOLLOW,
-    D2D1_FIGURE_END_CLOSED, D2D1_FIGURE_END_OPEN, D2D1_PIXEL_FORMAT,
+    D2D_SIZE_F, D2D1_BEZIER_SEGMENT, D2D1_FIGURE_BEGIN_HOLLOW,
+    D2D1_FIGURE_END_CLOSED, D2D1_FIGURE_END_OPEN,
 };
 use windows::Win32::Graphics::Direct2D::{
-    D2D1_ARC_SEGMENT, D2D1_ARC_SIZE_LARGE, D2D1_ARC_SIZE_SMALL, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
-    D2D1_BITMAP_PROPERTIES, D2D1_CAP_STYLE_ROUND, D2D1_DASH_STYLE_CUSTOM, D2D1_DASH_STYLE_SOLID, D2D1_LINE_JOIN_ROUND,
-    D2D1_STROKE_STYLE_PROPERTIES, D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE, ID2D1Bitmap,
+    D2D1_ARC_SEGMENT, D2D1_ARC_SIZE_LARGE, D2D1_ARC_SIZE_SMALL, D2D1_CAP_STYLE_ROUND, D2D1_DASH_STYLE_CUSTOM, D2D1_DASH_STYLE_SOLID, D2D1_LINE_JOIN_ROUND,
+    D2D1_STROKE_STYLE_PROPERTIES, D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE,
 };
 use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD,
     IDWriteFont1, IDWriteFontCollection, IDWriteTextFormat,
 };
-use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::core::Interface;
 use windows_numerics::Vector2;
 
@@ -24,7 +22,25 @@ use crate::layout::Rect;
 use crate::svg_path::{self, Seg};
 use crate::theme::Rgba;
 
+/// El logo de notty ("n_"), en el mismo lienzo de 24×24 que los iconos. Misma
+/// geometría que `tools/make-icon.ps1` (assets/notty.ico).
+pub const LOGO_N: &str = "M5.6 8.4V17M5.6 12.3a3.9 3.9 0 0 1 7.8 0V17";
+pub const LOGO_CARET: &str = "M16.4 17h2.6";
+const LOGO_STROKE: f32 = 2.4;
+
 impl Renderer {
+    /// Logo sobre su cuadrado redondeado. `caret` es la opacidad del "_" (para que
+    /// parpadee en Acerca de; 1.0 fijo en las barras de título).
+    pub fn draw_logo(&self, r: Rect, bg: Rgba, fg: Rgba, caret: f32) {
+        let s = r.width();
+        let (cx, cy) = (r.left + s / 2.0, r.top + s / 2.0);
+        self.fill_round(r, s * 0.22, bg);
+        self.stroke_svg(LOGO_N, cx, cy, s, LOGO_STROKE, fg, None);
+        if caret > 0.0 {
+            self.stroke_svg(LOGO_CARET, cx, cy, s, LOGO_STROKE, fg.faded(caret), None);
+        }
+    }
+
     /// Traza el icono `d` (lienzo SVG de 24×24) centrado en `(cx, cy)` y escalado a
     /// `size` DIPs, con extremos/uniones redondeados como `stroke-linecap:round`.
     /// `dash` = `stroke-dasharray` en unidades del lienzo.
@@ -143,72 +159,5 @@ impl Renderer {
         }
         out.sort_by_key(|n| n.to_lowercase());
         out
-    }
-
-    /// El icono de la app (recurso 1 del ejecutable) a `px` píxeles, como mapa de
-    /// bits de Direct2D. `None` si no hay icono (p.ej. en los tests).
-    pub fn app_icon_bitmap(&self, px: i32) -> Option<ID2D1Bitmap> {
-        use windows::Win32::Graphics::Gdi::{
-            BI_RGB, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, DeleteObject, GetDC, GetDIBits, ReleaseDC,
-        };
-        use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, GetIconInfo, HICON, ICONINFO, IMAGE_ICON, LR_DEFAULTCOLOR, LoadImageW};
-        unsafe {
-            let instance = windows::Win32::System::LibraryLoader::GetModuleHandleW(None).ok()?;
-            let handle = LoadImageW(Some(instance.into()), windows::core::PCWSTR(1usize as *const u16), IMAGE_ICON, px, px, LR_DEFAULTCOLOR).ok()?;
-            let icon = HICON(handle.0);
-            let mut info = ICONINFO::default();
-            let ok = GetIconInfo(icon, &mut info).is_ok();
-            let mut pixels = vec![0u8; (px * px * 4) as usize];
-            let mut got = false;
-            if ok && !info.hbmColor.is_invalid() {
-                let hdc = GetDC(None);
-                let mut bmi = BITMAPINFO {
-                    bmiHeader: BITMAPINFOHEADER {
-                        biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                        biWidth: px,
-                        biHeight: -px,
-                        biPlanes: 1,
-                        biBitCount: 32,
-                        biCompression: BI_RGB.0,
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                };
-                got = GetDIBits(hdc, info.hbmColor, 0, px as u32, Some(pixels.as_mut_ptr() as *mut _), &mut bmi, DIB_RGB_COLORS) > 0;
-                ReleaseDC(None, hdc);
-            }
-            if !info.hbmColor.is_invalid() {
-                let _ = DeleteObject(info.hbmColor.into());
-            }
-            if !info.hbmMask.is_invalid() {
-                let _ = DeleteObject(info.hbmMask.into());
-            }
-            let _ = DestroyIcon(icon);
-            if !got {
-                return None;
-            }
-            // Direct2D quiere alfa premultiplicado.
-            for p in pixels.chunks_exact_mut(4) {
-                let a = p[3] as u32;
-                p[0] = (p[0] as u32 * a / 255) as u8;
-                p[1] = (p[1] as u32 * a / 255) as u8;
-                p[2] = (p[2] as u32 * a / 255) as u8;
-            }
-            let props = D2D1_BITMAP_PROPERTIES {
-                pixelFormat: D2D1_PIXEL_FORMAT { format: DXGI_FORMAT_B8G8R8A8_UNORM, alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED },
-                dpiX: 96.0,
-                dpiY: 96.0,
-            };
-            self.target
-                .CreateBitmap(D2D_SIZE_U { width: px as u32, height: px as u32 }, Some(pixels.as_ptr() as *const _), (px * 4) as u32, &props)
-                .ok()
-        }
-    }
-
-    pub fn draw_bitmap(&self, bmp: &ID2D1Bitmap, r: Rect, opacity: f32) {
-        unsafe {
-            let dst = D2D_RECT_F { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
-            self.target.DrawBitmap(bmp, Some(&dst), opacity * self.fade.get(), D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, None);
-        }
     }
 }

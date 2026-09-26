@@ -1,11 +1,12 @@
 # Genera installer/icons/{text,config,markdown,code}.ico: una hoja de documento con
-# el símbolo de la categoría y, abajo a la derecha, el icono de notty (el de
-# tools/make-icon.ps1) como sello. Mismo método que make-icon.ps1: GDI+, un PNG
+# el símbolo de la categoría y, abajo a la derecha, el logo de notty
+# (tools/notty-logo.ps1) como sello. Mismo método que make-icon.ps1: GDI+, un PNG
 # dibujado por tamaño y el .ico empaquetado a mano.
 # Uso: pwsh tools/make-file-icons.ps1 [-PreviewDir <carpeta>]
 param([string]$PreviewDir)
 Add-Type -AssemblyName System.Drawing
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'notty-logo.ps1')
 
 $root = Split-Path -Parent $PSScriptRoot
 $outDir = Join-Path $root 'installer\icons'
@@ -16,8 +17,6 @@ $page = C 0xe5e6e8       # texto principal de notty-setup, aquí como papel
 $pageEdge = C 0x8a8b8e   # texto terciario
 $fold = C 0xb4b5b8
 $ink = C 0x46474c        # .dots apagados
-$badgeBg = C 0x1d1e1f    # mismos colores que assets/notty.ico
-$accent = C 0x4aa8f5
 
 function New-RoundRect([single]$x, [single]$y, [single]$w, [single]$h, [single]$r) {
   $p = New-Object System.Drawing.Drawing2D.GraphicsPath
@@ -67,26 +66,17 @@ function Draw-Page($g, [int]$s) {
   $brush.Dispose(); $edge.Dispose(); $foldBrush.Dispose(); $p.Dispose(); $tri.Dispose()
 }
 
-# Sello de notty: el icono de la app (fondo oscuro, trazo diagonal + punto) en
-# pequeño, rodeado de un filo del color de la hoja para que no se funda con un
-# Explorador en tema oscuro.
+# Sello de notty: el logo ("n_", tools/notty-logo.ps1) en pequeño, rodeado de un
+# filo del color de la hoja para que no se funda con un Explorador en tema oscuro.
 function Draw-Badge($g, [int]$s) {
-  $bs = [Math]::Round($s * 0.42)
+  $bs = [Math]::Round($s * 0.46)
   $gap = [Math]::Max(1.0, [Math]::Round($s * 0.045))
   $x = $s - $bs - $gap; $y = $s - $bs - $gap
   $hole = New-RoundRect ($x - $gap) ($y - $gap) ($bs + 2 * $gap) ($bs + 2 * $gap) ([Math]::Max(1.5, ($bs + 2 * $gap) * 0.26))
   $clear = New-Object System.Drawing.SolidBrush $page
   $g.FillPath($clear, $hole)
-
-  $body = New-RoundRect $x $y $bs $bs ([Math]::Max(1.2, $bs * 0.22))
-  $bg = New-Object System.Drawing.SolidBrush $badgeBg
-  $g.FillPath($bg, $body)
-  $pen = New-Pen $accent ([Math]::Max(1.2, $bs * 0.15))
-  $g.DrawLine($pen, $x + $bs * 0.28, $y + $bs * 0.68, $x + $bs * 0.58, $y + $bs * 0.38)
-  $dotR = [Math]::Max(0.8, $bs * 0.085)
-  $dot = New-Object System.Drawing.SolidBrush $accent
-  $g.FillEllipse($dot, $x + $bs * 0.72 - $dotR, $y + $bs * 0.27 - $dotR, $dotR * 2, $dotR * 2)
-  $hole.Dispose(); $clear.Dispose(); $body.Dispose(); $bg.Dispose(); $pen.Dispose(); $dot.Dispose()
+  Draw-NottyLogo $g $x $y $bs
+  $hole.Dispose(); $clear.Dispose()
 }
 
 function Stroke-W([int]$s) { if ($s -le 20) { 1.0 } else { [Math]::Max(1.5, $s * 0.065) } }

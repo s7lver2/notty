@@ -6,7 +6,6 @@ use std::time::Instant;
 
 use notty_config::{Config, Files, HotkeyMechanism, MenuBar, Preset, TabsPosition};
 use notty_input::Command;
-use windows::Win32::Graphics::Direct2D::ID2D1Bitmap;
 use windows_numerics::{Matrix3x2, Vector2};
 
 use crate::anim::Curve;
@@ -95,7 +94,6 @@ pub(crate) struct PageData<'a> {
     pub caret_on: bool,
     pub update: &'a UpdateInfo,
     pub preview: &'a Preview,
-    pub logo: Option<&'a ID2D1Bitmap>,
     pub system_dark: bool,
     /// Lenguaje de la vista previa de Sintaxis (índice en `syntax::LANGS`) y cuándo se eligió.
     pub syn_pick: usize,
@@ -1848,49 +1846,129 @@ fn actualizaciones(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
 
 fn acerca(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     let pal = ui.pal;
+    let now_ms = millis(d, ui.now);
     blk(ui, d, 0);
     let mut y = header(ui, x, top, w, "Acerca de", "") + 16.0;
     blk_end(ui);
 
+    // Tarjeta principal: logo que flota con el "_" parpadeando, nombre, lema y la
+    // versión con el estado del actualizador al lado.
     blk(ui, d, 1);
-    let card = Rect::new(x, y, x + w, y + 116.0);
+    let card = Rect::new(x, y, x + w, y + 132.0);
     ui.r.fill_round(card, 10.0, pal.chrome);
     ui.r.fill_round(Rect::new(card.left + 1.0, card.top + 1.0, card.right - 1.0, card.bottom - 1.0), 9.0, pal.cmd);
-    let (fy, rot) = if ui.anim() {
-        let s = millis(d, ui.now) / 4000.0 * std::f32::consts::TAU;
-        (-2.0 + 2.0 * s.cos(), -1.0 + s.cos())
+    // Halo suave detrás del logo.
+    let halo = Rect::new(x + 14.0, card.top + 18.0, x + 110.0, card.top + 114.0);
+    ui.r.fill_round(halo, 48.0, pal.accent_soft.faded(0.5));
+    let (fy, rot, caret) = if ui.anim() {
+        let s = now_ms / 4000.0 * std::f32::consts::TAU;
+        (-2.0 + 2.0 * s.cos(), -1.0 + s.cos(), if now_ms % 1060.0 < 530.0 { 1.0 } else { 0.0 })
     } else {
-        (0.0, 0.0)
+        (0.0, 0.0, 1.0)
     };
-    let logo = Rect::new(x + 26.0, card.top + 26.0 + fy, x + 90.0, card.top + 90.0 + fy);
+    let logo = Rect::new(x + 30.0, card.top + 34.0 + fy, x + 94.0, card.top + 98.0 + fy);
     let c = Vector2 { X: logo.left + 32.0, Y: logo.top + 32.0 };
     ui.push_xf(Matrix3x2::rotation_around(rot, c));
-    match d.logo {
-        Some(bmp) => ui.r.draw_bitmap(bmp, logo, 1.0),
-        None => ui.r.fill_round(logo, 14.0, pal.accent),
-    }
+    ui.r.draw_logo(logo, pal.accent, pal.on_accent, caret);
     ui.pop_xf();
-    let tx = logo.right + 20.0;
-    ui.text("notty", 22.0, true, Rect::new(tx, card.top + 24.0, x + w - 20.0, card.top + 54.0), pal.text);
-    ui.text("Editor de texto para Windows. Rust + Direct2D.", 12.0, false, Rect::new(tx, card.top + 56.0, x + w - 20.0, card.top + 74.0), pal.text_2);
-    let fm = ui.mono(ui.r.mono_family(), 12.0);
-    ui.r.text(&format!("v{}", crate::app_version()), &fm, Rect::new(tx, card.top + 76.0, x + w, card.top + 94.0), pal.accent);
+    let tx = logo.right + 24.0;
+    let tw = x + w - 20.0 - tx;
+    ui.text("notty", 26.0, true, Rect::new(tx, card.top + 26.0, tx + tw, card.top + 60.0), pal.text);
+    ui.text("El Bloc de notas, pero rápido y con teclado.", 12.5, false, Rect::new(tx, card.top + 62.0, tx + tw, card.top + 80.0), pal.text_2);
+    // Versión + estado del actualizador, como chips.
+    let fm = ui.mono(ui.r.mono_family(), 11.5);
+    let ver = format!("v{}", crate::app_version());
+    let vw = ui.r.measure(&ver, &fm) + 16.0;
+    let vr = Rect::new(tx, card.top + 90.0, tx + vw, card.top + 110.0);
+    ui.r.fill_round(vr, 10.0, pal.accent_soft);
+    ui.r.text_center(&ver, &fm, vr, pal.accent);
+    let (st_txt, st_c) = match (&d.update.phase, d.update.up_to_date, &d.update.new_version) {
+        (UpdatePhase::Found, _, Some(v)) => (format!("Hay una versión nueva: {v}"), pal.accent),
+        (UpdatePhase::Checking, _, _) => ("Buscando actualizaciones…".to_string(), pal.text_2),
+        (_, true, _) => ("Al día".to_string(), pal.ok),
+        _ => ("Buscar actualizaciones".to_string(), pal.text_2),
+    };
+    let sw = ui.measure(&st_txt, 11.5, false) + 22.0;
+    let sr = Rect::new(vr.right + 8.0, vr.top, vr.right + 8.0 + sw, vr.bottom);
+    let hit = Hit::Go(Page::Actualizaciones);
+    let hv = ui.hover_t(hit, 150);
+    ui.r.fill_round(sr, 10.0, ui.row_c(1.0 + hv));
+    ui.r.fill_circle(sr.left + 10.0, sr.top + 10.0, 3.0, st_c);
+    ui.text(&st_txt, 11.5, false, Rect::new(sr.left + 18.0, sr.top, sr.right, sr.bottom), pal.text.mix(st_c, 0.35));
+    ui.hit(sr, hit);
     y = card.bottom + 16.0;
     blk_end(ui);
 
+    // Datos: dónde vive cada cosa.
     blk(ui, d, 2);
+    y = label(ui, x, y, w, "Información") + 8.0;
+    let cfg_path = notty_config::default_path();
+    let exe = std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.display().to_string())).unwrap_or_default();
+    let facts: [(&str, String); 4] = [
+        ("Versión", crate::app_version().to_string()),
+        ("Plataforma", format!("Windows · {}", std::env::consts::ARCH)),
+        ("Configuración", cfg_path.display().to_string()),
+        ("Instalado en", exe),
+    ];
+    let row_h = 30.0;
+    let box_ = Rect::new(x, y, x + w, y + row_h * facts.len() as f32 + 8.0);
+    ui.r.fill_round(box_, 8.0, ui.row_c(0.0));
+    let fm12 = ui.mono(ui.r.mono_family(), 11.5);
+    for (j, (k, v)) in facts.iter().enumerate() {
+        item(ui, d, j);
+        let ry = box_.top + 4.0 + row_h * j as f32;
+        if j > 0 {
+            ui.r.fill(Rect::new(x + 14.0, ry, x + w - 14.0, ry + 1.0), pal.line);
+        }
+        ui.text(k, 12.0, false, Rect::new(x + 14.0, ry, x + 130.0, ry + row_h), pal.text_2);
+        let v = ellipsize_mid(ui, v, &fm12, w - 160.0);
+        ui.r.text(&v, &fm12, Rect::new(x + 140.0, ry + 7.0, x + w - 14.0, ry + row_h), pal.text);
+        ui.end_enter();
+    }
+    y = box_.bottom + 16.0;
+    blk_end(ui);
+
+    // Enlaces.
+    blk(ui, d, 3);
     let repo = format!("github.com/{}", notty_update::REPO);
     item(ui, d, 0);
     y = link_row(ui, x, y, w, Hit::Link(LinkAction::OpenRepo), "Código fuente", &repo, false, icon::EXTERNO) + 4.0;
     ui.end_enter();
     item(ui, d, 1);
-    y = link_row(ui, x, y, w, Hit::Link(LinkAction::OpenChangelog), "Novedades", "Historial de cambios de cada versión", false, icon::CHEVRON) + 4.0;
+    y = link_row(ui, x, y, w, Hit::Link(LinkAction::OpenIssues), "Informar de un problema", "Abre una incidencia en GitHub", false, icon::EXTERNO) + 4.0;
     ui.end_enter();
     item(ui, d, 2);
+    y = link_row(ui, x, y, w, Hit::Link(LinkAction::OpenChangelog), "Novedades", "Historial de cambios de cada versión", false, icon::CHEVRON) + 4.0;
+    ui.end_enter();
+    item(ui, d, 3);
     y = link_row(ui, x, y, w, Hit::Link(LinkAction::OpenConfigFolder), "Carpeta de configuración", "%APPDATA%\\notty\\config.toml", true, icon::CHEVRON);
     ui.end_enter();
     blk_end(ui);
-    y
+
+    // Pie: con qué está hecho.
+    y += 18.0;
+    let credit = "Hecho con Rust, Direct2D, DirectWrite y tree-sitter.";
+    ui.text(credit, 11.0, false, Rect::new(x, y, x + w, y + 16.0), pal.text_3);
+    y + 16.0
+}
+
+/// Recorta `s` por el medio ("C:\Users\…\notty.toml") si no cabe en `max_w`.
+fn ellipsize_mid(ui: &Ui, s: &str, f: &windows::Win32::Graphics::DirectWrite::IDWriteTextFormat, max_w: f32) -> String {
+    if ui.r.measure(s, f) <= max_w {
+        return s.to_string();
+    }
+    let chars: Vec<char> = s.chars().collect();
+    let mut keep = chars.len();
+    while keep > 4 {
+        keep -= 1;
+        let head = keep / 2;
+        let tail = keep - head;
+        let t: String = chars[..head].iter().chain(std::iter::once(&'…')).chain(chars[chars.len() - tail..].iter()).collect();
+        if ui.r.measure(&t, f) <= max_w {
+            return t;
+        }
+    }
+    s.chars().take(4).collect()
 }
 
 // --- Ayuda --------------------------------------------------------------------------

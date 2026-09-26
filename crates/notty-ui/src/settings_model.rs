@@ -214,6 +214,8 @@ pub enum LinkAction {
     ReleaseNotes,
     /// Acerca de → Código fuente.
     OpenRepo,
+    /// Acerca de → Informar de un problema (incidencias de GitHub).
+    OpenIssues,
     /// Acerca de → Novedades (todas las releases).
     OpenChangelog,
     /// Acerca de → Carpeta de configuración.
