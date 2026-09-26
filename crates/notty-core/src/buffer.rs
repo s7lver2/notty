@@ -50,6 +50,10 @@ impl Buffer {
     pub fn byte_to_char(&self, byte_idx: usize) -> usize {
         self.rope.byte_to_char(byte_idx)
     }
+
+    pub fn char_to_byte(&self, char_idx: usize) -> usize {
+        self.rope.char_to_byte(char_idx)
+    }
 }
 
 impl fmt::Display for Buffer {

@@ -27,6 +27,7 @@ pub enum SettingKey {
     NativeFileDialog,
     FontFamily,
     Ligatures,
+    SyntaxHighlight,
 }
 
 /// El valor elegido; `apply` decide qué campo de `Config` toca según `SettingKey`.
@@ -126,6 +127,11 @@ const APARIENCIA: &[Row] = &[
         desc: "Añade o cambia sustituciones en config.toml, sección [ligature_overrides].",
         label: "Abrir config.toml",
         action: LinkAction::OpenKeys,
+    },
+    Row::Toggle {
+        title: "Resaltado de sintaxis",
+        desc: "Colorea el código según el lenguaje (por la extensión del archivo).",
+        key: SettingKey::SyntaxHighlight,
     },
 ];
 
@@ -280,9 +286,13 @@ pub fn apply(cfg: &mut Config, key: SettingKey, value: SettingValue) {
         notty_config::apply_preset(&mut cfg.ui, p);
         return;
     }
-    // Archivos/Atajo global no son piezas de un preset de Apariencia: se resuelven
-    // aparte y no tocan `cfg.ui.preset`.
+    // Archivos/Atajo global (y el resaltado, que ningún preset fija) no son piezas
+    // de un preset de Apariencia: se resuelven aparte y no tocan `cfg.ui.preset`.
     match (key, value) {
+        (SettingKey::SyntaxHighlight, SettingValue::Bool(b)) => {
+            cfg.ui.syntax_highlight = b;
+            return;
+        }
         (SettingKey::TempMode, SettingValue::TempMode(m)) => {
             cfg.files.temp_mode = m;
             return;
@@ -349,12 +359,22 @@ mod tests {
     }
 
     #[test]
-    fn apariencia_has_preset_theme_and_line_numbers() {
-        assert_eq!(APARIENCIA.len(), 6);
+    fn apariencia_has_preset_theme_line_numbers_and_syntax() {
+        assert_eq!(APARIENCIA.len(), 7);
         assert!(matches!(APARIENCIA[0], Row::Seg { key: SettingKey::Preset, .. }));
         assert!(matches!(APARIENCIA[2], Row::Toggle { key: SettingKey::LineNumbers, .. }));
         assert!(matches!(APARIENCIA[3], Row::Select { key: SettingKey::FontFamily, .. }));
         assert!(matches!(APARIENCIA[4], Row::Toggle { key: SettingKey::Ligatures, .. }));
+        assert!(matches!(APARIENCIA[6], Row::Toggle { key: SettingKey::SyntaxHighlight, .. }));
+    }
+
+    #[test]
+    fn toggling_syntax_highlight_keeps_the_preset() {
+        let mut cfg = Config::default();
+        let preset_before = cfg.ui.preset;
+        apply(&mut cfg, SettingKey::SyntaxHighlight, SettingValue::Bool(false));
+        assert!(!cfg.ui.syntax_highlight);
+        assert_eq!(cfg.ui.preset, preset_before);
     }
 
     #[test]

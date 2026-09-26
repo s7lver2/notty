@@ -23,6 +23,7 @@ pub struct EditorState {
     pub raw_pending_nibble: Option<u8>,
     pub temp: Option<notty_config::TempMode>,
     pub open_mtime: Option<std::time::SystemTime>,
+    pub syntax: crate::syntax::SyntaxCache,
 }
 
 impl EditorState {
@@ -39,6 +40,7 @@ impl EditorState {
             raw_pending_nibble: None,
             temp: None,
             open_mtime: None,
+            syntax: Default::default(),
         }
     }
 
@@ -56,6 +58,7 @@ impl EditorState {
             raw_pending_nibble: None,
             temp: None,
             open_mtime,
+            syntax: Default::default(),
         }
     }
 
