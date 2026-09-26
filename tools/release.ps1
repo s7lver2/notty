@@ -28,6 +28,12 @@ $cargoVersion = (Select-String -Path "crates\notty\Cargo.toml" -Pattern '^versio
 if (-not (Test-TagMatchesVersion -Tag $Tag -CargoVersion $cargoVersion)) {
     throw "El tag $Tag no coincide con la versión de crates/notty/Cargo.toml ($cargoVersion)."
 }
+# notty-setup compara su propia versión con la última release para autoactualizarse:
+# si se quedara atrás, cada instalador recién descargado se volvería a descargar.
+$setupVersion = (Select-String -Path "crates\notty-setup\Cargo.toml" -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+if (-not (Test-TagMatchesVersion -Tag $Tag -CargoVersion $setupVersion)) {
+    throw "El tag $Tag no coincide con la versión de crates/notty-setup/Cargo.toml ($setupVersion)."
+}
 
 # 2. Build: notty/notty-legacy, el MSI (WiX, plan del instalador) y notty-setup.
 cargo build --release -p notty -p notty-legacy

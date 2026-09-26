@@ -40,6 +40,12 @@ const ID_ANIM_TIMER: usize = 1;
 const WM_INSTALL_EVENT: u32 = WM_APP + 1;
 /// El hilo de instalación terminó con un código de error de MSI (`wparam` = código).
 const WM_INSTALL_FAILED: u32 = WM_APP + 2;
+/// Fin de la comprobación de un notty-setup más nuevo: `wparam` 0 = no hay, 1 = no se
+/// pudo comprobar, 2 = descargado y verificado (`lparam` = `Box<PathBuf>`).
+const WM_SELF_UPDATE: u32 = WM_APP + 3;
+/// Lo lleva el notty-setup descargado al relanzarse: si GitHub anunciara una versión
+/// que el propio binario no cree tener, no se descargaría a sí mismo en bucle.
+const SKIP_SELF_UPDATE: &str = "--skip-self-update";
 
 static MSI_BYTES: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/notty.msi"));
 
@@ -69,7 +75,7 @@ fn main() {
         let _ = run_update_screen(&from, &to, relaunch);
         return;
     }
-    let _ = run_wizard();
+    let _ = run_wizard(!args.iter().any(|a| a == SKIP_SELF_UPDATE));
 }
 
 fn arg_value(args: &[String], flag: &str) -> Option<String> {
@@ -200,12 +206,68 @@ fn spawn_install(hwnd: HWND, toggles: FeatureToggles, install_folder: PathBuf) {
             let ptr = Box::into_raw(Box::new(event));
             let _ = PostMessageW(Some(hwnd), WM_INSTALL_EVENT, WPARAM(0), LPARAM(ptr as isize));
         };
-        if let Err(code) = msi_driver::install(&msi_path, &addlocal, &install_folder, on_event) {
-            unsafe {
+        match msi_driver::install(&msi_path, &addlocal, &install_folder, on_event) {
+            // Tras el MSI se mira el IFEO resultante (no los interruptores): en
+            // mantenimiento ADDLOCAL solo añade, así que la feature puede seguir puesta.
+            Ok(()) => notty_update::notepad::sync(),
+            Err(code) => unsafe {
                 let _ = PostMessageW(Some(hwnd), WM_INSTALL_FAILED, WPARAM(code as usize), LPARAM(0));
-            }
+            },
         }
     });
+}
+
+/// `Ok(None)` si ya es la última versión; `Ok(Some(ruta))` con el notty-setup nuevo
+/// ya verificado contra `notty_update::PUBKEY`.
+fn fetch_newer_setup() -> std::result::Result<Option<PathBuf>, ()> {
+    let ua = format!("notty-setup/{}", ui::VERSION);
+    let release = notty_update::http::latest_release(notty_update::REPO, &ua).map_err(|_| ())?;
+    if !notty_update::is_newer(ui::VERSION, &release.version) {
+        return Ok(None);
+    }
+    let dir = std::env::temp_dir().join("notty-setup-update");
+    std::fs::create_dir_all(&dir).map_err(|_| ())?;
+    let setup_path = dir.join("notty-setup.exe");
+    let sig_path = dir.join("notty-setup.exe.sig");
+    let verified = (|| {
+        notty_update::http::download(&release.sig_url, &sig_path, |_, _| {}).ok()?;
+        notty_update::http::download(&release.setup_url, &setup_path, |_, _| {}).ok()?;
+        let sig: [u8; 64] = std::fs::read(&sig_path).ok()?.try_into().ok()?;
+        let bytes = std::fs::read(&setup_path).ok()?;
+        notty_update::verify(&bytes, &sig, &notty_update::PUBKEY).then_some(())
+    })();
+    let _ = std::fs::remove_file(&sig_path);
+    if verified.is_none() {
+        let _ = std::fs::remove_file(&setup_path);
+        return Err(());
+    }
+    Ok(Some(setup_path))
+}
+
+fn spawn_self_update_check(hwnd: HWND) {
+    let send_hwnd = SendHwnd(hwnd);
+    std::thread::spawn(move || {
+        let send_hwnd = send_hwnd;
+        let (code, payload) = match fetch_newer_setup() {
+            Ok(None) => (0, 0),
+            Err(()) => (1, 0),
+            Ok(Some(path)) => (2, Box::into_raw(Box::new(path)) as isize),
+        };
+        unsafe {
+            let _ = PostMessageW(Some(send_hwnd.0), WM_SELF_UPDATE, WPARAM(code), LPARAM(payload));
+        }
+    });
+}
+
+/// Lanza el notty-setup descargado. `false` si Windows no pudo (p. ej. UAC cancelado).
+fn launch_setup(exe: &Path) -> bool {
+    unsafe {
+        let verb = to_wide("open");
+        let file = to_wide(&exe.display().to_string());
+        let params = to_wide(SKIP_SELF_UPDATE);
+        let h = ShellExecuteW(None, PCWSTR(verb.as_ptr()), PCWSTR(file.as_ptr()), PCWSTR(params.as_ptr()), None, windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL);
+        h.0 as isize > 32
+    }
 }
 
 fn ensure_anim_timer(st: &mut State, hwnd: HWND) {
@@ -217,7 +279,7 @@ fn ensure_anim_timer(st: &mut State, hwnd: HWND) {
     }
 }
 
-fn run_wizard() -> Result<()> {
+fn run_wizard(check_for_newer: bool) -> Result<()> {
     unsafe {
         let instance = GetModuleHandleW(None)?;
         let class_name = w!("NottySetupClass");
@@ -263,6 +325,10 @@ fn run_wizard() -> Result<()> {
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, ptr as isize);
         if let Some(st) = ptr.as_mut() {
             ensure_anim_timer(st, hwnd);
+            if check_for_newer {
+                st.self_update = ui::SelfUpdate::Checking;
+                spawn_self_update_check(hwnd);
+            }
         }
 
         let _ = ShowWindow(hwnd, SW_SHOW);
@@ -489,6 +555,27 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 if let Some(st) = ptr.as_mut() {
                     st.on_install_failed(wparam.0 as i32);
                     ensure_anim_timer(st, hwnd);
+                    let _ = InvalidateRect(Some(hwnd), None, false);
+                }
+                LRESULT(0)
+            }
+            WM_SELF_UPDATE => {
+                let newer = (wparam.0 == 2).then(|| *Box::from_raw(lparam.0 as *mut PathBuf));
+                if let Some(st) = ptr.as_mut() {
+                    st.self_update = ui::SelfUpdate::Idle;
+                    match newer {
+                        // Ya instalando o instalado: el que corre se queda, sin sorpresas.
+                        Some(exe) if matches!(st.step, Step::Welcome | Step::Options) => {
+                            if launch_setup(&exe) {
+                                close_window(hwnd);
+                            } else {
+                                st.self_update = ui::SelfUpdate::Failed;
+                            }
+                        }
+                        Some(_) => {}
+                        None if wparam.0 == 1 => st.self_update = ui::SelfUpdate::Failed,
+                        None => {}
+                    }
                     let _ = InvalidateRect(Some(hwnd), None, false);
                 }
                 LRESULT(0)

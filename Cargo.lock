@@ -349,6 +349,7 @@ version = "0.1.0"
 dependencies = [
  "notty-config",
  "notty-ui",
+ "notty-update",
  "windows",
  "windows-numerics",
 ]
