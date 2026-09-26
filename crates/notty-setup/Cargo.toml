@@ -1,0 +1,29 @@
+[package]
+name = "notty-setup"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "notty-setup"
+path = "src/main.rs"
+
+[dependencies]
+notty-ui = { path = "../notty-ui" }
+notty-config = { path = "../notty-config" }
+windows = { version = "0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_System_ApplicationInstallationAndServicing",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Dwm",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_Graphics_Direct2D",
+    "Win32_Graphics_Direct2D_Common",
+    "Win32_Graphics_DirectWrite",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Shell",
+] }
+windows-numerics = { version = "0.3.1", features = ["std"] }
