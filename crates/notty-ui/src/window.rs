@@ -1009,6 +1009,11 @@ fn start_update_download(w: &mut WindowState, hwnd: HWND) {
 /// volcado fresco justo antes de relanzar es el equivalente más fiel que hay.
 fn relaunch_via_setup(w: &mut WindowState, setup_exe: &std::path::Path) {
     refresh_recovery(w);
+    // Sin volcado a disco, lo no guardado se perdería al cerrar: mejor no relanzar.
+    if let Err(e) = dump_recovery_snapshot(w.recovery) {
+        w.update.download_error(format!("no se pudo guardar la sesión: {e}"));
+        return;
+    }
     let current = std::env::current_exe().unwrap_or_default();
     let _ = std::process::Command::new(setup_exe)
         .arg("--update")
@@ -1136,17 +1141,22 @@ fn refresh_recovery(w: &WindowState) {
 fn install_recovery_hook(snapshot: &'static RecoverySnapshot) {
     std::panic::set_hook(Box::new(move |info| {
         eprintln!("notty: pánico: {info}");
-        let entries: Vec<notty_io::RecoveryEntry> = {
-            let guard = snapshot.lock().unwrap_or_else(|e| e.into_inner());
-            guard
-                .iter()
-                .filter(|(_, _, dirty)| *dirty)
-                .enumerate()
-                .map(|(i, (name, text, _))| notty_io::RecoveryEntry { name: format!("{i}_{name}"), text: text.clone() })
-                .collect()
-        };
-        let _ = notty_io::dump_recovery(&notty_io::recovery_dir(), &entries);
+        let _ = dump_recovery_snapshot(snapshot);
     }));
+}
+
+/// Vuelca a `notty_io::recovery_dir()` los documentos sucios del snapshot.
+fn dump_recovery_snapshot(snapshot: &RecoverySnapshot) -> std::io::Result<()> {
+    let entries: Vec<notty_io::RecoveryEntry> = {
+        let guard = snapshot.lock().unwrap_or_else(|e| e.into_inner());
+        guard
+            .iter()
+            .filter(|(_, _, dirty)| *dirty)
+            .enumerate()
+            .map(|(i, (name, text, _))| notty_io::RecoveryEntry { name: format!("{i}_{name}"), text: text.clone() })
+            .collect()
+    };
+    notty_io::dump_recovery(&notty_io::recovery_dir(), &entries)
 }
 
 /// Abre la ventana principal de notty y bloquea hasta que se cierra.
