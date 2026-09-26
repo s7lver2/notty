@@ -70,6 +70,8 @@ pub struct UiConfig {
     /// `layout::FONT_MONO`/`LINE_H`. No afecta a la letra del resto de la interfaz
     /// (pestañas, barra de estado, Ajustes), solo al cuerpo del documento y la vista raw.
     pub font_scale: f32,
+    /// Icono de carpeta/archivo delante de cada sugerencia de la línea de ruta.
+    pub suggestion_icons: bool,
 }
 
 impl Default for UiConfig {
@@ -86,6 +88,7 @@ impl Default for UiConfig {
             vim_always: false,
             merged_command_line: false,
             font_scale: 1.0,
+            suggestion_icons: true,
         };
         let preset = ui.preset;
         crate::apply_preset(&mut ui, preset);

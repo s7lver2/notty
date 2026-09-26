@@ -23,6 +23,7 @@ pub enum SettingKey {
     HotkeyMechanism,
     StartWithWindows,
     UpdatesCheck,
+    SuggestionIcons,
 }
 
 /// El valor elegido; `apply` decide qué campo de `Config` toca según `SettingKey`.
@@ -178,6 +179,11 @@ const ARCHIVOS: &[Row] = &[
         desc: "Guarda sola tras dejar de escribir. Solo si el archivo ya tiene ruta.",
         key: SettingKey::Autosave,
     },
+    Row::Toggle {
+        title: "Iconos en las sugerencias",
+        desc: "Carpeta o archivo delante de cada sugerencia al escribir una ruta.",
+        key: SettingKey::SuggestionIcons,
+    },
 ];
 
 const ATAJO_GLOBAL: &[Row] = &[
@@ -275,6 +281,7 @@ pub fn apply(cfg: &mut Config, key: SettingKey, value: SettingValue) {
         (SettingKey::StatusBar, SettingValue::Bool(b)) => cfg.ui.status_bar = b,
         (SettingKey::MergedCommandLine, SettingValue::Bool(b)) => cfg.ui.merged_command_line = b,
         (SettingKey::VimAlways, SettingValue::Bool(b)) => cfg.ui.vim_always = b,
+        (SettingKey::SuggestionIcons, SettingValue::Bool(b)) => cfg.ui.suggestion_icons = b,
         _ => return, // combinación key/value que no tiene sentido: no hace nada
     }
     cfg.ui.preset = Preset::Custom;

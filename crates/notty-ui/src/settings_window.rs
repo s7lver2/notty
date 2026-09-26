@@ -937,6 +937,7 @@ fn current_bool(cfg: &Config, key: SettingKey) -> bool {
         SettingKey::MergedCommandLine => cfg.ui.merged_command_line,
         SettingKey::VimAlways => cfg.ui.vim_always,
         SettingKey::Autosave => cfg.files.autosave,
+        SettingKey::SuggestionIcons => cfg.ui.suggestion_icons,
         SettingKey::StartWithWindows => cfg.hotkey.start_with_windows,
         SettingKey::UpdatesCheck => cfg.updates.check,
         _ => false,

@@ -1169,7 +1169,7 @@ impl Renderer {
                 self.pop_clip();
             }
 
-            self.draw_status(ws, state, pal, frame, bands.merged_status, view);
+            self.draw_status(ws, state, pal, frame, bands.merged_status, view, ui.suggestion_icons);
 
             if let (Some((x, top)), Some(i)) = (self.pending_dropdown.take(), view.open_menu) {
                 let checks = crate::menu::MenuChecks {
@@ -1707,7 +1707,7 @@ impl Renderer {
     /// Barra de estado (`.status`) o, si hay un prompt activo, lo dibuja en su lugar
     /// (nunca coexisten: mientras hay prompt, la franja inferior es suya por completo).
     #[allow(unused_unsafe)]
-    unsafe fn draw_status(&mut self, ws: &Workspace, state: &EditorState, pal: &theme::Palette, frame: layout::Frame, merged: bool, view: &ViewState) {
+    unsafe fn draw_status(&mut self, ws: &Workspace, state: &EditorState, pal: &theme::Palette, frame: layout::Frame, merged: bool, view: &ViewState, suggestion_icons: bool) {
         unsafe {
             let r = frame.status;
             if merged {
@@ -1729,7 +1729,7 @@ impl Renderer {
             };
 
             if prompt_open {
-                self.draw_prompt(&ws.prompt, state, pal, content_r, merged, view);
+                self.draw_prompt(&ws.prompt, state, pal, content_r, merged, view, suggestion_icons);
             } else {
                 self.draw_status_normal(state, pal, content_r, merged, view);
             }
@@ -2061,10 +2061,10 @@ impl Renderer {
     /// Prompt activo (ruta, buscar/reemplazar, línea de comandos vim), ocupando la
     /// franja de estado entera.
     #[allow(unused_unsafe)]
-    unsafe fn draw_prompt(&mut self, prompt: &crate::Prompt, state: &EditorState, pal: &theme::Palette, r: Rect, merged: bool, view: &ViewState) {
+    unsafe fn draw_prompt(&mut self, prompt: &crate::Prompt, state: &EditorState, pal: &theme::Palette, r: Rect, merged: bool, view: &ViewState, suggestion_icons: bool) {
         unsafe {
             match prompt {
-                crate::Prompt::Path(p) => self.draw_path_prompt(p, pal, r, view),
+                crate::Prompt::Path(p) => self.draw_path_prompt(p, pal, r, view, suggestion_icons),
                 crate::Prompt::Find(s) => self.draw_search_bar(s, &state.doc, pal, r, false),
                 crate::Prompt::Replace(s) => self.draw_search_bar(s, &state.doc, pal, r, true),
                 crate::Prompt::VimCmdline(line) => {
@@ -2086,7 +2086,7 @@ impl Renderer {
     }
 
     #[allow(unused_unsafe)]
-    unsafe fn draw_path_prompt(&mut self, p: &crate::PathPromptState, pal: &theme::Palette, r: Rect, view: &ViewState) {
+    unsafe fn draw_path_prompt(&mut self, p: &crate::PathPromptState, pal: &theme::Palette, r: Rect, view: &ViewState, suggestion_icons: bool) {
         unsafe {
             let x = r.left + layout::STATUS_PAD_X;
             let value_color = if p.is_invalid() { pal.danger } else { pal.text };
@@ -2155,7 +2155,7 @@ impl Renderer {
             self.draw_path_value(p, x, xr - 10.0, r, placeholder, value_color, pal);
 
             if p.last_error.is_none() && !visible_sugs.is_empty() {
-                self.draw_suggestions(&visible_sugs, p.scroll, p.selected, total_sugs, pal, r, view);
+                self.draw_suggestions(&visible_sugs, p.scroll, p.selected, total_sugs, pal, r, view, suggestion_icons);
             }
         }
     }
@@ -2216,6 +2216,7 @@ impl Renderer {
         pal: &theme::Palette,
         status: Rect,
         view: &ViewState,
+        show_icons: bool,
     ) {
         unsafe {
             // Mismo tratamiento de fundido + desplazamiento que `draw_dropdown` (Task 3).
@@ -2226,9 +2227,10 @@ impl Renderer {
             let row_h = 24.0;
             let has_more = total > sugs.len();
             let counter_h = if has_more { 20.0 } else { 0.0 };
+            let icon_w = if show_icons { 20.0 } else { 0.0 };
             let longest = sugs.iter().map(|e| self.measure(&e.name, &self.fonts.mono_12)).fold(0.0f32, f32::max);
             let (win_w, _) = self.size_dips();
-            let width = (longest + 16.0 + 16.0).clamp(220.0, 360.0).min((win_w - 24.0).max(120.0));
+            let width = (longest + icon_w + 16.0 + 16.0).clamp(220.0, 360.0).min((win_w - 24.0).max(120.0));
             let height = row_h * sugs.len() as f32 + counter_h + layout::POPUP_PAD * 2.0;
             // Posición final (sin desplazar): la usada para el hit-testing, que no anima.
             let box_r = Rect::new(12.0, status.top - 2.0 - height, 12.0 + width, status.top - 2.0);
@@ -2248,7 +2250,14 @@ impl Renderer {
                 }
                 let label = if entry.is_dir { format!("{}\\", entry.name) } else { entry.name.clone() };
                 let c = if i == selected { pal.accent } else if entry.is_dir { pal.text } else { pal.text_2 };
-                self.text(&label, &self.fonts.mono_12, Rect::new(draw_row.left + 8.0, draw_row.top, draw_row.right - 8.0, draw_row.bottom), c.faded(t));
+                let text_left = if show_icons {
+                    let icon_r = Rect::new(draw_row.left + 8.0, draw_row.top, draw_row.left + 8.0 + 14.0, draw_row.bottom);
+                    self.draw_suggestion_icon(entry.is_dir, icon_r, c.faded(t));
+                    draw_row.left + 8.0 + icon_w
+                } else {
+                    draw_row.left + 8.0
+                };
+                self.text(&label, &self.fonts.mono_12, Rect::new(text_left, draw_row.top, draw_row.right - 8.0, draw_row.bottom), c.faded(t));
                 self.hits.push((row, Hit::Suggestion(i)));
             }
 
@@ -2264,6 +2273,25 @@ impl Renderer {
                     pal.text_3.faded(t),
                 );
             }
+        }
+    }
+
+    /// Icono plano de carpeta o archivo delante de cada sugerencia de ruta (Ajustes →
+    /// Archivos → "Iconos en las sugerencias"). Centrado en `r` (14x14 aprox.), del
+    /// mismo color que la etiqueta de esa fila.
+    fn draw_suggestion_icon(&mut self, is_dir: bool, r: Rect, c: Rgba) {
+        let cx = r.left + r.width() / 2.0;
+        let cy = r.top + r.height() / 2.0;
+        if is_dir {
+            let body = Rect::new(cx - 6.0, cy - 3.0, cx + 6.0, cy + 5.0);
+            let tab = Rect::new(cx - 6.0, cy - 5.0, cx - 1.0, cy - 2.0);
+            self.fill_round(tab, 1.0, c);
+            self.fill_round(body, 1.5, c);
+        } else {
+            let page = Rect::new(cx - 4.5, cy - 6.0, cx + 4.5, cy + 6.0);
+            self.stroke_round_rect(page, 1.0, 1.2, c);
+            self.stroke_line(cx - 2.5, cy - 1.5, cx + 2.5, cy - 1.5, 1.0, c);
+            self.stroke_line(cx - 2.5, cy + 1.5, cx + 2.5, cy + 1.5, 1.0, c);
         }
     }
 
