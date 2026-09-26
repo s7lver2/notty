@@ -1366,6 +1366,11 @@ unsafe fn setup_chrome(hwnd: HWND, dark: bool) {
 
 /// `DWMWA_USE_IMMERSIVE_DARK_MODE`: oscurece el marco nativo (los 4 px de borde que
 /// sigue dibujando DWM). Se vuelve a llamar cuando cambia el tema (Task 10).
+///
+/// Además fija `DWMWA_BORDER_COLOR` al `chrome` de la paleta: si no, Windows 11 pinta
+/// su propio contorno de 1 px, que cambia al activar/desactivar la ventana (gris
+/// claro inactiva, color de acento activa si el usuario lo tiene puesto) y al cambiar
+/// el tema — ese era el borde claro que "a veces" aparecía.
 pub unsafe fn apply_dark_mode(hwnd: HWND, dark: bool) {
     unsafe {
         let value: i32 = if dark { 1 } else { 0 };
@@ -1375,7 +1380,20 @@ pub unsafe fn apply_dark_mode(hwnd: HWND, dark: bool) {
             &value as *const _ as *const _,
             std::mem::size_of::<i32>() as u32,
         );
+        let border = colorref(crate::theme::palette(dark).chrome);
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            windows::Win32::Graphics::Dwm::DWMWA_BORDER_COLOR,
+            &border as *const _ as *const _,
+            std::mem::size_of::<u32>() as u32,
+        );
     }
+}
+
+/// `Rgba` → `COLORREF` (`0x00BBGGRR`), ignorando el alfa.
+fn colorref(c: crate::Rgba) -> u32 {
+    let b = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u32;
+    b(c.0) | (b(c.1) << 8) | (b(c.2) << 16)
 }
 
 /// Lee `HKCU\...\Personalize\AppsUseLightTheme`. Si no se puede leer, asume modo claro.

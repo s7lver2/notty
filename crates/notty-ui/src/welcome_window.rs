@@ -316,6 +316,16 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 let _ = windows::Win32::Graphics::Gdi::ValidateRect(Some(hwnd), None);
                 LRESULT(0)
             }
+            windows::Win32::UI::WindowsAndMessaging::WM_SETTINGCHANGE => {
+                // Windows cambió de claro a oscuro con la bienvenida abierta: el marco
+                // de DWM (y su borde) tiene que seguirle, no solo lo que pintamos.
+                if let Some(st) = ptr.as_ref() {
+                    let dark = is_dark(st.cfg.borrow().ui.theme, crate::window::system_uses_dark_mode());
+                    crate::window::apply_dark_mode(hwnd, dark);
+                    let _ = windows::Win32::Graphics::Gdi::InvalidateRect(Some(hwnd), None, false);
+                }
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
             WM_NCCALCSIZE if wparam.0 != 0 => adaptive::nc_calc_size(hwnd, lparam),
             WM_GETMINMAXINFO => {
                 adaptive::min_max_info(hwnd, lparam, MIN_W, MIN_H);

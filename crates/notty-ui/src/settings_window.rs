@@ -404,6 +404,16 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 let _ = windows::Win32::Graphics::Gdi::ValidateRect(Some(hwnd), None);
                 LRESULT(0)
             }
+            windows::Win32::UI::WindowsAndMessaging::WM_SETTINGCHANGE => {
+                // Cambio de tema de Windows con Ajustes abierto: sin esto el marco de DWM
+                // (y su borde) se quedaba con el tema anterior.
+                if let Some(st) = ptr.as_ref() {
+                    let dark = is_dark(st.cfg.borrow().ui.theme, crate::window::system_uses_dark_mode());
+                    crate::window::apply_dark_mode(hwnd, dark);
+                    invalidate(hwnd);
+                }
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
             WM_NCCALCSIZE if wparam.0 != 0 => {
                 // Sin marco: el área cliente es la ventana entera. Maximizada (p.ej. por
                 // Aero Snap), Windows la saca el grosor del marco por cada lado.
