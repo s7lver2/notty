@@ -59,6 +59,9 @@ struct WindowState {
     renderer: Renderer,
     mouse_down: bool,
     selection_anchor: usize,
+    /// Arrastre en curso del tirador de la barra de scroll del editor: (y del ratón,
+    /// `first_line` de cuando se empezó a arrastrar). `None` en reposo.
+    scroll_drag: Option<(f32, usize)>,
     cfg: Rc<RefCell<notty_config::Config>>,
     /// Solo se usa cuando `cfg.ui.menubar == MenuBar::Alt`: si el menú está desplegado.
     menu_visible: bool,
@@ -184,6 +187,16 @@ impl WindowState {
         let ui = self.cfg.borrow().ui;
         let total = self.ws.active().doc.buffer().len_lines();
         self.renderer.body_and_gutter(&ui, self.ws.len(), self.menu_bar_visible(), total, self.ws.active().raw.is_some())
+    }
+
+    /// "Filas" totales del documento activo para la barra de scroll: líneas de texto,
+    /// o filas de 16 bytes en la vista raw (ver `Renderer::editor_scrollbar_geom`).
+    fn total_rows(&self) -> usize {
+        let st = self.ws.active();
+        match &st.raw {
+            Some(raw) => raw.len().div_ceil(16).max(1),
+            None => st.doc.buffer().len_lines(),
+        }
     }
 }
 
@@ -1178,6 +1191,7 @@ fn run_inner(
             renderer,
             mouse_down: false,
             selection_anchor: 0,
+            scroll_drag: None,
             cfg,
             menu_visible: false,
             hover: Hit::None,
@@ -1959,6 +1973,20 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             SetCapture(hwnd);
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
+                        crate::Hit::ScrollThumb => {
+                            w.scroll_drag = Some((y, w.ws.active().viewport.first_line));
+                            SetCapture(hwnd);
+                        }
+                        crate::Hit::ScrollTrack => {
+                            let (body, _) = w.body_and_gutter();
+                            let total_rows = w.total_rows();
+                            let page = w.ws.active().viewport.visible_lines as i32;
+                            let thumb_top = Renderer::editor_scrollbar_geom(body, &w.ws.active().viewport, total_rows)
+                                .map(|(_, thumb)| thumb.top)
+                                .unwrap_or(y);
+                            w.ws.active_mut().scroll_by(if y < thumb_top { -page } else { page });
+                            let _ = InvalidateRect(Some(hwnd), None, false);
+                        }
                         _ => {
                             if w.open_menu.is_some() {
                                 w.open_menu = None;
@@ -1974,6 +2002,20 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     let (x, y) = point_from_lparam(lparam);
                     let scale = w.renderer.scale();
                     let (x, y) = (x / scale, y / scale);
+                    if let Some((y0, first0)) = w.scroll_drag {
+                        let (body, _) = w.body_and_gutter();
+                        let total_rows = w.total_rows();
+                        if let Some((track, thumb)) =
+                            Renderer::editor_scrollbar_geom(body, &w.ws.active().viewport, total_rows)
+                        {
+                            let free = (track.height() - thumb.height()).max(1.0);
+                            let max_first = total_rows.saturating_sub(w.ws.active().viewport.visible_lines) as f32;
+                            let new_first = (first0 as f32 + (y - y0) * max_first / free).round().clamp(0.0, max_first);
+                            w.ws.active_mut().viewport.first_line = new_first as usize;
+                        }
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                        return LRESULT(0);
+                    }
                     if w.mouse_down {
                         let (body, gutter_w) = w.body_and_gutter();
                         let idx = w.renderer.char_index_at(w.ws.active(), body, gutter_w, x, y);
@@ -2003,6 +2045,11 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             WM_LBUTTONUP => {
                 if let Some(w) = ptr.as_mut() {
                     w.mouse_down = false;
+                    if w.scroll_drag.take().is_some() {
+                        let _ = ReleaseCapture();
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                        return LRESULT(0);
+                    }
                     let (x, y) = point_from_lparam(lparam);
                     let scale = w.renderer.scale();
                     let (x, y) = (x / scale, y / scale);

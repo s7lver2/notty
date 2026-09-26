@@ -29,7 +29,7 @@ use notty_config::UiConfig;
 
 use crate::layout::{self, Rect};
 use crate::theme::{self, Rgba};
-use crate::{EditorState, Workspace};
+use crate::{EditorState, Viewport, Workspace};
 
 /// Convierte un desplazamiento en chars (relativo al inicio de `text`) a un
 /// desplazamiento en unidades UTF-16, que es lo que espera `IDWriteTextLayout`.
@@ -96,6 +96,10 @@ pub enum Hit {
     Overwrite(u8),
     /// Enlace al repositorio en "Acerca de notty".
     AboutLink,
+    /// Tirador de la barra de scroll del editor (arrastrar desplaza el documento).
+    ScrollThumb,
+    /// Zona de la pista por encima/debajo del tirador: clic avanza una página.
+    ScrollTrack,
 }
 
 /// Lo que enseña "Acerca de notty" (menú Ayuda).
@@ -1149,6 +1153,10 @@ impl Renderer {
                 }
             }
             }
+
+            let total_rows =
+                if is_raw { state.raw.as_ref().map(|r| r.len().div_ceil(16).max(1)).unwrap_or(1) } else { total_lines };
+            self.draw_editor_scrollbar(frame.body, &state.viewport, total_rows, pal, view);
 
             if !frame.hints.is_empty() {
                 let k = frame.hints.height() / layout::HINTS_H;
@@ -2338,6 +2346,31 @@ impl Renderer {
     /// más simple y evita necesitar un `IDWriteTextRenderer` a medida para colorear
     /// rangos dentro de un único layout por fila (desviación de tiempo respecto al
     /// plan, que pedía `SetDrawingEffect`; el resultado visual es el mismo).
+    /// Pista y pulgar de la barra de scroll del editor (vacía si el documento cabe
+    /// entero: `total_rows <= viewport.visible_lines`, como en la maqueta no hay barra
+    /// si no hace falta). Sirve igual para texto normal (una "fila" = una línea) que
+    /// para la vista raw (una "fila" = 16 bytes), según lo que le pase `paint`.
+    pub(crate) fn editor_scrollbar_geom(body: layout::Rect, viewport: &Viewport, total_rows: usize) -> Option<(Rect, Rect)> {
+        if total_rows <= viewport.visible_lines {
+            return None;
+        }
+        let track = Rect::new(body.right - 10.0, body.top + 4.0, body.right - 4.0, body.bottom - 4.0);
+        let thumb_h = (track.height() * viewport.visible_lines as f32 / total_rows as f32).clamp(24.0, track.height());
+        let max_first = (total_rows - viewport.visible_lines) as f32;
+        let free = (track.height() - thumb_h).max(1.0);
+        let top = track.top + free * (viewport.first_line as f32 / max_first).clamp(0.0, 1.0);
+        Some((track, Rect::new(track.left, top, track.right, top + thumb_h)))
+    }
+
+    fn draw_editor_scrollbar(&mut self, body: layout::Rect, viewport: &Viewport, total_rows: usize, pal: &theme::Palette, view: &ViewState) {
+        let Some((track, thumb)) = Self::editor_scrollbar_geom(body, viewport, total_rows) else { return };
+        let active = view.pressed == Hit::ScrollThumb || view.hover == Hit::ScrollThumb;
+        let c = if active { pal.text_2 } else { pal.text_3 };
+        self.fill_round(thumb, thumb.width() / 2.0, c);
+        self.hits.push((track, Hit::ScrollTrack));
+        self.hits.push((Rect::new(thumb.left - 2.0, thumb.top, thumb.right + 2.0, thumb.bottom), Hit::ScrollThumb));
+    }
+
     fn draw_hex(&mut self, raw: &crate::RawDoc, cursor: usize, pending_nibble: Option<u8>, first_row: usize, pal: &theme::Palette, frame: layout::Frame) {
         const PREFIX_COLS: f32 = 11.0; // "XXXXXXXX   " (8 dígitos de offset + 3 espacios)
         const ASCII_COL: f32 = 61.0; // PREFIX_COLS + 16*3 + 1 (espacio extra tras el 8º) + 1 (espacio literal)
@@ -2421,5 +2454,35 @@ unsafe fn hit_test_x(
         } else {
             pad
         }
+    }
+}
+
+#[cfg(test)]
+mod scrollbar_tests {
+    use super::*;
+
+    fn vp(first_line: usize, visible_lines: usize) -> Viewport {
+        Viewport { first_line, visible_lines }
+    }
+
+    #[test]
+    fn no_scrollbar_when_document_fits() {
+        let body = Rect::new(0.0, 0.0, 200.0, 400.0);
+        assert!(Renderer::editor_scrollbar_geom(body, &vp(0, 20), 20).is_none());
+        assert!(Renderer::editor_scrollbar_geom(body, &vp(0, 20), 10).is_none());
+    }
+
+    #[test]
+    fn thumb_at_top_when_first_line_is_zero() {
+        let body = Rect::new(0.0, 0.0, 200.0, 400.0);
+        let (track, thumb) = Renderer::editor_scrollbar_geom(body, &vp(0, 10), 100).unwrap();
+        assert_eq!(thumb.top, track.top);
+    }
+
+    #[test]
+    fn thumb_at_bottom_when_scrolled_to_the_end() {
+        let body = Rect::new(0.0, 0.0, 200.0, 400.0);
+        let (track, thumb) = Renderer::editor_scrollbar_geom(body, &vp(90, 10), 100).unwrap();
+        assert!((thumb.bottom - track.bottom).abs() < 0.01);
     }
 }
