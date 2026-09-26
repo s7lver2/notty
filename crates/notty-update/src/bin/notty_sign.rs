@@ -20,6 +20,13 @@ fn cmd_keygen(key_path: Option<&str>) {
     println!("Clave pública (pégala en PUBKEY): {:?}", sk.verifying_key().to_bytes());
 }
 
+fn cmd_pubkey(key: Option<&str>) {
+    let key_path = key.map(PathBuf::from).unwrap_or_else(default_key_path);
+    let key_bytes: [u8; 32] = std::fs::read(&key_path).expect("no se pudo leer la clave privada").try_into().expect("clave con longitud inesperada");
+    let sk = SigningKey::from_bytes(&key_bytes);
+    println!("Clave pública (pégala en PUBKEY): {:?}", sk.verifying_key().to_bytes());
+}
+
 fn cmd_sign(file: &str, key: Option<&str>, out: &str) {
     let key_path = key.map(PathBuf::from).unwrap_or_else(default_key_path);
     let key_bytes: [u8; 32] = std::fs::read(&key_path).expect("no se pudo leer la clave privada").try_into().expect("clave con longitud inesperada");
@@ -37,12 +44,16 @@ fn main() {
             let key = args.iter().position(|a| a == "--key").and_then(|i| args.get(i + 1)).map(String::as_str);
             cmd_keygen(key);
         }
+        Some("--pubkey") => {
+            let key = args.iter().position(|a| a == "--key").and_then(|i| args.get(i + 1)).map(String::as_str);
+            cmd_pubkey(key);
+        }
         Some("--sign") => {
             let file = args.get(1).expect("uso: notty-sign --sign <file> [--key <path>] --out <file>.sig");
             let out = args.iter().position(|a| a == "--out").and_then(|i| args.get(i + 1)).expect("falta --out");
             let key = args.iter().position(|a| a == "--key").and_then(|i| args.get(i + 1)).map(String::as_str);
             cmd_sign(file, key, out);
         }
-        _ => eprintln!("uso: notty-sign --keygen [--key <path>] | notty-sign --sign <file> --out <file>.sig [--key <path>]"),
+        _ => eprintln!("uso: notty-sign --keygen [--key <path>] | notty-sign --pubkey [--key <path>] | notty-sign --sign <file> --out <file>.sig [--key <path>]"),
     }
 }

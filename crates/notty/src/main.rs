@@ -4,18 +4,13 @@
 pub(crate) mod daemon;
 pub(crate) mod shortcut;
 
-/// "owner/repo" de GitHub Releases contra el que se comprueban actualizaciones
-/// (Task 4/6 del plan del actualizador). PLACEHOLDER: reemplázalo por el repo real
-/// en cuanto exista (`gh repo create <owner>/notty ...`, paso manual que no
-/// ejecuta el agente) — usado también por `tools/release.ps1`.
+/// "owner/repo" de GitHub Releases contra el que se comprueban actualizaciones.
 pub(crate) const REPO: &str = "s7lver2/notty";
 
 /// Clave pública Ed25519 contra la que se verifica `notty-setup.exe` antes de
-/// ejecutarlo (Task 4, Step 5 del plan del actualizador). Todo-cero hasta que se
-/// genere la clave real con `notty-sign --keygen` y se pegue aquí (ver Task 5 y
-/// `tools/release.ps1`): verificar contra una clave de ceros siempre falla, así
-/// que el actualizador es seguro por defecto mientras tanto.
-pub(crate) const PUBKEY: [u8; 32] = [0u8; 32];
+/// ejecutarlo. La privada correspondiente vive en `%USERPROFILE%\.notty-release\ed25519.key`
+/// (generada con `notty-sign --keygen`) y nunca se comitea.
+pub(crate) const PUBKEY: [u8; 32] = [51, 182, 247, 144, 128, 138, 166, 110, 113, 122, 139, 194, 108, 248, 62, 17, 7, 196, 199, 207, 255, 46, 54, 194, 18, 251, 14, 57, 139, 2, 199, 90];
 
 /// Intenta reenviar `msg` a una instancia de notty ya en marcha (ventana normal o
 /// `--daemon`) a través del *named pipe* de instancia única. Devuelve `true` si había
