@@ -172,6 +172,9 @@ const TECLADO: &[Row] = &[
     Row::Binding { cmd: Command::ZoomIn },
     Row::Binding { cmd: Command::ZoomOut },
     Row::Binding { cmd: Command::ZoomReset },
+    Row::Group("Atajos globales · funcionan aunque notty no tenga el foco"),
+    Row::Kbd { title: "Nuevo temporal", keys: "Win+Alt+N" },
+    Row::Kbd { title: "Nuevo permanente", keys: "Win+Alt+Shift+N" },
     Row::Link {
         title: "Todos los atajos",
         desc: "Cada acción es un comando con nombre. También puedes reasignarlos en config.toml, sección [keys].",
@@ -217,8 +220,6 @@ const ATAJO_GLOBAL: &[Row] = &[
             ("Acceso directo", SettingValue::HotkeyMechanism(HotkeyMechanism::Lnk)),
         ],
     },
-    Row::Kbd { title: "Nuevo temporal", keys: "Win+Alt+N" },
-    Row::Kbd { title: "Nuevo permanente", keys: "Win+Alt+Shift+N" },
     Row::Toggle { title: "Iniciar con Windows", desc: "", key: SettingKey::StartWithWindows },
 ];
 
