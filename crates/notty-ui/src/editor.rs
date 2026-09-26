@@ -27,6 +27,9 @@ pub struct EditorState {
     /// Ruta del archivo si se abrió con bytes que no se pudieron decodificar (se
     /// ven como U+FFFD): guardar encima destruiría esos bytes, así que `save` se niega.
     pub lossy_source: Option<PathBuf>,
+    /// Revisión del documento en la que falló el último autoguardado: no se reintenta
+    /// hasta que haya cambios nuevos (ni se repite el aviso hasta que uno salga bien).
+    pub autosave_failed_rev: Option<u64>,
 }
 
 impl EditorState {
@@ -45,6 +48,7 @@ impl EditorState {
             open_mtime: None,
             syntax: Default::default(),
             lossy_source: None,
+            autosave_failed_rev: None,
         }
     }
 
@@ -65,6 +69,7 @@ impl EditorState {
             open_mtime,
             syntax: Default::default(),
             lossy_source,
+            autosave_failed_rev: None,
         }
     }
 

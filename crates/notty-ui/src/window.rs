@@ -763,7 +763,7 @@ fn start_tour(hwnd: HWND) {
 
 /// Guarda el documento activo, pero antes comprueba si el archivo cambió en disco
 /// desde que se abrió: si es así, abre `Prompt::Conflict` en vez de escribir encima.
-fn try_save(w: &mut WindowState) {
+fn try_save(w: &mut WindowState) -> SaveOutcome {
     let path_and_since = {
         let st = w.ws.active();
         st.path.clone().map(|p| (p, st.open_mtime))
@@ -771,12 +771,36 @@ fn try_save(w: &mut WindowState) {
     if let Some((path, Some(since))) = path_and_since {
         if notty_io::changed_since(&path, since) {
             w.ws.open_conflict();
-            return;
+            return SaveOutcome::Conflict;
         }
     }
-    let _ = w.ws.active_mut().save();
-    if let Some(path) = w.ws.active().path.clone() {
-        w.ws.active_mut().open_mtime = notty_io::mtime(&path).ok();
+    if let Err(e) = w.ws.active_mut().save() {
+        return SaveOutcome::Failed(e.to_string());
+    }
+    let st = w.ws.active_mut();
+    st.autosave_failed_rev = None;
+    if let Some(path) = st.path.clone() {
+        st.open_mtime = notty_io::mtime(&path).ok();
+    }
+    SaveOutcome::Saved
+}
+
+enum SaveOutcome {
+    Saved,
+    Conflict,
+    Failed(String),
+}
+
+/// Guardado pedido por el usuario: si falla, lo dice en la barra de estado.
+/// Devuelve `true` solo si se guardó.
+fn save_now(w: &mut WindowState, hwnd: HWND) -> bool {
+    match try_save(w) {
+        SaveOutcome::Saved => true,
+        SaveOutcome::Conflict => false,
+        SaveOutcome::Failed(e) => {
+            show_notice(w, hwnd, format!("No se pudo guardar: {e}"));
+            false
+        }
     }
 }
 
@@ -785,7 +809,7 @@ fn try_save(w: &mut WindowState) {
 /// tecla, y mucho más simple — ver Task 7 Step 3 del plan). Solo se autoguarda el
 /// documento activo, solo si tiene ruta real, no es temporal volátil, y no hay ya un
 /// conflicto sin resolver.
-fn autosave_tick(w: &mut WindowState) {
+fn autosave_tick(w: &mut WindowState, hwnd: HWND) {
     if !w.cfg.borrow().files.autosave {
         return;
     }
@@ -794,8 +818,16 @@ fn autosave_tick(w: &mut WindowState) {
     }
     let st = w.ws.active();
     let has_real_path = st.path.is_some() && !matches!(st.temp, Some(notty_config::TempMode::Volatile));
-    if has_real_path && st.doc.is_dirty() {
-        try_save(w);
+    let already_failed = st.autosave_failed_rev == Some(st.doc.revision());
+    if has_real_path && st.doc.is_dirty() && !already_failed {
+        if let SaveOutcome::Failed(e) = try_save(w) {
+            let st = w.ws.active_mut();
+            let first = st.autosave_failed_rev.is_none();
+            st.autosave_failed_rev = Some(st.doc.revision());
+            if first {
+                show_notice(w, hwnd, format!("No se pudo autoguardar: {e}"));
+            }
+        }
     }
     refresh_recovery(w);
 }
@@ -1093,13 +1125,19 @@ fn about_content(repo: &str) -> crate::AboutContent {
 /// Resuelve `Prompt::Conflict`: `M` conserva lo escrito en notty y lo guarda, `D`
 /// descarta los cambios locales y recarga lo que hay en disco. Cualquier otra tecla
 /// no hace nada (Esc ya se maneja antes, en `handle_prompt_keydown`).
-fn handle_conflict_key(w: &mut WindowState, vk: u32) {
+fn handle_conflict_key(w: &mut WindowState, hwnd: HWND, vk: u32) {
     match vk {
         0x4D => {
             // M: el mío.
-            let _ = w.ws.active_mut().save();
-            if let Some(path) = w.ws.active().path.clone() {
-                w.ws.active_mut().open_mtime = notty_io::mtime(&path).ok();
+            match w.ws.active_mut().save() {
+                Ok(()) => {
+                    let st = w.ws.active_mut();
+                    st.autosave_failed_rev = None;
+                    if let Some(path) = st.path.clone() {
+                        st.open_mtime = notty_io::mtime(&path).ok();
+                    }
+                }
+                Err(e) => show_notice(w, hwnd, format!("No se pudo guardar: {e}")),
             }
             w.ws.close_prompt();
         }
@@ -1990,7 +2028,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             // llegar aquí), F3 no tiene una búsqueda que repetir: no hace nada.
                         }
                         crate::EditorAction::Save => {
-                            try_save(w);
+                            save_now(w, hwnd);
                             update_title(hwnd, w.ws.active());
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
@@ -2433,7 +2471,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             WM_TIMER => {
                 if wparam.0 == ID_AUTOSAVE_TIMER {
                     if let Some(w) = ptr.as_mut() {
-                        autosave_tick(w);
+                        autosave_tick(w, hwnd);
                         let _ = InvalidateRect(Some(hwnd), None, false);
                     }
                     return LRESULT(0);
@@ -2550,7 +2588,7 @@ fn run_menu_item(w: &mut WindowState, hwnd: HWND, menu_idx: usize, item_idx: usi
                     start_popup_anim(w, hwnd);
                 }
             } else {
-                try_save(w);
+                save_now(w, hwnd);
             }
         }
         MenuCmd::SaveAs => {
@@ -2737,7 +2775,7 @@ fn handle_prompt_keydown(w: &mut WindowState, hwnd: HWND, vk: u32, mods: Modifie
     } else if matches!(w.ws.prompt, crate::Prompt::VimCmdline(_)) {
         handle_vim_cmdline_key(w, hwnd, vk);
     } else if matches!(w.ws.prompt, crate::Prompt::Conflict) {
-        handle_conflict_key(w, vk);
+        handle_conflict_key(w, hwnd, vk);
     }
 }
 
@@ -2981,6 +3019,7 @@ fn commit_path_prompt_with(w: &mut WindowState, hwnd: HWND, force_overwrite: boo
                         match w.ws.active_mut().save() {
                             Ok(()) => {
                                 w.ws.active_mut().open_mtime = notty_io::mtime(&path).ok();
+                                w.ws.active_mut().autosave_failed_rev = None;
                                 done = true;
                             }
                             Err(e) => {
@@ -3031,16 +3070,18 @@ fn commit_vim_cmdline(w: &mut WindowState, hwnd: HWND) {
     w.ws.close_prompt();
     match crate::parse_vim_cmd(&line) {
         crate::VimCmd::Save => {
-            try_save(w);
+            save_now(w, hwnd);
         }
         crate::VimCmd::Quit => {
             let i = w.ws.active_index();
             close_tab(w, hwnd, i);
         }
         crate::VimCmd::SaveAndQuit => {
-            try_save(w);
-            let i = w.ws.active_index();
-            close_tab(w, hwnd, i);
+            // Si no se pudo guardar, la pestaña no se cierra: se perdería lo escrito.
+            if save_now(w, hwnd) {
+                let i = w.ws.active_index();
+                close_tab(w, hwnd, i);
+            }
         }
         crate::VimCmd::Substitute { pattern, replacement, global, ignore_case } => {
             // `replace_all` ya sustituye todas las apariciones de cada línea, que es lo que
