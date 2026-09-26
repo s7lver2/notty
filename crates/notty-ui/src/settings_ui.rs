@@ -80,6 +80,11 @@ pub(crate) enum Hit {
     LigToggle(u16),
     LigDelete(u16),
     LigAdd,
+    /// Ajustes → Sintaxis: interruptor del lenguaje `n` de `syntax::LANGS`, elegirlo
+    /// para la vista previa, y activar/desactivar todos.
+    LangToggle(u16),
+    LangPick(u16),
+    LangAll(bool),
     /// Zonas sin acción que solo reaccionan al ratón (atajos de Ayuda...).
     Static(u16),
     ScrollThumb,

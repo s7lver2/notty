@@ -68,13 +68,20 @@ impl Inputs {
 pub(crate) struct Preview {
     pub doc: notty_core::Document,
     pub syntax: crate::syntax::SyntaxCache,
+    /// La muestra de cada lenguaje de `syntax::LANGS` (subpágina Sintaxis), con su
+    /// propio árbol para no reparsear al cambiar de uno a otro.
+    pub langs: Vec<(notty_core::Document, crate::syntax::SyntaxCache)>,
 }
 
 pub(crate) const PREVIEW_CODE: &str = "fn main() -> Result<(), Error> {\n    let path = args().nth(1)?;\n    if path != \"\" { open(&path)?; }\n    // abre lo que te pasen por argumento\n}";
 
 impl Default for Preview {
     fn default() -> Self {
-        Self { doc: notty_core::Document::new(PREVIEW_CODE, "\n"), syntax: Default::default() }
+        Self {
+            doc: notty_core::Document::new(PREVIEW_CODE, "\n"),
+            syntax: Default::default(),
+            langs: crate::syntax::LANGS.iter().map(|l| (notty_core::Document::new(l.sample, "\n"), Default::default())).collect(),
+        }
     }
 }
 
@@ -90,6 +97,9 @@ pub(crate) struct PageData<'a> {
     pub preview: &'a Preview,
     pub logo: Option<&'a ID2D1Bitmap>,
     pub system_dark: bool,
+    /// Lenguaje de la vista previa de Sintaxis (índice en `syntax::LANGS`) y cuándo se eligió.
+    pub syn_pick: usize,
+    pub syn_pick_at: Instant,
 }
 
 /// Fuentes que traen ligaduras de programación propias (etiqueta "Ligaduras").
@@ -120,6 +130,7 @@ pub(crate) fn filtered_fonts<'f>(fonts: &'f [String], query: &str) -> Vec<&'f St
 pub(crate) fn has_continuous_anim(d: &PageData) -> bool {
     match d.page {
         Page::Apariencia | Page::Archivos | Page::AtajoGlobal | Page::AcercaDe | Page::Ayuda => true,
+        Page::Sintaxis => d.syn_pick_at.elapsed().as_millis() < 300,
         Page::Actualizaciones => matches!(d.update.phase, UpdatePhase::Checking | UpdatePhase::Downloading(..) | UpdatePhase::Found),
         _ => false,
     }
@@ -142,6 +153,7 @@ pub(crate) fn draw_page(ui: &mut Ui, d: &PageData, area: Rect) -> f32 {
         Page::Apariencia => apariencia(ui, d, x, top, w),
         Page::Fuentes => fuentes(ui, d, x, top, w),
         Page::Ligaduras => ligaduras(ui, d, x, top, w),
+        Page::Sintaxis => sintaxis(ui, d, x, top, w),
         Page::Ventana => ventana(ui, d, x, top, w),
         Page::Teclado => teclado(ui, d, x, top, w),
         Page::Archivos => archivos(ui, d, x, top, w),
@@ -414,8 +426,12 @@ fn apariencia(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     item(ui, d, 2);
     let key = SettingKey::SyntaxHighlight;
     let hit = Hit::Toggle(key);
-    let desc = "Según la extensión: Rust, JS/TS, Python, C/C++, JSON, TOML, Markdown, YAML";
-    let g = row(ui, x, y, w, hit, 34.0, desc, 40.0, 22.0);
+    let total = crate::syntax::LANGS.len();
+    let active = crate::syntax::LANGS.iter().filter(|l| !cfg.syntax_disabled.iter().any(|d| d == l.id)).count();
+    let desc_s = if cfg.ui.syntax_highlight { format!("{active} de {total} lenguajes, según la extensión del archivo") } else { "Desactivado".to_string() };
+    let desc = desc_s.as_str();
+    let editar_w = ui.measure("Editar", 12.0, false);
+    let g = row(ui, x, y, w, hit, 34.0, desc, 40.0 + 14.0 + editar_w, 22.0);
     let on = cfg.ui.syntax_highlight;
     let (cx, cy) = ui.ic_begin(g.ic, g.hover, ui.pal.surface);
     let bars = [(16.0, ui.pal.syn_keyword), (11.0, ui.pal.syn_string), (14.0, ui.pal.syn_function)];
@@ -427,7 +443,8 @@ fn apariencia(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     }
     ui.pop_xf();
     title_desc(ui, g.text_x, text_y(&g, desc, ui), g.text_w, "Resaltado de sintaxis", desc);
-    ui.toggle(g.ctrl, hit, on);
+    ui.more(g.ctrl.left, g.ctrl.top + 11.0, "Editar", Hit::Go(Page::Sintaxis));
+    ui.toggle(Rect::new(g.ctrl.right - 40.0, g.ctrl.top, g.ctrl.right, g.ctrl.bottom), hit, on);
     y = g.rect.bottom + 4.0;
     ui.end_enter();
 
@@ -605,7 +622,7 @@ fn code_preview(ui: &mut Ui, d: &PageData, x: f32, y: f32, w: f32) -> f32 {
     let gut = ui.tween(TK::Preview(2), cfg.ui.line_numbers as u8 as f32, 350, Curve::Out);
     let syn = ui.tween(TK::Preview(3), cfg.ui.syntax_highlight as u8 as f32, 350, Curve::Linear);
     let code_x = card.left + 16.0 + (38.0 + 14.0) * gut;
-    let spans = d.preview.syntax.line_spans(&d.preview.doc, Some(std::path::Path::new("vista.rs")), 0..lines.len());
+    let spans = d.preview.syntax.line_spans(&d.preview.doc, Some(std::path::Path::new("vista.rs")), 0..lines.len(), &cfg.syntax_disabled);
     let entries = crate::ligature::entries(&cfg.ligature_overrides, &cfg.ligature_disabled);
     let mut seqs: Vec<&crate::ligature::Entry> = entries.iter().collect();
     seqs.sort_by_key(|e| std::cmp::Reverse(e.seq.chars().count()));
@@ -961,6 +978,141 @@ fn ligaduras(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     }
     let rows = entries.len().div_ceil(2);
     y + (ch + 6.0) * rows as f32 - 6.0
+}
+
+// --- Sintaxis -----------------------------------------------------------------------
+
+fn sintaxis(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
+    use crate::syntax::LANGS;
+    let cfg = d.cfg;
+    let pal = ui.pal;
+    let key = SettingKey::SyntaxHighlight;
+    let on = cfg.ui.syntax_highlight;
+    let mut y = crumb_header(ui, d, x, top, w);
+    let tr = Rect::new(x + w - 40.0, y - 25.0, x + w, y - 3.0);
+    ui.toggle(tr, Hit::Toggle(key), on);
+    let aw = ui.measure("Activado", 12.0, false);
+    ui.text("Activado", 12.0, false, Rect::new(tr.left - 10.0 - aw, tr.top, tr.left - 8.0, tr.bottom), pal.text_2);
+    y += 14.0;
+
+    // Vista previa del lenguaje elegido, con los colores de verdad.
+    let pick = d.syn_pick.min(LANGS.len() - 1);
+    let info = &LANGS[pick];
+    let lang_on = on && !cfg.syntax_disabled.iter().any(|id| id == info.id);
+    let family = cfg.ui.font_family.primary_name();
+    let f = ui.mono(family, 13.0);
+    let cw = ui.r.measure("0", &f).max(1.0);
+    let lh = 20.0;
+    const ROWS: usize = 6;
+    let card = Rect::new(x, y, x + w, y + 28.0 + lh * ROWS as f32);
+    ui.r.fill_round(card, 8.0, pal.chrome);
+    ui.r.fill_round(Rect::new(card.left + 1.0, card.top + 1.0, card.right - 1.0, card.bottom - 1.0), 7.0, pal.cmd);
+    let syn = ui.tween(TK::Preview(40), lang_on as u8 as f32, 350, Curve::Linear);
+    let since = d.syn_pick_at.elapsed().as_secs_f32() * 1000.0;
+    let fade = if ui.anim() { (since / 220.0).clamp(0.0, 1.0) } else { 1.0 };
+    let lift = 8.0 * (1.0 - crate::anim::ease_out_cubic(fade));
+    let (doc, cache) = &d.preview.langs[pick];
+    let lines: Vec<&str> = info.sample.lines().take(ROWS).collect();
+    let spans = cache.spans_for(doc, Some(info.lang), 0..lines.len());
+    ui.r.push_clip(Rect::new(card.left + 1.0, card.top + 1.0, card.right - 1.0, card.bottom - 1.0));
+    ui.push_fade(fade);
+    for (li, line) in lines.iter().enumerate() {
+        let ly = card.top + 14.0 + lh * li as f32 + lift;
+        let chars: Vec<char> = line.chars().collect();
+        let mut colors: Vec<Rgba> = vec![pal.text; chars.len()];
+        for s in spans.get(li).into_iter().flatten() {
+            if let Some(c) = crate::syntax::color(pal, s.highlight) {
+                for col in s.start as usize..(s.start + s.len) as usize {
+                    if let Some(slot) = colors.get_mut(col) {
+                        *slot = pal.text.mix(c, syn);
+                    }
+                }
+            }
+        }
+        let mut start = 0;
+        while start < chars.len() {
+            let mut end = start + 1;
+            while end < chars.len() && colors[end] == colors[start] {
+                end += 1;
+            }
+            let s: String = chars[start..end].iter().collect();
+            if !s.trim().is_empty() {
+                let rx = card.left + 16.0 + cw * start as f32;
+                ui.r.text(&s, &f, Rect::new(rx, ly, rx + cw * (end - start) as f32 + cw, ly + lh), colors[start]);
+            }
+            start = end;
+        }
+    }
+    ui.pop_fade();
+    ui.r.pop_clip();
+    let chip = format!("{} · .{}", info.name, info.exts.first().copied().unwrap_or(""));
+    let chip_w = ui.measure(&chip, 11.0, false) + 16.0;
+    let cr = Rect::new(card.right - 12.0 - chip_w, card.top + 10.0, card.right - 12.0, card.top + 30.0);
+    ui.r.fill_round(cr, 4.0, ui.row_c(0.0));
+    ui.r.text_center(&chip, &ui.font(11.0, false), cr, pal.text_2);
+    y = card.bottom + 10.0;
+
+    // Leyenda de colores.
+    let legend = [
+        ("Palabra clave", pal.syn_keyword),
+        ("Cadena", pal.syn_string),
+        ("Número", pal.syn_number),
+        ("Tipo", pal.syn_type),
+        ("Función", pal.syn_function),
+        ("Comentario", pal.syn_comment),
+    ];
+    let mut lx = x + 2.0;
+    for (name, c) in legend {
+        let nw = ui.measure(name, 11.0, false);
+        if lx + 14.0 + nw > x + w {
+            break;
+        }
+        ui.r.fill_round(Rect::new(lx, y + 4.0, lx + 8.0, y + 12.0), 2.0, c);
+        ui.text(name, 11.0, false, Rect::new(lx + 12.0, y, lx + 12.0 + nw + 2.0, y + 16.0), pal.text_3);
+        lx += 12.0 + nw + 14.0;
+    }
+    y += 16.0 + 14.0;
+
+    // Contador + activar/desactivar todos.
+    let active = LANGS.iter().filter(|l| !cfg.syntax_disabled.iter().any(|id| id == l.id)).count();
+    ui.text(&format!("{active} de {} lenguajes activos", LANGS.len()), 12.0, false, Rect::new(x, y, x + w, y + 18.0), pal.text_2);
+    let all_w = ui.measure("Desactivar todos", 12.0, false);
+    ui.more(x + w - all_w, y + 9.0, "Desactivar todos", Hit::LangAll(false));
+    let on_w = ui.measure("Activar todos", 12.0, false);
+    ui.more(x + w - all_w - 16.0 - on_w, y + 9.0, "Activar todos", Hit::LangAll(true));
+    y += 18.0 + 10.0;
+
+    // Cuadrícula: clic en la celda = verla arriba; interruptor = encender/apagar.
+    let colw = (w - 6.0) / 2.0;
+    let ch = 50.0;
+    let fm = ui.mono(ui.r.mono_family(), 11.0);
+    for (j, l) in LANGS.iter().enumerate() {
+        let cx = x + (colw + 6.0) * (j % 2) as f32;
+        let cyy = y + (ch + 6.0) * (j / 2) as f32;
+        let r = Rect::new(cx, cyy, cx + colw, cyy + ch);
+        item(ui, d, j);
+        let pick_hit = Hit::LangPick(j as u16);
+        let enabled = !cfg.syntax_disabled.iter().any(|id| id == l.id);
+        let hv = ui.hover_t(pick_hit, 200);
+        let op = ui.tween(TK::On(Hit::Static(400 + j as u16)), if enabled && on { 1.0 } else { 0.45 }, 250, Curve::Linear);
+        let sel = ui.tween(TK::On(pick_hit), (j == pick) as u8 as f32, 250, Curve::Out);
+        ui.push_fade(op);
+        ui.r.fill_round(r, 6.0, ui.row_c(hv * 2.0).mix(pal.accent_soft, sel * 0.6));
+        ui.pop_fade();
+        if sel > 0.01 {
+            ui.r.stroke_round_rect(Rect::new(r.left + 0.75, r.top + 0.75, r.right - 0.75, r.bottom - 0.75), 6.0, 1.5, pal.accent.faded(sel));
+        }
+        ui.hit(r, pick_hit);
+        ui.push_fade(op);
+        ui.text(l.name, 13.0, false, Rect::new(cx + 14.0, r.top + 8.0, r.right - 64.0, r.top + 26.0), pal.text);
+        let exts: Vec<String> = l.exts.iter().take(4).map(|e| format!(".{e}")).collect();
+        ui.r.text(&exts.join(" "), &fm, Rect::new(cx + 14.0, r.top + 27.0, r.right - 64.0, r.top + 43.0), pal.text_3);
+        ui.pop_fade();
+        let tr = Rect::new(r.right - 52.0, r.top + ch / 2.0 - 11.0, r.right - 12.0, r.top + ch / 2.0 + 11.0);
+        ui.toggle(tr, Hit::LangToggle(j as u16), enabled);
+        ui.end_enter();
+    }
+    y + (ch + 6.0) * LANGS.len().div_ceil(2) as f32 - 6.0
 }
 
 // --- Ventana ------------------------------------------------------------------------

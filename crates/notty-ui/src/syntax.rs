@@ -25,26 +25,76 @@ pub enum Lang {
     Toml,
     Markdown,
     Yaml,
+    Go,
+    Java,
+    CSharp,
+    Html,
+    Css,
+    Bash,
+    Lua,
+    Ruby,
+    Php,
+    Xml,
+    Sql,
 }
 
-const LANG_COUNT: usize = 11;
+const LANG_COUNT: usize = 22;
+
+/// Un lenguaje tal como sale en Ajustes → Apariencia → Sintaxis. TSX no tiene
+/// entrada propia: va con TypeScript (mismo `id`, así se apagan juntos).
+pub struct LangInfo {
+    pub lang: Lang,
+    /// Clave en `syntax_disabled` de config.toml.
+    pub id: &'static str,
+    pub name: &'static str,
+    pub exts: &'static [&'static str],
+    /// Nombres de archivo sin extensión que también le tocan (`Gemfile`, `.bashrc`).
+    pub files: &'static [&'static str],
+    /// Muestra corta para la vista previa de la subpágina.
+    pub sample: &'static str,
+}
+
+pub const LANGS: &[LangInfo] = &[
+    LangInfo { lang: Lang::Rust, id: "rust", name: "Rust", exts: &["rs"], files: &[], sample: "fn main() {\n    let n = 42;\n    println!(\"hola {n}\"); // saludo\n}" },
+    LangInfo { lang: Lang::Python, id: "python", name: "Python", exts: &["py", "pyw", "pyi"], files: &[], sample: "def saluda(nombre: str) -> None:\n    n = 42\n    print(f\"hola {nombre}\")  # saludo\n" },
+    LangInfo { lang: Lang::JavaScript, id: "javascript", name: "JavaScript", exts: &["js", "mjs", "cjs", "jsx"], files: &[], sample: "function saluda(nombre) {\n  const n = 42;\n  console.log(`hola ${nombre}`); // saludo\n}" },
+    LangInfo { lang: Lang::TypeScript, id: "typescript", name: "TypeScript", exts: &["ts", "mts", "cts", "tsx"], files: &[], sample: "function saluda(nombre: string): void {\n  const n: number = 42;\n  console.log(`hola ${nombre}`); // saludo\n}" },
+    LangInfo { lang: Lang::C, id: "c", name: "C", exts: &["c", "h"], files: &[], sample: "#include <stdio.h>\nint main(void) {\n    int n = 42;\n    printf(\"hola\\n\"); // saludo\n}" },
+    LangInfo { lang: Lang::Cpp, id: "cpp", name: "C++", exts: &["cpp", "cc", "cxx", "hpp", "hh", "hxx"], files: &[], sample: "#include <iostream>\nint main() {\n    auto n = 42;\n    std::cout << \"hola\"; // saludo\n}" },
+    LangInfo { lang: Lang::CSharp, id: "csharp", name: "C#", exts: &["cs", "csx"], files: &[], sample: "class Programa {\n    static void Main() {\n        int n = 42;\n        System.Console.WriteLine(\"hola\"); // saludo\n    }\n}" },
+    LangInfo { lang: Lang::Java, id: "java", name: "Java", exts: &["java"], files: &[], sample: "class Programa {\n    public static void main(String[] args) {\n        int n = 42;\n        System.out.println(\"hola\"); // saludo\n    }\n}" },
+    LangInfo { lang: Lang::Go, id: "go", name: "Go", exts: &["go"], files: &[], sample: "package main\n\nfunc main() {\n    n := 42\n    println(\"hola\", n) // saludo\n}" },
+    LangInfo { lang: Lang::Php, id: "php", name: "PHP", exts: &["php", "phtml"], files: &[], sample: "<?php\nfunction saluda(string $nombre): void {\n    $n = 42;\n    echo \"hola $nombre\"; // saludo\n}" },
+    LangInfo { lang: Lang::Ruby, id: "ruby", name: "Ruby", exts: &["rb", "rake", "gemspec"], files: &["Gemfile", "Rakefile"], sample: "def saluda(nombre)\n  n = 42\n  puts \"hola #{nombre}\" # saludo\nend" },
+    LangInfo { lang: Lang::Lua, id: "lua", name: "Lua", exts: &["lua"], files: &[], sample: "local function saluda(nombre)\n  local n = 42\n  print(\"hola \" .. nombre) -- saludo\nend" },
+    LangInfo { lang: Lang::Bash, id: "bash", name: "Bash", exts: &["sh", "bash", "zsh"], files: &[".bashrc", ".bash_profile", ".zshrc", ".profile"], sample: "#!/bin/bash\nn=42\nif [ \"$n\" -gt 0 ]; then\n  echo \"hola $USER\" # saludo\nfi" },
+    LangInfo { lang: Lang::Html, id: "html", name: "HTML", exts: &["html", "htm", "xhtml"], files: &[], sample: "<!doctype html>\n<p class=\"nota\">hola</p>\n<!-- saludo -->\n<a href=\"#\">enlace</a>" },
+    LangInfo { lang: Lang::Css, id: "css", name: "CSS", exts: &["css"], files: &[], sample: ".nota {\n  color: #73b6fa;\n  margin: 4px 0; /* saludo */\n}" },
+    LangInfo { lang: Lang::Json, id: "json", name: "JSON", exts: &["json", "jsonc", "json5"], files: &[], sample: "{\n  \"nombre\": \"notty\",\n  \"versión\": 42,\n  \"activo\": true\n}" },
+    LangInfo { lang: Lang::Toml, id: "toml", name: "TOML", exts: &["toml"], files: &[], sample: "[paquete]\nnombre = \"notty\" # saludo\nversion = 42\nactivo = true" },
+    LangInfo { lang: Lang::Yaml, id: "yaml", name: "YAML", exts: &["yaml", "yml"], files: &[], sample: "nombre: notty\nversion: 42\nactivo: true # saludo\nlista: [a, b]" },
+    LangInfo { lang: Lang::Xml, id: "xml", name: "XML", exts: &["xml", "xsd", "xsl", "xslt", "svg", "csproj", "props", "targets", "wxs", "plist"], files: &[], sample: "<?xml version=\"1.0\"?>\n<nota tipo=\"saludo\">\n  <!-- hola -->\n  <texto>hola</texto>\n</nota>" },
+    LangInfo { lang: Lang::Sql, id: "sql", name: "SQL", exts: &["sql"], files: &[], sample: "SELECT nombre, 42 AS n\nFROM usuarios\nWHERE activo = TRUE -- saludo\nORDER BY nombre;" },
+    LangInfo { lang: Lang::Markdown, id: "markdown", name: "Markdown", exts: &["md", "markdown"], files: &[], sample: "# Título\n\nUn párrafo.\n\n```\ncódigo\n```" },
+];
+
+impl Lang {
+    pub fn info(self) -> &'static LangInfo {
+        let target = if self == Lang::Tsx { Lang::TypeScript } else { self };
+        LANGS.iter().find(|l| l.lang == target).expect("todo Lang salvo Tsx está en LANGS")
+    }
+}
 
 pub fn lang_for_path(path: &Path) -> Option<Lang> {
+    let name = path.file_name()?.to_str()?;
+    if let Some(l) = LANGS.iter().find(|l| l.files.iter().any(|f| f.eq_ignore_ascii_case(name))) {
+        return Some(l.lang);
+    }
     let ext = path.extension()?.to_str()?.to_ascii_lowercase();
-    Some(match ext.as_str() {
-        "rs" => Lang::Rust,
-        "js" | "mjs" | "cjs" | "jsx" => Lang::JavaScript,
-        "ts" | "mts" | "cts" => Lang::TypeScript,
-        "tsx" => Lang::Tsx,
-        "py" | "pyw" => Lang::Python,
-        "c" | "h" => Lang::C,
-        "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" => Lang::Cpp,
-        "json" => Lang::Json,
-        "toml" => Lang::Toml,
-        "md" | "markdown" => Lang::Markdown,
-        "yaml" | "yml" => Lang::Yaml,
-        _ => return None,
-    })
+    if ext == "tsx" {
+        return Some(Lang::Tsx);
+    }
+    LANGS.iter().find(|l| l.exts.contains(&ext.as_str())).map(|l| l.lang)
 }
 
 /// Los nombres estándar de `tree-sitter-highlight` (los de su README), más
@@ -143,6 +193,17 @@ fn build(lang: Lang) -> Option<Grammar> {
         Lang::Toml => (tree_sitter_toml_ng::LANGUAGE.into(), tree_sitter_toml_ng::HIGHLIGHTS_QUERY.into()),
         Lang::Markdown => (tree_sitter_md::LANGUAGE.into(), tree_sitter_md::HIGHLIGHT_QUERY_BLOCK.into()),
         Lang::Yaml => (tree_sitter_yaml::LANGUAGE.into(), tree_sitter_yaml::HIGHLIGHTS_QUERY.into()),
+        Lang::Go => (tree_sitter_go::LANGUAGE.into(), tree_sitter_go::HIGHLIGHTS_QUERY.into()),
+        Lang::Java => (tree_sitter_java::LANGUAGE.into(), tree_sitter_java::HIGHLIGHTS_QUERY.into()),
+        Lang::CSharp => (tree_sitter_c_sharp::LANGUAGE.into(), tree_sitter_c_sharp::HIGHLIGHTS_QUERY.into()),
+        Lang::Html => (tree_sitter_html::LANGUAGE.into(), tree_sitter_html::HIGHLIGHTS_QUERY.into()),
+        Lang::Css => (tree_sitter_css::LANGUAGE.into(), tree_sitter_css::HIGHLIGHTS_QUERY.into()),
+        Lang::Bash => (tree_sitter_bash::LANGUAGE.into(), tree_sitter_bash::HIGHLIGHT_QUERY.into()),
+        Lang::Lua => (tree_sitter_lua::LANGUAGE.into(), tree_sitter_lua::HIGHLIGHTS_QUERY.into()),
+        Lang::Ruby => (tree_sitter_ruby::LANGUAGE.into(), tree_sitter_ruby::HIGHLIGHTS_QUERY.into()),
+        Lang::Php => (tree_sitter_php::LANGUAGE_PHP.into(), tree_sitter_php::HIGHLIGHTS_QUERY.into()),
+        Lang::Xml => (tree_sitter_xml::LANGUAGE_XML.into(), tree_sitter_xml::XML_HIGHLIGHT_QUERY.into()),
+        Lang::Sql => (tree_sitter_sequel::LANGUAGE.into(), tree_sitter_sequel::HIGHLIGHTS_QUERY.into()),
     };
     let query = Query::new(&language, &src).ok()?;
     let highlights = query.capture_names().iter().map(|n| resolve(n)).collect();
@@ -178,9 +239,16 @@ impl SyntaxCache {
     /// Tramos de color de cada línea de `lines` (vacío si no hay gramática para
     /// `path`). Reparsea solo si el texto cambió desde la última vez, y entonces de
     /// forma incremental a partir del árbol anterior.
-    pub fn line_spans(&self, doc: &Document, path: Option<&Path>, lines: Range<usize>) -> Vec<Vec<Span>> {
+    /// `disabled`: ids de `LANGS` apagados en Ajustes (`Config::syntax_disabled`).
+    pub fn line_spans(&self, doc: &Document, path: Option<&Path>, lines: Range<usize>, disabled: &[String]) -> Vec<Vec<Span>> {
+        let lang = path.and_then(lang_for_path).filter(|l| !disabled.iter().any(|d| d == l.info().id));
+        self.spans_for(doc, lang, lines)
+    }
+
+    /// Como `line_spans`, pero con el lenguaje ya elegido (vista previa de Ajustes).
+    pub fn spans_for(&self, doc: &Document, lang: Option<Lang>, lines: Range<usize>) -> Vec<Vec<Span>> {
         let mut slot = self.0.borrow_mut();
-        let Some((lang, g)) = path.and_then(lang_for_path).and_then(|l| Some((l, grammar(l)?))) else {
+        let Some((lang, g)) = lang.and_then(|l| Some((l, grammar(l)?))) else {
             *slot = None;
             return Vec::new();
         };
@@ -319,6 +387,17 @@ mod tests {
         Lang::Toml,
         Lang::Markdown,
         Lang::Yaml,
+        Lang::Go,
+        Lang::Java,
+        Lang::CSharp,
+        Lang::Html,
+        Lang::Css,
+        Lang::Bash,
+        Lang::Lua,
+        Lang::Ruby,
+        Lang::Php,
+        Lang::Xml,
+        Lang::Sql,
     ];
 
     fn name_at(spans: &[Span], col: u32) -> Option<&'static str> {
@@ -338,6 +417,44 @@ mod tests {
         assert_eq!(lang_for_path(Path::new("ci.yml")), Some(Lang::Yaml));
         assert_eq!(lang_for_path(Path::new("notas.txt")), None);
         assert_eq!(lang_for_path(Path::new("Makefile")), None);
+        assert_eq!(lang_for_path(Path::new("main.go")), Some(Lang::Go));
+        assert_eq!(lang_for_path(Path::new("x.CS")), Some(Lang::CSharp));
+        assert_eq!(lang_for_path(Path::new("Gemfile")), Some(Lang::Ruby));
+        assert_eq!(lang_for_path(Path::new("C:/u/.bashrc")), Some(Lang::Bash));
+        assert_eq!(lang_for_path(Path::new("notty.wxs")), Some(Lang::Xml));
+    }
+
+    #[test]
+    fn langs_table_is_consistent() {
+        let mut ids: Vec<&str> = LANGS.iter().map(|l| l.id).collect();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(ids.len(), LANGS.len());
+        assert_eq!(LANGS.len(), LANG_COUNT - 1, "todos salvo Tsx");
+        assert_eq!(Lang::Tsx.info().id, "typescript");
+    }
+
+    #[test]
+    fn every_sample_gets_some_color() {
+        for l in LANGS {
+            let doc = Document::new(l.sample, "
+");
+            let n = doc.buffer().len_lines();
+            let spans = SyntaxCache::default().spans_for(&doc, Some(l.lang), 0..n);
+            assert!(spans.iter().any(|s| !s.is_empty()), "{}", l.name);
+        }
+    }
+
+    #[test]
+    fn disabled_language_is_not_highlighted() {
+        let doc = Document::new("fn main() {}", "
+");
+        let cache = SyntaxCache::default();
+        assert!(!cache.line_spans(&doc, Some(Path::new("a.rs")), 0..1, &[]).concat().is_empty());
+        assert!(cache.line_spans(&doc, Some(Path::new("a.rs")), 0..1, &["rust".to_string()]).is_empty());
+        let tsx = Document::new("const a = 1;", "
+");
+        assert!(cache.line_spans(&tsx, Some(Path::new("a.tsx")), 0..1, &["typescript".to_string()]).is_empty());
     }
 
     #[test]
@@ -359,7 +476,7 @@ mod tests {
     fn rust_line_gets_keyword_string_and_comment() {
         let doc = Document::new("fn main() {\n    let s = \"hola\"; // saludo\n}\n", "\n");
         let cache = SyntaxCache::default();
-        let spans = cache.line_spans(&doc, Some(Path::new("a.rs")), 0..3);
+        let spans = cache.line_spans(&doc, Some(Path::new("a.rs")), 0..3, &[]);
         assert_eq!(name_at(&spans[0], 0), Some("keyword"));
         assert_eq!(name_at(&spans[0], 3), Some("function"));
         assert_eq!(name_at(&spans[1], 4), Some("keyword"));
@@ -371,14 +488,14 @@ mod tests {
     fn unknown_extension_or_no_path_gives_nothing() {
         let doc = Document::new("fn main() {}", "\n");
         let cache = SyntaxCache::default();
-        assert!(cache.line_spans(&doc, None, 0..1).is_empty());
-        assert!(cache.line_spans(&doc, Some(Path::new("a.txt")), 0..1).is_empty());
+        assert!(cache.line_spans(&doc, None, 0..1, &[]).is_empty());
+        assert!(cache.line_spans(&doc, Some(Path::new("a.txt")), 0..1, &[]).is_empty());
     }
 
     #[test]
     fn columns_are_utf16_after_multibyte_text() {
         let doc = Document::new("// ñ😀\nlet x = 1;", "\n");
-        let spans = SyntaxCache::default().line_spans(&doc, Some(Path::new("a.rs")), 0..2);
+        let spans = SyntaxCache::default().line_spans(&doc, Some(Path::new("a.rs")), 0..2, &[]);
         // "// ñ😀": 6 unidades UTF-16 (el emoji son dos).
         assert_eq!(spans[0], vec![Span { start: 0, len: 6, highlight: resolve("comment").unwrap() }]);
         assert_eq!(name_at(&spans[1], 8), Some("constant.builtin")); // así marca los enteros la consulta de Rust
@@ -389,11 +506,11 @@ mod tests {
         let mut doc = Document::new("fn a() {}\nlet x = 1;\n", "\n");
         let cache = SyntaxCache::default();
         let path = Some(Path::new("a.rs"));
-        cache.line_spans(&doc, path, 0..2);
+        cache.line_spans(&doc, path, 0..2, &[]);
         doc.set_cursor(doc.buffer().len_chars());
         doc.insert("// fin", Instant::now());
-        let incremental = cache.line_spans(&doc, path, 0..3);
-        let fresh = SyntaxCache::default().line_spans(&doc, path, 0..3);
+        let incremental = cache.line_spans(&doc, path, 0..3, &[]);
+        let fresh = SyntaxCache::default().line_spans(&doc, path, 0..3, &[]);
         assert_eq!(incremental, fresh);
         assert_eq!(name_at(&incremental[2], 0), Some("comment"));
     }

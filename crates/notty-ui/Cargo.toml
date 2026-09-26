@@ -12,15 +12,26 @@ notty-io = { path = "../notty-io" }
 notty-ipc = { version = "0.1.0", path = "../notty-ipc" }
 notty-update = { version = "0.1.0", path = "../notty-update" }
 tree-sitter = "0.25"
+tree-sitter-bash = "0.25.1"
 tree-sitter-c = "0.24.2"
+tree-sitter-c-sharp = "0.23.5"
 tree-sitter-cpp = "0.23.4"
+tree-sitter-css = "0.25.0"
+tree-sitter-go = "0.25.0"
+tree-sitter-html = "0.23.2"
+tree-sitter-java = "0.23.5"
 tree-sitter-javascript = "0.25.0"
 tree-sitter-json = "0.24.8"
+tree-sitter-lua = "0.5.0"
 tree-sitter-md = { version = "0.5.3", default-features = false }
+tree-sitter-php = "0.24.2"
 tree-sitter-python = "0.25.0"
+tree-sitter-ruby = "0.23.1"
 tree-sitter-rust = "0.24.2"
+tree-sitter-sequel = "0.3.11"
 tree-sitter-toml-ng = "0.7.0"
 tree-sitter-typescript = "0.23.2"
+tree-sitter-xml = "0.7.0"
 tree-sitter-yaml = "0.7.2"
 windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_Graphics_Dwm", "Win32_System_LibraryLoader", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_Registry", "Win32_Graphics_Direct2D", "Win32_Graphics_Direct2D_Common", "Win32_Graphics_DirectWrite", "Win32_Graphics_Dxgi_Common", "Win32_UI_HiDpi", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_System_Ole", "Win32_UI_Controls", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_System_Com"] }
 windows-numerics = { version = "0.3.1", features = ["std"] }

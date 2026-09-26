@@ -279,6 +279,8 @@ pub struct Renderer {
     /// Atajos en vigor (tras reasignaciones en `[keys]`) de los elementos de menú que
     /// los tienen, ya en formato corto ("^N").
     menu_keys: Vec<(crate::menu::MenuCmd, String)>,
+    /// `Config::syntax_disabled`, copiado antes de cada `paint`.
+    syntax_disabled: Vec<String>,
     /// Familia monoespaciada resuelta en `new` (Cascadia Mono o Consolas de *fallback*):
     /// hace falta guardarla para poder recrear `mono_13`/`mono_13_bold` a otro tamaño
     /// cuando cambia el zoom (Ctrl+=/Ctrl+-/Ctrl+0), sin repetir la búsqueda de familia.
@@ -406,6 +408,7 @@ impl Renderer {
                 about: None,
                 path_copied: None,
                 menu_keys: Vec::new(),
+                syntax_disabled: Vec::new(),
                 mono_family,
                 ui_family,
                 font_scale: 1.0,
@@ -1105,7 +1108,7 @@ impl Renderer {
                 }
             } else {
             let spans = if ui.syntax_highlight {
-                state.syntax.line_spans(&state.doc, state.path.as_deref(), range.clone())
+                state.syntax.line_spans(&state.doc, state.path.as_deref(), range.clone(), &self.syntax_disabled)
             } else {
                 Vec::new()
             };
@@ -1926,6 +1929,12 @@ impl Renderer {
     }
 
     /// Atajos en vigor de los elementos de menú (ver `menu::shortcut_labels`).
+    pub fn set_syntax_disabled(&mut self, ids: &[String]) {
+        if self.syntax_disabled != ids {
+            self.syntax_disabled = ids.to_vec();
+        }
+    }
+
     pub fn set_menu_keys(&mut self, keys: Vec<(crate::menu::MenuCmd, String)>) {
         self.menu_keys = keys;
     }

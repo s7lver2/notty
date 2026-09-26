@@ -264,6 +264,10 @@ pub struct Config {
     /// Secuencias (de serie o propias) apagadas una a una en Ajustes → Ligaduras.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ligature_disabled: Vec<String>,
+    /// Lenguajes (ids de `notty_ui::syntax::LANGS`) que no se colorean aunque el
+    /// resaltado esté activo: Ajustes → Apariencia → Sintaxis.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub syntax_disabled: Vec<String>,
 }
 
 #[cfg(test)]
@@ -424,6 +428,14 @@ font_family = \"{old}\"
         cfg.ligature_overrides.insert("|>".to_string(), "▷".to_string());
         let back: Config = toml::from_str(&toml::to_string(&cfg).unwrap()).unwrap();
         assert_eq!(back.ligature_disabled, vec!["->".to_string()]);
+    }
+
+    #[test]
+    fn syntax_disabled_round_trips_and_is_omitted_when_empty() {
+        assert!(!toml::to_string(&Config::default()).unwrap().contains("syntax_disabled"));
+        let cfg = Config { syntax_disabled: vec!["go".to_string()], ..Config::default() };
+        let back: Config = toml::from_str(&toml::to_string(&cfg).unwrap()).unwrap();
+        assert_eq!(back.syntax_disabled, vec!["go".to_string()]);
     }
 
     #[test]

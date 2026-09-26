@@ -118,6 +118,8 @@ struct State {
     pending_surrogate: Option<u16>,
     fonts: Vec<String>,
     preview: Preview,
+    syn_pick: usize,
+    syn_pick_at: Instant,
     logo: Option<ID2D1Bitmap>,
     logo_px: i32,
 }
@@ -268,6 +270,8 @@ pub fn open(
             pending_surrogate: None,
             fonts: Vec::new(),
             preview: Preview::default(),
+            syn_pick: 0,
+            syn_pick_at: Instant::now(),
             logo: None,
             logo_px: 0,
         });
@@ -874,6 +878,23 @@ fn handle_click(hwnd: HWND, st: &mut State, x: f32, y: f32) {
             }
         }
         Hit::LigAdd => add_ligature(st),
+        Hit::LangToggle(j) => {
+            if let Some(l) = crate::syntax::LANGS.get(j as usize) {
+                model::toggle_syntax_lang(&mut st.cfg.borrow_mut(), l.id);
+                save_and_notify(st);
+            }
+        }
+        Hit::LangPick(j) => {
+            if (j as usize) != st.syn_pick {
+                st.syn_pick = j as usize;
+                st.syn_pick_at = Instant::now();
+                ensure_anim_timer(st, hwnd);
+            }
+        }
+        Hit::LangAll(on) => {
+            model::set_all_syntax_langs(&mut st.cfg.borrow_mut(), on);
+            save_and_notify(st);
+        }
         Hit::Binding(cmd) => {
             let now = Instant::now();
             st.capture = Some(Capture { cmd, opened: now, closing: None, captured: None, captured_at: now, error: None });
@@ -1144,6 +1165,8 @@ fn paint(st: &mut State) {
         caret_on,
         update: &update,
         preview: &st.preview,
+        syn_pick: st.syn_pick,
+        syn_pick_at: st.syn_pick_at,
         logo: st.logo.as_ref(),
         system_dark,
     };

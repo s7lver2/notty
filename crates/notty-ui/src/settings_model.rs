@@ -5,14 +5,15 @@
 use notty_config::{Config, Files, FontFamily, HotkeyMechanism, MenuBar, Preset, TabsPosition, TempMode, Theme};
 use notty_input::Command;
 
-/// Una página de Ajustes. Las de la barra lateral están en `Page::RAIL`; `Fuentes` y
-/// `Ligaduras` son subpáginas de `Apariencia` (como las rutas de la Configuración de
+/// Una página de Ajustes. Las de la barra lateral están en `Page::RAIL`; `Fuentes`,
+/// `Ligaduras` y `Sintaxis` son subpáginas de `Apariencia` (como las rutas de la Configuración de
 /// Windows: cabecera con miga de pan y la barra sigue marcando a la madre).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Page {
     Apariencia,
     Fuentes,
     Ligaduras,
+    Sintaxis,
     Ventana,
     Teclado,
     Archivos,
@@ -34,10 +35,11 @@ impl Page {
         Page::Ayuda,
     ];
 
-    const ALL: [Page; 10] = [
+    const ALL: [Page; 11] = [
         Page::Apariencia,
         Page::Fuentes,
         Page::Ligaduras,
+        Page::Sintaxis,
         Page::Ventana,
         Page::Teclado,
         Page::Archivos,
@@ -53,6 +55,7 @@ impl Page {
             Page::Apariencia => "apariencia",
             Page::Fuentes => "fuentes",
             Page::Ligaduras => "ligaduras",
+            Page::Sintaxis => "sintaxis",
             Page::Ventana => "ventana",
             Page::Teclado => "teclado",
             Page::Archivos => "archivos",
@@ -72,6 +75,7 @@ impl Page {
             Page::Apariencia => "Apariencia",
             Page::Fuentes => "Fuentes",
             Page::Ligaduras => "Ligaduras",
+            Page::Sintaxis => "Sintaxis",
             Page::Ventana => "Ventana",
             Page::Teclado => "Teclado",
             Page::Archivos => "Archivos",
@@ -85,7 +89,7 @@ impl Page {
     /// Página madre de una subpágina.
     pub fn parent(self) -> Option<Page> {
         match self {
-            Page::Fuentes | Page::Ligaduras => Some(Page::Apariencia),
+            Page::Fuentes | Page::Ligaduras | Page::Sintaxis => Some(Page::Apariencia),
             _ => None,
         }
     }
@@ -427,6 +431,20 @@ pub fn release_bullets(body: &str, max: usize) -> Vec<String> {
         .collect()
 }
 
+/// Enciende o apaga el resaltado de un lenguaje (`syntax::LangInfo::id`).
+pub fn toggle_syntax_lang(cfg: &mut Config, id: &str) {
+    if let Some(i) = cfg.syntax_disabled.iter().position(|d| d == id) {
+        cfg.syntax_disabled.remove(i);
+    } else {
+        cfg.syntax_disabled.push(id.to_string());
+    }
+}
+
+/// "Activar todos" / "Desactivar todos" en Ajustes → Sintaxis.
+pub fn set_all_syntax_langs(cfg: &mut Config, on: bool) {
+    cfg.syntax_disabled = if on { Vec::new() } else { crate::syntax::LANGS.iter().map(|l| l.id.to_string()).collect() };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -600,5 +618,20 @@ Arreglos varios
         assert_eq!(can_add_ligature("a", "x"), Err(AddLigatureError::TooShort));
         assert_eq!(can_add_ligature("a b", "x"), Err(AddLigatureError::Whitespace));
         assert_eq!(can_add_ligature("~>", "↝"), Ok(()));
+    }
+
+    #[test]
+    fn syntax_langs_toggle_and_bulk() {
+        let mut cfg = Config::default();
+        toggle_syntax_lang(&mut cfg, "go");
+        assert_eq!(cfg.syntax_disabled, vec!["go".to_string()]);
+        toggle_syntax_lang(&mut cfg, "go");
+        assert!(cfg.syntax_disabled.is_empty());
+        set_all_syntax_langs(&mut cfg, false);
+        assert_eq!(cfg.syntax_disabled.len(), crate::syntax::LANGS.len());
+        set_all_syntax_langs(&mut cfg, true);
+        assert!(cfg.syntax_disabled.is_empty());
+        assert_eq!(Page::Sintaxis.parent(), Some(Page::Apariencia));
+        assert_eq!(Page::from_id("sintaxis"), Some(Page::Sintaxis));
     }
 }

@@ -1579,6 +1579,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     }
                     let ligature_table = {
                         let cfg = w.cfg.borrow();
+                        w.renderer.set_syntax_disabled(&cfg.syntax_disabled);
                         crate::ligature::resolve(&cfg.ligature_overrides, &cfg.ligature_disabled)
                     };
                     w.renderer.paint(&w.ws, &ui, &view, &ligature_table);
