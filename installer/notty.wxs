@@ -131,6 +131,16 @@
       </Component>
     </StandardDirectory>
 
+    <!-- notty-setup (y notty al arrancar) apuntan HKCU\...\App Paths\notepad.exe a notty
+         para que Win+R no se salte el IFEO en Windows 11; al desinstalar se deshace para
+         el usuario que desinstala. Impersonado: HKCU tiene que ser el suyo, no SYSTEM. -->
+    <CustomAction Id="ForgetNotepadAppPath" FileRef="notty.exe" ExeCommand="--forget-notepad"
+      Execute="deferred" Impersonate="yes" Return="ignore" />
+    <InstallExecuteSequence>
+      <Custom Action="ForgetNotepadAppPath" Before="RemoveFiles"
+        Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+    </InstallExecuteSequence>
+
     <Feature Id="Core" Title="notty (núcleo)" Level="1" AllowAbsent="no" Display="hidden">
       <ComponentRef Id="CoreFiles" />
       <ComponentRef Id="CoreLegacyFile" />

@@ -200,10 +200,13 @@ fn spawn_install(hwnd: HWND, toggles: FeatureToggles, install_folder: PathBuf) {
             let ptr = Box::into_raw(Box::new(event));
             let _ = PostMessageW(Some(hwnd), WM_INSTALL_EVENT, WPARAM(0), LPARAM(ptr as isize));
         };
-        if let Err(code) = msi_driver::install(&msi_path, &addlocal, &install_folder, on_event) {
-            unsafe {
+        match msi_driver::install(&msi_path, &addlocal, &install_folder, on_event) {
+            // Tras el MSI se mira el IFEO resultante (no los interruptores): en
+            // mantenimiento ADDLOCAL solo añade, así que la feature puede seguir puesta.
+            Ok(()) => notty_update::notepad::sync(),
+            Err(code) => unsafe {
                 let _ = PostMessageW(Some(hwnd), WM_INSTALL_FAILED, WPARAM(code as usize), LPARAM(0));
-            }
+            },
         }
     });
 }

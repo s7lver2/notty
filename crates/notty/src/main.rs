@@ -92,6 +92,11 @@ fn main() -> windows::core::Result<()> {
     if args.first().map(String::as_str) == Some("--daemon") {
         return daemon::run();
     }
+    // Lo lanza el MSI al desinstalar (acción personalizada en installer/notty.wxs).
+    if args.first().map(String::as_str) == Some("--forget-notepad") {
+        notty_update::notepad::forget();
+        return Ok(());
+    }
 
     // `--new-temp`/`--new-permanent`: los lanza el daemon (Task 9) al pulsar un atajo
     // global. Cada pulsación abre su propia ventana nueva sin pasar por el pipe: no
@@ -110,6 +115,9 @@ fn main() -> windows::core::Result<()> {
             return Ok(());
         }
     }
+
+    // Cada usuario tiene su propio HKCU y el instalador solo corrió como uno de ellos.
+    notty_update::notepad::sync();
 
     // Nadie escuchaba en el pipe: esta instancia se convierte en el servidor mientras
     // viva, además de abrir su propia ventana con normalidad.

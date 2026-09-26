@@ -11,6 +11,7 @@ pub use semver::{due, is_newer};
 pub use sign::verify;
 
 pub mod http;
+pub mod notepad;
 
 /// Reemplázalo por la clave pública real generada con `notty-sign --keygen`
 /// antes de la primera release firmada.
