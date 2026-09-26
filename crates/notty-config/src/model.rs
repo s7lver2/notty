@@ -137,11 +137,29 @@ pub struct Config {
     pub ui: UiConfig,
     pub files: FilesConfig,
     pub hotkey: HotkeyConfig,
+    /// Si la ventana de bienvenida (`welcome_window`) ya se mostró una vez. No se
+    /// repite sola nunca más; solo vuelve a verse desde Ajustes → Ayuda si el usuario
+    /// lo pide expresamente (eso arranca el recorrido directamente, no esta ventana).
+    #[serde(default)]
+    pub first_run_done: bool,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn first_run_done_defaults_to_false() {
+        assert!(!Config::default().first_run_done);
+    }
+
+    #[test]
+    fn first_run_done_round_trips_through_toml() {
+        let cfg = Config { first_run_done: true, ..Config::default() };
+        let s = toml::to_string_pretty(&cfg).unwrap();
+        let back: Config = toml::from_str(&s).unwrap();
+        assert!(back.first_run_done);
+    }
 
     #[test]
     fn default_config_matches_moderna() {
