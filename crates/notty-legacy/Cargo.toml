@@ -1,0 +1,18 @@
+[package]
+name = "notty-legacy"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "notepad_legacy"
+path = "src/main.rs"
+
+[dependencies]
+windows = { version = "0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Threading",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_UI_Shell",
+] }
