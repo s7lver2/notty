@@ -2944,9 +2944,13 @@ fn commit_path_prompt_with(w: &mut WindowState, hwnd: HWND, force_overwrite: boo
             }
             Err(e) => error = Some(e.to_string()),
         },
-        // Guardar un documento que aún no tenía ruta encima de un archivo que ya
-        // existe: antes de escribir encima, se pregunta (ver `answer_overwrite`).
-        notty_io::Hint::Exists if purpose == crate::Purpose::Save && w.ws.active().path.is_none() && !force_overwrite => {
+        // Guardar encima de un archivo que ya existe y no es el propio documento:
+        // antes de escribir encima, se pregunta (ver `answer_overwrite`).
+        notty_io::Hint::Exists
+            if purpose == crate::Purpose::Save
+                && !w.ws.active().path.as_deref().is_some_and(|own| crate::same_file(own, &path))
+                && !force_overwrite =>
+        {
             if let crate::Prompt::Path(p) = &mut w.ws.prompt {
                 p.ask_overwrite = true;
             }
@@ -2970,7 +2974,10 @@ fn commit_path_prompt_with(w: &mut WindowState, hwnd: HWND, force_overwrite: boo
                         let previous_path = w.ws.active().path.clone();
                         w.ws.active_mut().path = Some(path.clone());
                         match w.ws.active_mut().save() {
-                            Ok(()) => done = true,
+                            Ok(()) => {
+                                w.ws.active_mut().open_mtime = notty_io::mtime(&path).ok();
+                                done = true;
+                            }
                             Err(e) => {
                                 w.ws.active_mut().path = previous_path;
                                 error = Some(e.to_string());

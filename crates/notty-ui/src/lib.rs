@@ -40,7 +40,7 @@ pub mod workspace;
 
 pub use anim::{Anim, Curve, Tweens, cubic_bezier, ease_out_cubic};
 pub use chrome_text::*;
-pub use doc_io::{OpenedDoc, open_as_document, save_document};
+pub use doc_io::{OpenedDoc, open_as_document, same_file, save_document};
 pub use editor::EditorState;
 pub use hex::{hex_char, hex_row, hex_rows};
 pub use keymap::{EditorAction, Modifiers, action_for_vk};

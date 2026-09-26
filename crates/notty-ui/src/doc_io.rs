@@ -23,6 +23,15 @@ pub fn open_as_document(path: &Path) -> io::Result<OpenedDoc> {
     }
 }
 
+/// Si `a` y `b` apuntan al mismo archivo (rutas canónicas; si alguna no existe, se
+/// comparan sin distinguir mayúsculas, como hace Windows).
+pub fn same_file(a: &Path, b: &Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(ca), Ok(cb)) => ca == cb,
+        _ => a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase(),
+    }
+}
+
 pub fn save_document(doc: &Document, path: &Path, encoding: TextEncoding) -> Result<(), CodecError> {
     let bytes = notty_io::encode(&doc.text(), encoding)?;
     notty_io::atomic_write(path, &bytes).map_err(|e| CodecError::Io(e.to_string()))
@@ -54,6 +63,18 @@ mod tests {
         let p = dir.path().join("bin.dat");
         fs::write(&p, [0u8, 1, 2, 3]).unwrap();
         assert!(open_as_document(&p).is_err());
+    }
+
+    #[test]
+    fn same_file_matches_equivalent_paths_only() {
+        let dir = tempdir().unwrap();
+        let a = dir.path().join("a.txt");
+        let b = dir.path().join("b.txt");
+        fs::write(&a, "x").unwrap();
+        fs::write(&b, "y").unwrap();
+        assert!(same_file(&a, &dir.path().join(".").join("a.txt")));
+        assert!(!same_file(&a, &b));
+        assert!(!same_file(&dir.path().join("no-existe.txt"), &b));
     }
 
     #[test]
