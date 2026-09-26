@@ -785,8 +785,9 @@ impl Renderer {
 
             // Línea de separación bajo la barra de título, como en las apps nativas de
             // Windows 11 (Ajustes, Explorador...): la distingue del resto de la ventana
-            // sin depender de que haya pestañas o menú justo debajo.
-            self.stroke_line(0.0, frame.titlebar.bottom, frame.titlebar.width(), frame.titlebar.bottom, 1.0, pal.line);
+            // sin depender de que haya pestañas o menú justo debajo. Atenuada a la mitad
+            // de su opacidad normal: en esas apps es casi imperceptible, no un trazo duro.
+            self.stroke_line(0.0, frame.titlebar.bottom, frame.titlebar.width(), frame.titlebar.bottom, 1.0, pal.line.faded(0.5));
         }
     }
 
@@ -802,12 +803,14 @@ impl Renderer {
             }
             let cx = r.left + r.width() / 2.0;
             let cy = r.top + r.height() / 2.0;
+            // Trazo más fino (1.0 en vez de 1.2) y radios algo más cerrados: junto a la
+            // titlebar más baja, un icono igual de grande se veía desproporcionado.
             let c = if hovered { pal.text } else { pal.text_2 };
-            self.stroke_circle(cx, cy, 3.0, 1.2, c);
+            self.stroke_circle(cx, cy, 2.8, 1.0, c);
             for i in 0..6 {
                 let a = std::f32::consts::PI * 2.0 * (i as f32) / 6.0;
                 let (dx, dy) = (a.cos(), a.sin());
-                self.stroke_line(cx + dx * 4.5, cy + dy * 4.5, cx + dx * 6.5, cy + dy * 6.5, 1.2, c);
+                self.stroke_line(cx + dx * 4.2, cy + dy * 4.2, cx + dx * 6.0, cy + dy * 6.0, 1.0, c);
             }
         }
     }

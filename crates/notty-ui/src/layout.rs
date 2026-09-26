@@ -26,7 +26,7 @@ impl Rect {
     }
 }
 
-pub const TITLEBAR_H: f32 = 34.0; // .titlebar{height:34px}
+pub const TITLEBAR_H: f32 = 32.0; // más plana/compacta, como Notepad/Ajustes/Explorador en Windows 11
 pub const APPICON_W: f32 = 36.0; // .appicon{width:36px}
 pub const APPICON_SIZE: f32 = 16.0; // ICON() 16x16
 pub const CAPTION_BTN_W: f32 = 46.0; // .caption button{width:46px}
@@ -209,7 +209,7 @@ mod tests {
     #[test]
     fn moderna_bands_match_mockup() {
         let f = frame(920.0, 600.0, Bands { tabs_in_title: true, hints: true, ..Default::default() });
-        assert_eq!(f.body.top, 34.0);
+        assert_eq!(f.body.top, TITLEBAR_H);
         assert_eq!(f.status, Rect::new(0.0, 576.0, 920.0, 600.0));
         assert_eq!(f.hints, Rect::new(0.0, 554.0, 920.0, 576.0));
         assert_eq!(f.body.bottom, 554.0);
@@ -228,9 +228,9 @@ mod tests {
     #[test]
     fn clasica_stacks_menubar_and_tabs_below() {
         let f = frame(920.0, 600.0, Bands { menubar: true, tabs_below: true, ..Default::default() });
-        assert_eq!(f.menubar, Rect::new(0.0, 34.0, 920.0, 64.0));
-        assert_eq!(f.tabs_below, Rect::new(0.0, 64.0, 920.0, 96.0));
-        assert_eq!(f.body.top, 96.0);
+        assert_eq!(f.menubar, Rect::new(0.0, TITLEBAR_H, 920.0, TITLEBAR_H + MENUBAR_H));
+        assert_eq!(f.tabs_below, Rect::new(0.0, TITLEBAR_H + MENUBAR_H, 920.0, TITLEBAR_H + MENUBAR_H + TABS_BELOW_H));
+        assert_eq!(f.body.top, TITLEBAR_H + MENUBAR_H + TABS_BELOW_H);
         assert!(f.hints.is_empty());
         assert_eq!(f.body.bottom, 576.0);
     }
