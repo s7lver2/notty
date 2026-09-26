@@ -72,6 +72,10 @@ pub struct UiConfig {
     pub font_scale: f32,
     /// Icono de carpeta/archivo delante de cada sugerencia de la línea de ruta.
     pub suggestion_icons: bool,
+    /// Abrir/Guardar como usan el selector nativo de Windows en vez de la línea de
+    /// ruta de abajo. `^O` dentro de la línea de ruta ya lo ofrece siempre como
+    /// alternativa puntual; esto lo hace el camino por defecto.
+    pub native_file_dialog: bool,
 }
 
 impl Default for UiConfig {
@@ -89,6 +93,7 @@ impl Default for UiConfig {
             merged_command_line: false,
             font_scale: 1.0,
             suggestion_icons: true,
+            native_file_dialog: false,
         };
         let preset = ui.preset;
         crate::apply_preset(&mut ui, preset);

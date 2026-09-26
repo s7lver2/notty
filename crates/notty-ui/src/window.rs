@@ -407,8 +407,9 @@ fn run_ctx_cmd(w: &mut WindowState, hwnd: HWND, cmd: crate::context_menu::CtxCmd
                 start_tab_switch_anim(w, hwnd);
             }
             let initial = w.ws.active().path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
-            w.ws.prompt = crate::Prompt::Path(crate::PathPromptState::new(crate::Purpose::Save, initial));
-            start_popup_anim(w, hwnd);
+            if start_path_entry(w, hwnd, crate::Purpose::Save, initial) {
+                start_popup_anim(w, hwnd);
+            }
         }
         CtxCmd::Undo => w.ws.active_mut().apply(crate::EditorAction::Undo, now),
         CtxCmd::Redo => w.ws.active_mut().apply(crate::EditorAction::Redo, now),
@@ -1748,8 +1749,9 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         }
                         crate::EditorAction::OpenPathPrompt => {
                             let initial = w.ws.active().path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
-                            w.ws.prompt = crate::Prompt::Path(crate::PathPromptState::new(crate::Purpose::Open, initial));
-                            start_popup_anim(w, hwnd);
+                            if start_path_entry(w, hwnd, crate::Purpose::Open, initial) {
+                                start_popup_anim(w, hwnd);
+                            }
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                         crate::EditorAction::Find => {
@@ -1761,8 +1763,9 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                         crate::EditorAction::Save if w.ws.active().path.is_none() => {
-                            w.ws.prompt = crate::Prompt::Path(crate::PathPromptState::new(crate::Purpose::Save, String::new()));
-                            start_popup_anim(w, hwnd);
+                            if start_path_entry(w, hwnd, crate::Purpose::Save, String::new()) {
+                                start_popup_anim(w, hwnd);
+                            }
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                         crate::EditorAction::FindNext | crate::EditorAction::FindPrev => {
@@ -1895,8 +1898,9 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                         crate::Hit::Clickme => {
-                            w.ws.prompt = crate::Prompt::Path(crate::PathPromptState::new(crate::Purpose::Save, String::new()));
-                            start_popup_anim(w, hwnd);
+                            if start_path_entry(w, hwnd, crate::Purpose::Save, String::new()) {
+                                start_popup_anim(w, hwnd);
+                            }
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                         crate::Hit::Settings => open_settings(w, hwnd),
@@ -2283,20 +2287,23 @@ fn run_menu_item(w: &mut WindowState, hwnd: HWND, menu_idx: usize, item_idx: usi
         }
         MenuCmd::Open => {
             let initial = w.ws.active().path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
-            w.ws.prompt = crate::Prompt::Path(crate::PathPromptState::new(crate::Purpose::Open, initial));
-            start_popup_anim(w, hwnd);
+            if start_path_entry(w, hwnd, crate::Purpose::Open, initial) {
+                start_popup_anim(w, hwnd);
+            }
         }
         MenuCmd::Save => {
             if w.ws.active().path.is_none() {
-                w.ws.prompt = crate::Prompt::Path(crate::PathPromptState::new(crate::Purpose::Save, String::new()));
-                start_popup_anim(w, hwnd);
+                if start_path_entry(w, hwnd, crate::Purpose::Save, String::new()) {
+                    start_popup_anim(w, hwnd);
+                }
             } else {
                 try_save(w);
             }
         }
         MenuCmd::SaveAs => {
-            w.ws.prompt = crate::Prompt::Path(crate::PathPromptState::new(crate::Purpose::Save, String::new()));
-            start_popup_anim(w, hwnd);
+            if start_path_entry(w, hwnd, crate::Purpose::Save, String::new()) {
+                start_popup_anim(w, hwnd);
+            }
         }
         MenuCmd::Settings => open_settings(w, hwnd),
         MenuCmd::CloseTab => {
@@ -2552,6 +2559,28 @@ fn handle_path_key(w: &mut WindowState, hwnd: HWND, vk: u32, mods: Modifiers) {
 /// `Ctrl+O` dentro de la línea de ruta: diálogo nativo de Windows en vez de escribir
 /// la ruta a mano. Si el usuario elige algo, se rellena el prompt y se acepta al
 /// instante, como si lo hubiera escrito y pulsado Enter.
+/// Arranca "Abrir"/"Guardar como": con el ajuste "Selector nativo de Windows" activo
+/// va directo al diálogo de `IFileOpenDialog`/`IFileSaveDialog` (sin pasar por la
+/// línea de ruta de abajo); si no, abre la línea de ruta de siempre con `initial`
+/// como valor de partida. Devuelve `true` cuando abrió la línea de ruta (para que
+/// quien llama sepa si le toca arrancar `start_popup_anim`).
+fn start_path_entry(w: &mut WindowState, hwnd: HWND, purpose: crate::Purpose, initial: String) -> bool {
+    if !w.cfg.borrow().ui.native_file_dialog {
+        w.ws.prompt = crate::Prompt::Path(crate::PathPromptState::new(purpose, initial));
+        return true;
+    }
+    if let Some(path) = crate::native_dialog::pick_path(hwnd, purpose) {
+        if let Some(value) = path.to_str() {
+            let ctx = path_ctx(w);
+            let mut p = crate::PathPromptState::new(purpose, String::new());
+            p.type_text(value, &ctx);
+            w.ws.prompt = crate::Prompt::Path(p);
+            commit_path_prompt(w, hwnd);
+        }
+    }
+    false
+}
+
 fn open_native_dialog(w: &mut WindowState, hwnd: HWND) {
     let purpose = match &w.ws.prompt {
         crate::Prompt::Path(p) => p.purpose,

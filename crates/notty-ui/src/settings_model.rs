@@ -24,6 +24,7 @@ pub enum SettingKey {
     StartWithWindows,
     UpdatesCheck,
     SuggestionIcons,
+    NativeFileDialog,
 }
 
 /// El valor elegido; `apply` decide qué campo de `Config` toca según `SettingKey`.
@@ -184,6 +185,11 @@ const ARCHIVOS: &[Row] = &[
         desc: "Carpeta o archivo delante de cada sugerencia al escribir una ruta.",
         key: SettingKey::SuggestionIcons,
     },
+    Row::Toggle {
+        title: "Selector nativo de Windows",
+        desc: "Abrir y Guardar como usan el diálogo de Windows en vez de la línea de ruta.",
+        key: SettingKey::NativeFileDialog,
+    },
 ];
 
 const ATAJO_GLOBAL: &[Row] = &[
@@ -282,6 +288,7 @@ pub fn apply(cfg: &mut Config, key: SettingKey, value: SettingValue) {
         (SettingKey::MergedCommandLine, SettingValue::Bool(b)) => cfg.ui.merged_command_line = b,
         (SettingKey::VimAlways, SettingValue::Bool(b)) => cfg.ui.vim_always = b,
         (SettingKey::SuggestionIcons, SettingValue::Bool(b)) => cfg.ui.suggestion_icons = b,
+        (SettingKey::NativeFileDialog, SettingValue::Bool(b)) => cfg.ui.native_file_dialog = b,
         _ => return, // combinación key/value que no tiene sentido: no hace nada
     }
     cfg.ui.preset = Preset::Custom;
