@@ -207,8 +207,10 @@ fn spawn_update_check(cfg: notty_config::Config, tx: std::sync::mpsc::Sender<not
         }
         // Se persiste `last_check` pase lo que pase (éxito, sin red, JSON roto...):
         // así no se reintenta cada arranque si GitHub está caído.
+        // Con el archivo roto no se escribe nada por detrás del usuario.
         let mut fresh = match notty_config::load(&notty_config::default_path()) {
-            notty_config::LoadResult::Loaded(c) | notty_config::LoadResult::Missing(c) | notty_config::LoadResult::Defaulted(c, _) => c,
+            notty_config::LoadResult::Loaded(c) | notty_config::LoadResult::Missing(c) => c,
+            notty_config::LoadResult::Defaulted(..) => return,
         };
         fresh.updates.last_check = unix_now();
         let _ = notty_config::save(&fresh, &notty_config::default_path());

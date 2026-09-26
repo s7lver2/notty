@@ -40,8 +40,28 @@ pub fn load(path: &Path) -> LoadResult {
 
 pub fn save(cfg: &Config, path: &Path) -> std::io::Result<()> {
     let text = toml::to_string_pretty(cfg).expect("Config siempre serializa");
+    backup_if_broken(path)?;
     notty_io::create_parent_dirs(path)?;
     notty_io::atomic_write(path, text.as_bytes())
+}
+
+/// `config.toml.bak` junto a `path`.
+pub fn backup_path(path: &Path) -> PathBuf {
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(".bak");
+    path.with_file_name(name)
+}
+
+/// Si el archivo actual no se puede leer como configuración (lo que hizo que `load`
+/// devolviera `Defaulted`), se copia a `.bak` antes de escribir encima: el usuario no
+/// pierde lo que tenía. Si no existe (primer arranque) no hay nada que guardar.
+fn backup_if_broken(path: &Path) -> std::io::Result<()> {
+    let Ok(bytes) = std::fs::read(path) else { return Ok(()) };
+    let parses = std::str::from_utf8(&bytes).is_ok_and(|t| toml::from_str::<Config>(t).is_ok());
+    if parses {
+        return Ok(());
+    }
+    std::fs::write(backup_path(path), &bytes)
 }
 
 #[cfg(test)]
@@ -92,6 +112,28 @@ mod tests {
         fs::write(&p, "roto [[[").unwrap();
         load(&p);
         assert_eq!(fs::read_to_string(&p).unwrap(), "roto [[[");
+    }
+
+    #[test]
+    fn saving_over_a_broken_file_backs_it_up_first() {
+        let dir = tempdir().unwrap();
+        let p = dir.path().join("config.toml");
+        fs::write(&p, "roto [[[").unwrap();
+        save(&Config::default(), &p).unwrap();
+        assert_eq!(fs::read_to_string(dir.path().join("config.toml.bak")).unwrap(), "roto [[[");
+        assert!(matches!(load(&p), LoadResult::Loaded(_)));
+        // Guardar otra vez sobre uno ya válido no toca la copia.
+        save(&Config::default(), &p).unwrap();
+        assert_eq!(fs::read_to_string(dir.path().join("config.toml.bak")).unwrap(), "roto [[[");
+    }
+
+    #[test]
+    fn saving_without_existing_file_creates_it_and_no_backup() {
+        let dir = tempdir().unwrap();
+        let p = dir.path().join("sub").join("config.toml");
+        save(&Config::default(), &p).unwrap();
+        assert!(p.exists());
+        assert!(!backup_path(&p).exists());
     }
 
     #[test]
