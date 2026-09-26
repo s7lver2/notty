@@ -1262,7 +1262,7 @@ impl Renderer {
                 self.draw_dropdown(crate::menu::MENUS[i].items, x, top, checks, view, pal);
             }
 
-            self.draw_update_panel(pal, frame.status.top, w);
+            self.draw_update_panel(pal, frame.status.top, w, view);
             self.draw_about(pal, frame.body, view);
 
             if let Some(menu) = self.context_menu.take() {
@@ -1910,53 +1910,79 @@ impl Renderer {
         (x, y)
     }
 
-    /// Panel flotante con las notas de la release encontrada y un botón "Actualizar"
-    /// (Task 4, Step 2-3 del plan del actualizador): anclado justo encima de la barra
-    /// de estado, a la derecha, con el mismo estilo oscuro que los desplegables.
-    unsafe fn draw_update_panel(&mut self, pal: &theme::Palette, status_top: f32, w: f32) {
+    /// Aviso de versión nueva (maqueta `Popup.dc.html`): columna del icono y columna
+    /// del texto (título, `actual → nueva`, novedades), separador y botones del mismo
+    /// alto alineados a la derecha. Anclado encima de la barra de estado.
+    unsafe fn draw_update_panel(&mut self, pal: &theme::Palette, status_top: f32, w: f32, view: &ViewState) {
         let Some(content) = self.update_panel.clone() else { return };
-        // Se encoge con la ventana en vez de salirse por la izquierda o por arriba.
-        let panel_w = 340.0f32.min(w - layout::STATUS_PAD_X * 2.0).max(160.0);
-        let panel_h = 190.0f32.min(status_top - layout::TITLEBAR_H - 16.0).max(110.0);
+        let panel_w = 440.0f32.min(w - layout::STATUS_PAD_X * 2.0).max(220.0);
+        let pad = 20.0;
+        let text_x_off = pad + 40.0 + 14.0;
+        let text_w = panel_w - text_x_off - pad;
+        let body_f = self.create_format(None, 12.0, false).unwrap_or_else(|| self.fonts.ui_12.clone());
+        let title_f = self.create_format(None, 15.0, true).unwrap_or_else(|| self.fonts.ui_13_semibold.clone());
+        let bullets = crate::settings_model::release_bullets(&content.body, 5);
+        let mut bullets_h = 0.0;
+        for b in &bullets {
+            bullets_h += self.measure_wrapped(b, &body_f, text_w - 16.0, Some(20.0)).max(20.0);
+        }
+        let status_h = if content.status_line.is_some() { 20.0 } else { 0.0 };
+        let head_h = 40.0f32;
+        let content_h = head_h + if bullets.is_empty() { 0.0 } else { 14.0 + bullets_h } + status_h;
+        let panel_h = (pad + content_h + 14.0 + 1.0 + 14.0 + 32.0 + 16.0).min(status_top - layout::TITLEBAR_H - 16.0);
         let right = w - layout::STATUS_PAD_X;
         let r = Rect::new(right - panel_w, status_top - panel_h - 8.0, right, status_top - 8.0);
 
-        self.draw_popup_shadow(r, layout::POPUP_RADIUS, 1.0, pal.shadow);
-        self.fill_round(r, layout::POPUP_RADIUS, pal.chrome);
-        self.stroke_round_rect(r, layout::POPUP_RADIUS, 1.0, pal.line);
+        self.draw_popup_shadow(r, 10.0, 1.0, pal.shadow);
+        self.fill_round(r, 10.0, pal.surface_2);
+        self.stroke_round_rect(r, 10.0, 1.0, pal.shadow_ring);
+        self.hits.push((r, Hit::PopupBox));
+        self.push_clip(r);
 
-        let pad = 14.0;
-        let title = format!("Actualización {} disponible", content.version);
-        self.text(&title, &self.fonts.ui_12_5, Rect::new(r.left + pad, r.top + pad, r.right - pad, r.top + pad + 20.0), pal.text);
-
-        let body_r = Rect::new(r.left + pad, r.top + pad + 26.0, r.right - pad, r.bottom - 60.0);
-        if !body_r.is_empty() {
-            self.push_clip(body_r);
-            self.text_wrapped(&content.body, &self.fonts.ui_11, body_r, pal.text_2, None);
-            self.pop_clip();
+        // Icono.
+        let (icx, icy) = (r.left + pad + 20.0, r.top + pad + 20.0);
+        self.fill_circle(icx, icy, 20.0, pal.accent_soft);
+        self.stroke_svg("M12 4v11M7 10l5 5 5-5M5 20h14", icx, icy, 20.0, 2.0, pal.accent, None);
+        // Título y versiones, centrados en el alto del icono.
+        let tx = r.left + text_x_off;
+        let ty = r.top + pad;
+        self.text("Hay una versión nueva de notty", &title_f, Rect::new(tx, ty, tx + text_w, ty + 20.0), pal.text);
+        let versions = format!("{} → {}", crate::app_version(), content.version);
+        self.text(&versions, &self.fonts.mono_12, Rect::new(tx, ty + 24.0, tx + text_w, ty + 40.0), pal.text_2);
+        let mut y = ty + head_h + 14.0;
+        let soft = pal.text.mix(pal.text_2, 0.3);
+        for b in &bullets {
+            let h = self.measure_wrapped(b, &body_f, text_w - 16.0, Some(20.0)).max(20.0);
+            self.text("•", &body_f, Rect::new(tx + 2.0, y, tx + 14.0, y + 20.0), soft);
+            self.text_wrapped(b, &body_f, Rect::new(tx + 16.0, y, tx + text_w, y + h), soft, Some(20.0));
+            y += h;
         }
-
         if let Some(status) = &content.status_line {
-            let status_r = Rect::new(r.left + pad, r.bottom - 56.0, r.right - pad, r.bottom - 40.0);
-            self.text(status, &self.fonts.ui_11, status_r, pal.warn);
+            self.text(status, &body_f, Rect::new(tx, y, tx + text_w, y + 20.0), pal.warn);
         }
 
-        let btn_h = 28.0;
-        let btn_r = Rect::new(r.right - pad - 100.0, r.bottom - pad - btn_h, r.right - pad, r.bottom - pad);
+        // Separador de lado a lado y botones.
+        let sep_y = r.bottom - 16.0 - 32.0 - 14.0;
+        self.fill(Rect::new(r.left, sep_y, r.right, sep_y + 1.0), pal.line);
+        let btn_top = r.bottom - 16.0 - 32.0;
+        let semi = self.create_format(None, 13.0, true).unwrap_or_else(|| self.fonts.ui_13_semibold.clone());
+        let normal = self.fonts.ui_13.clone();
+        let upd_w = (self.measure("Actualizar", &semi) + 28.0).max(96.0);
+        let later_w = (self.measure("Más tarde", &normal) + 28.0).max(96.0);
+        let upd = Rect::new(r.right - pad - upd_w, btn_top, r.right - pad, btn_top + 32.0);
+        let later_right = if content.show_actualizar { upd.left - 8.0 } else { r.right - pad };
+        let later = Rect::new(later_right - later_w, btn_top, later_right, btn_top + 32.0);
         if content.show_actualizar {
-            self.fill_round(btn_r, 6.0, pal.accent);
-            self.text(
-                "Actualizar",
-                &self.fonts.ui_11_5_semibold,
-                Rect::new(btn_r.left, btn_r.top, btn_r.right, btn_r.bottom),
-                pal.surface,
-            );
-            self.hits.push((btn_r, Hit::UpdatePanelActualizar));
+            let bg = if view.hover == Hit::UpdatePanelActualizar { pal.accent.mix(pal.text, 0.15) } else { pal.accent };
+            self.fill_round(upd, 6.0, bg);
+            self.text_center("Actualizar", &semi, upd, pal.on_accent);
+            self.hits.push((upd, Hit::UpdatePanelActualizar));
         }
-
-        let close_r = Rect::new(r.left + pad, r.bottom - pad - btn_h, r.left + pad + 80.0, r.bottom - pad);
-        self.text("Cerrar", &self.fonts.ui_11_5, Rect::new(close_r.left, close_r.top, close_r.right, close_r.bottom), pal.text_2);
-        self.hits.push((close_r, Hit::UpdatePanelCerrar));
+        let bg = if view.hover == Hit::UpdatePanelCerrar { pal.line } else { pal.chrome };
+        self.fill_round(later, 6.0, bg);
+        self.text_center("Más tarde", &normal, later, pal.text);
+        self.hits.push((later, Hit::UpdatePanelCerrar));
+        self.pop_clip();
     }
 
     /// "Acerca de notty": tarjeta centrada sobre el cuerpo, con el mismo aspecto que
