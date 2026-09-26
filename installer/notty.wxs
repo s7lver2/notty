@@ -1,0 +1,158 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="notty" Manufacturer="notty" Version="!(bind.FileVersion.notty.exe)"
+           UpgradeCode="6F1B7C2E-6E2F-4E2A-9B1F-2C3D4E5F6A7B" Scope="perMachine">
+
+    <MajorUpgrade DowngradeErrorMessage="Ya hay una versión más reciente de notty instalada." />
+    <MediaTemplate EmbedCab="yes" />
+    <Property Id="ARPPRODUCTICON" Value="notty.exe" />
+    <Property Id="INSTALLFOLDER" Secure="yes" />
+
+    <StandardDirectory Id="ProgramFilesFolder">
+      <Directory Id="INSTALLFOLDER" Name="notty">
+        <Component Id="CoreFiles" Guid="*">
+          <File Id="notty.exe" Source="$(var.NottyExePath)" KeyPath="yes" />
+        </Component>
+        <Component Id="CoreLegacyFile" Guid="*">
+          <File Id="notepad_legacy.exe" Source="$(var.NottyLegacyExePath)" KeyPath="yes" />
+        </Component>
+
+        <Component Id="NotepadReplaceReg" Guid="*">
+          <RegistryValue Root="HKLM"
+            Key="SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\notepad.exe"
+            Name="Debugger" Type="string" Value="[INSTALLFOLDER]notty.exe" KeyPath="yes" />
+        </Component>
+
+        <Component Id="ContextMenuReg" Guid="*">
+          <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\*\shell\notty"
+            Value="Abrir con notty" Type="string" KeyPath="yes" />
+          <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\*\shell\notty\command"
+            Value="&quot;[INSTALLFOLDER]notty.exe&quot; &quot;%1&quot;" Type="string" />
+        </Component>
+
+        <Component Id="PathEnvReg" Guid="*">
+          <RegistryValue Root="HKLM" Key="SOFTWARE\notty" Name="pathenv" Type="integer" Value="1" KeyPath="yes" />
+          <Environment Id="PathAddition" Name="PATH" Value="[INSTALLFOLDER]" Permanent="no"
+            Part="last" Action="set" System="yes" />
+        </Component>
+
+        <Component Id="AssocTextReg" Guid="*">
+          <ProgId Id="notty.txt" Description="Documento de texto (notty)">
+            <Extension Id="txt" ContentType="text/plain">
+              <Verb Id="open" Command="Abrir" TargetFile="notty.exe" Argument="&quot;%1&quot;" />
+            </Extension>
+            <Extension Id="log" />
+            <Extension Id="text" />
+          </ProgId>
+          <RegistryValue Root="HKLM" Key="SOFTWARE\RegisteredApplications" Name="notty"
+            Value="SOFTWARE\notty\Capabilities" Type="string" KeyPath="yes" />
+          <RegistryValue Root="HKLM" Key="SOFTWARE\notty\Capabilities\FileAssociations"
+            Name=".txt" Value="notty.txt" Type="string" />
+          <RegistryValue Root="HKLM" Key="SOFTWARE\notty\Capabilities\FileAssociations"
+            Name=".log" Value="notty.txt" Type="string" />
+          <RegistryValue Root="HKLM" Key="SOFTWARE\notty\Capabilities\FileAssociations"
+            Name=".text" Value="notty.txt" Type="string" />
+        </Component>
+
+        <Component Id="AssocConfigReg" Guid="*">
+          <ProgId Id="notty.config" Description="Archivo de configuración (notty)">
+            <Extension Id="ini" ContentType="text/plain">
+              <Verb Id="open" Command="Abrir" TargetFile="notty.exe" Argument="&quot;%1&quot;" />
+            </Extension>
+            <Extension Id="cfg" />
+            <Extension Id="conf" />
+            <Extension Id="toml" />
+          </ProgId>
+          <RegistryValue Root="HKLM" Key="SOFTWARE\notty\Capabilities\FileAssociations"
+            Name=".ini" Value="notty.config" Type="string" KeyPath="yes" />
+          <RegistryValue Root="HKLM" Key="SOFTWARE\notty\Capabilities\FileAssociations"
+            Name=".cfg" Value="notty.config" Type="string" />
+          <RegistryValue Root="HKLM" Key="SOFTWARE\notty\Capabilities\FileAssociations"
+            Name=".conf" Value="notty.config" Type="string" />
+          <RegistryValue Root="HKLM" Key="SOFTWARE\notty\Capabilities\FileAssociations"
+            Name=".toml" Value="notty.config" Type="string" />
+        </Component>
+
+        <Component Id="AssocMarkdownReg" Guid="*">
+          <ProgId Id="notty.markdown" Description="Documento Markdown (notty)">
+            <Extension Id="md" ContentType="text/markdown">
+              <Verb Id="open" Command="Abrir" TargetFile="notty.exe" Argument="&quot;%1&quot;" />
+            </Extension>
+            <Extension Id="markdown" />
+          </ProgId>
+          <RegistryValue Root="HKLM" Key="SOFTWARE\notty\Capabilities\FileAssociations"
+            Name=".md" Value="notty.markdown" Type="string" KeyPath="yes" />
+          <RegistryValue Root="HKLM" Key="SOFTWARE\notty\Capabilities\FileAssociations"
+            Name=".markdown" Value="notty.markdown" Type="string" />
+        </Component>
+
+        <Component Id="AssocCodeReg" Guid="*">
+          <ProgId Id="notty.code" Description="Código y datos (notty)">
+            <Extension Id="json" ContentType="application/json">
+              <Verb Id="open" Command="Abrir" TargetFile="notty.exe" Argument="&quot;%1&quot;" />
+            </Extension>
+            <Extension Id="xml" />
+            <Extension Id="csv" />
+            <Extension Id="yaml" />
+          </ProgId>
+          <RegistryValue Root="HKLM" Key="SOFTWARE\notty\Capabilities\FileAssociations"
+            Name=".json" Value="notty.code" Type="string" KeyPath="yes" />
+          <RegistryValue Root="HKLM" Key="SOFTWARE\notty\Capabilities\FileAssociations"
+            Name=".xml" Value="notty.code" Type="string" />
+          <RegistryValue Root="HKLM" Key="SOFTWARE\notty\Capabilities\FileAssociations"
+            Name=".csv" Value="notty.code" Type="string" />
+          <RegistryValue Root="HKLM" Key="SOFTWARE\notty\Capabilities\FileAssociations"
+            Name=".yaml" Value="notty.code" Type="string" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Component Id="StartMenuShortcut" Guid="*">
+        <Shortcut Id="StartMenuNotty" Name="notty" Target="[INSTALLFOLDER]notty.exe"
+          WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="RemoveStartMenuDir" On="uninstall" />
+        <RegistryValue Root="HKCU" Key="Software\notty" Name="startmenu" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <StandardDirectory Id="DesktopFolder">
+      <Component Id="DesktopShortcut" Guid="*">
+        <Shortcut Id="DesktopNotty" Name="notty" Target="[INSTALLFOLDER]notty.exe"
+          WorkingDirectory="INSTALLFOLDER" />
+        <RegistryValue Root="HKCU" Key="Software\notty" Name="desktop" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <Feature Id="Core" Title="notty (núcleo)" Level="1" AllowAbsent="no" Display="hidden">
+      <ComponentRef Id="CoreFiles" />
+      <ComponentRef Id="CoreLegacyFile" />
+    </Feature>
+    <Feature Id="NotepadReplace" Title="Sustituir el Bloc de notas" Level="1">
+      <ComponentRef Id="NotepadReplaceReg" />
+    </Feature>
+    <Feature Id="ContextMenu" Title="Menú contextual" Level="1">
+      <ComponentRef Id="ContextMenuReg" />
+    </Feature>
+    <Feature Id="PathEnv" Title="PATH" Level="1">
+      <ComponentRef Id="PathEnvReg" />
+    </Feature>
+    <Feature Id="AssocText" Title="Texto plano" Level="1">
+      <ComponentRef Id="AssocTextReg" />
+    </Feature>
+    <Feature Id="AssocConfig" Title="Configuración" Level="1">
+      <ComponentRef Id="AssocConfigReg" />
+    </Feature>
+    <Feature Id="AssocMarkdown" Title="Markdown" Level="1">
+      <ComponentRef Id="AssocMarkdownReg" />
+    </Feature>
+    <Feature Id="AssocCode" Title="Código y datos" Level="1000">
+      <ComponentRef Id="AssocCodeReg" />
+    </Feature>
+    <Feature Id="StartMenu" Title="Menú Inicio" Level="1">
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+    <Feature Id="Desktop" Title="Escritorio" Level="1000">
+      <ComponentRef Id="DesktopShortcut" />
+    </Feature>
+  </Package>
+</Wix>
