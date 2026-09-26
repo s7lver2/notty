@@ -106,6 +106,10 @@ pub struct UiConfig {
     /// alternativa puntual; esto lo hace el camino por defecto.
     pub native_file_dialog: bool,
     pub font_family: FontFamily,
+    /// Sustituye visualmente secuencias como "->" por una flecha, sin tocar el texto
+    /// guardado. El conjunto fijo vive en `notty_ui::ligature::BUILTIN`; `Config::
+    /// ligature_overrides` deja añadir o pisar entradas.
+    pub ligatures: bool,
 }
 
 impl Default for UiConfig {
@@ -125,6 +129,7 @@ impl Default for UiConfig {
             suggestion_icons: true,
             native_file_dialog: false,
             font_family: FontFamily::Auto,
+            ligatures: false,
         };
         let preset = ui.preset;
         crate::apply_preset(&mut ui, preset);
@@ -210,6 +215,11 @@ pub struct Config {
     /// deja el comando sin atajo.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub keys: BTreeMap<String, String>,
+    /// Sección `[ligature_overrides]`: secuencia → carácter de sustitución, para
+    /// añadir a `notty_ui::ligature::BUILTIN` o pisar alguna de sus entradas. Solo
+    /// tiene efecto si `ui.ligatures` está activo.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub ligature_overrides: BTreeMap<String, String>,
 }
 
 #[cfg(test)]
@@ -315,6 +325,24 @@ mod tests {
         let text = toml::to_string(&cfg).unwrap();
         let back: Config = toml::from_str(&text).unwrap();
         assert_eq!(back.ui.font_scale, 1.3);
+    }
+
+    #[test]
+    fn ligatures_default_off_and_overrides_round_trip() {
+        assert!(!UiConfig::default().ligatures);
+        let mut cfg = Config { ui: UiConfig { ligatures: true, ..UiConfig::default() }, ..Config::default() };
+        cfg.ligature_overrides.insert("~>".to_string(), "↝".to_string());
+        let text = toml::to_string(&cfg).unwrap();
+        assert!(text.contains("[ligature_overrides]"));
+        let back: Config = toml::from_str(&text).unwrap();
+        assert!(back.ui.ligatures);
+        assert_eq!(back.ligature_overrides.get("~>").map(String::as_str), Some("↝"));
+    }
+
+    #[test]
+    fn empty_ligature_overrides_are_not_written() {
+        let text = toml::to_string_pretty(&Config::default()).unwrap();
+        assert!(!text.contains("[ligature_overrides]"));
     }
 
     #[test]

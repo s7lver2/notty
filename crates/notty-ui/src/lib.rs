@@ -10,6 +10,7 @@ mod keyboard_widget;
 mod hex;
 pub mod layout;
 mod keymap;
+pub mod ligature;
 pub mod menu;
 pub mod native_dialog;
 mod path_prompt;

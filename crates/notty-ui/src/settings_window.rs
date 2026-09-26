@@ -939,6 +939,7 @@ fn current_bool(cfg: &Config, key: SettingKey) -> bool {
         SettingKey::Autosave => cfg.files.autosave,
         SettingKey::SuggestionIcons => cfg.ui.suggestion_icons,
         SettingKey::NativeFileDialog => cfg.ui.native_file_dialog,
+        SettingKey::Ligatures => cfg.ui.ligatures,
         SettingKey::StartWithWindows => cfg.hotkey.start_with_windows,
         SettingKey::UpdatesCheck => cfg.updates.check,
         _ => false,

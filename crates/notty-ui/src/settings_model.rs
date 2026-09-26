@@ -26,6 +26,7 @@ pub enum SettingKey {
     SuggestionIcons,
     NativeFileDialog,
     FontFamily,
+    Ligatures,
 }
 
 /// El valor elegido; `apply` decide qué campo de `Config` toca según `SettingKey`.
@@ -114,6 +115,17 @@ const APARIENCIA: &[Row] = &[
             ("Courier New", SettingValue::FontFamily(FontFamily::CourierNew)),
             ("Lucida Console", SettingValue::FontFamily(FontFamily::LucidaConsole)),
         ],
+    },
+    Row::Toggle {
+        title: "Ligaduras",
+        desc: "Sustituye -> => <= etc. por su flecha o símbolo, solo al dibujar.",
+        key: SettingKey::Ligatures,
+    },
+    Row::Link {
+        title: "Personalizar ligaduras",
+        desc: "Añade o cambia sustituciones en config.toml, sección [ligature_overrides].",
+        label: "Abrir config.toml",
+        action: LinkAction::OpenKeys,
     },
 ];
 
@@ -304,6 +316,7 @@ pub fn apply(cfg: &mut Config, key: SettingKey, value: SettingValue) {
         (SettingKey::MergedCommandLine, SettingValue::Bool(b)) => cfg.ui.merged_command_line = b,
         (SettingKey::VimAlways, SettingValue::Bool(b)) => cfg.ui.vim_always = b,
         (SettingKey::FontFamily, SettingValue::FontFamily(f)) => cfg.ui.font_family = f,
+        (SettingKey::Ligatures, SettingValue::Bool(b)) => cfg.ui.ligatures = b,
         (SettingKey::SuggestionIcons, SettingValue::Bool(b)) => cfg.ui.suggestion_icons = b,
         (SettingKey::NativeFileDialog, SettingValue::Bool(b)) => cfg.ui.native_file_dialog = b,
         _ => return, // combinación key/value que no tiene sentido: no hace nada
@@ -337,10 +350,11 @@ mod tests {
 
     #[test]
     fn apariencia_has_preset_theme_and_line_numbers() {
-        assert_eq!(APARIENCIA.len(), 4);
+        assert_eq!(APARIENCIA.len(), 6);
         assert!(matches!(APARIENCIA[0], Row::Seg { key: SettingKey::Preset, .. }));
         assert!(matches!(APARIENCIA[2], Row::Toggle { key: SettingKey::LineNumbers, .. }));
         assert!(matches!(APARIENCIA[3], Row::Select { key: SettingKey::FontFamily, .. }));
+        assert!(matches!(APARIENCIA[4], Row::Toggle { key: SettingKey::Ligatures, .. }));
     }
 
     #[test]
