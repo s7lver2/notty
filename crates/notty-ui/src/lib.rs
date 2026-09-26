@@ -49,6 +49,7 @@ pub use prompt::Prompt;
 pub use raw_doc::{RawDoc, open_raw_doc};
 pub use render::{AboutContent, Hit, Renderer, UpdatePanelContent, ViewState};
 pub use search_prompt::SearchState;
+pub use text_input::char_from_utf16_unit;
 pub use theme::{Palette, Rgba, is_dark, palette};
 pub use update_panel::{DownloadPhase, UpdatePhase, UpdateState};
 pub use viewport::Viewport;

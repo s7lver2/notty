@@ -143,6 +143,8 @@ struct WindowState {
     notice: Option<(String, std::time::Instant)>,
     /// Descartar el próximo `WM_CHAR` (la tecla ya se usó en `WM_KEYDOWN`).
     swallow_char: bool,
+    /// Mitad alta de un par sustituto pendiente de `WM_CHAR` (emoji).
+    pending_surrogate: Option<u16>,
     /// Paneles de `Files::Splits`. Se mantiene al día también en los otros modos (al
     /// cerrar documentos) para que volver a Paneles no apunte a índices que ya no existen.
     splits: crate::splits::Splits,
@@ -1380,6 +1382,7 @@ fn run_inner(
             path_copied_at: None,
             notice: None,
             swallow_char: false,
+            pending_surrogate: None,
             splits: crate::splits::Splits::default(),
         });
         let ptr = Box::into_raw(window_state);
@@ -2005,7 +2008,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     if std::mem::take(&mut w.swallow_char) {
                         return LRESULT(0);
                     }
-                    if let Some(ch) = char::from_u32(wparam.0 as u32) {
+                    if let Some(ch) = crate::char_from_utf16_unit(&mut w.pending_surrogate, wparam.0 as u16) {
                         if !matches!(w.ws.prompt, crate::Prompt::None) {
                             handle_prompt_char(w, ch);
                             let _ = InvalidateRect(Some(hwnd), None, false);

@@ -131,9 +131,39 @@ impl TextInput {
     }
 }
 
+/// Une las dos mitades de un par sustituto que `WM_CHAR` entrega por separado
+/// (emoji y demás caracteres fuera del BMP). La mitad alta se guarda en `pending`.
+pub fn char_from_utf16_unit(pending: &mut Option<u16>, unit: u16) -> Option<char> {
+    match unit {
+        0xD800..=0xDBFF => {
+            *pending = Some(unit);
+            None
+        }
+        0xDC00..=0xDFFF => {
+            let hi = pending.take()?;
+            char::decode_utf16([hi, unit]).next()?.ok()
+        }
+        _ => {
+            *pending = None;
+            char::from_u32(unit as u32)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn surrogate_pair_becomes_one_char() {
+        let mut pending = None;
+        assert_eq!(char_from_utf16_unit(&mut pending, 0xD83D), None);
+        assert_eq!(char_from_utf16_unit(&mut pending, 0xDE00), Some('😀'));
+        assert_eq!(pending, None);
+        assert_eq!(char_from_utf16_unit(&mut pending, 'ñ' as u16), Some('ñ'));
+        // Mitad baja suelta: se ignora.
+        assert_eq!(char_from_utf16_unit(&mut pending, 0xDE00), None);
+    }
 
     #[test]
     fn typing_and_backspace() {
