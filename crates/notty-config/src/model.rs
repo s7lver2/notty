@@ -131,12 +131,26 @@ impl Default for HotkeyConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UpdatesConfig {
+    pub check: bool,
+    pub last_check: u64,
+}
+
+impl Default for UpdatesConfig {
+    fn default() -> Self {
+        Self { check: false, last_check: 0 }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub ui: UiConfig,
     pub files: FilesConfig,
     pub hotkey: HotkeyConfig,
+    pub updates: UpdatesConfig,
 }
 
 #[cfg(test)]
@@ -206,6 +220,21 @@ mod tests {
         assert!(!f.autosave);
         assert_eq!(f.default_extension, ".txt");
         assert_eq!(f.large_file_mb, 50);
+    }
+
+    #[test]
+    fn updates_config_defaults_to_opt_out() {
+        let cfg = Config::default();
+        assert!(!cfg.updates.check);
+        assert_eq!(cfg.updates.last_check, 0);
+    }
+
+    #[test]
+    fn partial_toml_with_updates_section_parses() {
+        let toml_str = "[updates]\ncheck = true\nlast_check = 1234567890\n";
+        let cfg: Config = toml::from_str(toml_str).unwrap();
+        assert!(cfg.updates.check);
+        assert_eq!(cfg.updates.last_check, 1234567890);
     }
 
     #[test]
