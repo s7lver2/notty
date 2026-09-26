@@ -97,23 +97,23 @@ pub struct ViewState {
 /// Los formatos de texto fijos que usa la maqueta, creados una vez en `Renderer::new`.
 /// `pub(crate)` porque `settings_window` (Task 11) también dibuja con ellos, a través
 /// de `Renderer::fonts()`.
-pub(crate) struct Fonts {
-    pub(crate) ui_12: IDWriteTextFormat,
-    pub(crate) ui_12_5: IDWriteTextFormat,
-    pub(crate) ui_11: IDWriteTextFormat,
-    pub(crate) ui_11_5: IDWriteTextFormat,
-    pub(crate) ui_13: IDWriteTextFormat,
-    pub(crate) ui_20_semibold: IDWriteTextFormat,
-    pub(crate) ui_11_5_semibold: IDWriteTextFormat,
-    pub(crate) ui_9: IDWriteTextFormat,
-    pub(crate) mono_13: IDWriteTextFormat,
-    pub(crate) mono_13_bold: IDWriteTextFormat,
-    pub(crate) mono_11: IDWriteTextFormat,
-    pub(crate) mono_11_bold: IDWriteTextFormat,
-    pub(crate) mono_11_5: IDWriteTextFormat,
-    pub(crate) mono_11_5_semibold: IDWriteTextFormat,
-    pub(crate) mono_12: IDWriteTextFormat,
-    pub(crate) mono_12_5: IDWriteTextFormat,
+pub struct Fonts {
+    pub ui_12: IDWriteTextFormat,
+    pub ui_12_5: IDWriteTextFormat,
+    pub ui_11: IDWriteTextFormat,
+    pub ui_11_5: IDWriteTextFormat,
+    pub ui_13: IDWriteTextFormat,
+    pub ui_20_semibold: IDWriteTextFormat,
+    pub ui_11_5_semibold: IDWriteTextFormat,
+    pub ui_9: IDWriteTextFormat,
+    pub mono_13: IDWriteTextFormat,
+    pub mono_13_bold: IDWriteTextFormat,
+    pub mono_11: IDWriteTextFormat,
+    pub mono_11_bold: IDWriteTextFormat,
+    pub mono_11_5: IDWriteTextFormat,
+    pub mono_11_5_semibold: IDWriteTextFormat,
+    pub mono_12: IDWriteTextFormat,
+    pub mono_12_5: IDWriteTextFormat,
 }
 
 /// Busca `primary` en la colección de fuentes del sistema; si no existe, usa `fallback`.
@@ -311,20 +311,20 @@ impl Renderer {
 
     /// Formatos de texto fijos, para que `settings_window` (Task 11) dibuje con los
     /// mismos que el resto de la app en vez de crear los suyos.
-    pub(crate) fn fonts(&self) -> &Fonts {
+    pub fn fonts(&self) -> &Fonts {
         &self.fonts
     }
 
     /// `BeginDraw` + `Clear`. Junto con `end_paint`, deja que `settings_window`
     /// reutilice el mismo `ID2D1HwndRenderTarget` sin repetir el `unsafe` de Direct2D.
-    pub(crate) fn begin_paint(&self, bg: Rgba) {
+    pub fn begin_paint(&self, bg: Rgba) {
         unsafe {
             self.target.BeginDraw();
             self.target.Clear(Some(&color(bg)));
         }
     }
 
-    pub(crate) fn end_paint(&self) {
+    pub fn end_paint(&self) {
         unsafe {
             let _ = self.target.EndDraw(None, None);
         }
@@ -334,13 +334,13 @@ impl Renderer {
     /// siguiente `set_transform`/`reset_transform`): usada por `settings_window` para
     /// la escala de apertura (Task 5 del plan de animaciones). No afecta al
     /// hit-testing: los rects guardados en `hits` siguen en coordenadas lógicas.
-    pub(crate) fn set_transform(&self, m: Matrix3x2) {
+    pub fn set_transform(&self, m: Matrix3x2) {
         unsafe {
             self.target.SetTransform(&m);
         }
     }
 
-    pub(crate) fn reset_transform(&self) {
+    pub fn reset_transform(&self) {
         unsafe {
             self.target.SetTransform(&Matrix3x2::identity());
         }
@@ -349,13 +349,13 @@ impl Renderer {
     /// Ver el campo `fade`: multiplica la opacidad de todo lo dibujado después de esta
     /// llamada hasta el próximo `set_fade`. `1.0` (el valor por defecto tras cada
     /// `Renderer::new`) no cambia nada.
-    pub(crate) fn set_fade(&self, factor: f32) {
+    pub fn set_fade(&self, factor: f32) {
         self.fade.set(factor.clamp(0.0, 1.0));
     }
 
     // --- Helpers de dibujo con la brocha única --------------------------------------
 
-    pub(crate) fn fill(&self, r: Rect, c: Rgba) {
+    pub fn fill(&self, r: Rect, c: Rgba) {
         if r.is_empty() {
             return;
         }
@@ -365,7 +365,7 @@ impl Renderer {
         }
     }
 
-    pub(crate) fn fill_round(&self, r: Rect, radius: f32, c: Rgba) {
+    pub fn fill_round(&self, r: Rect, radius: f32, c: Rgba) {
         if r.is_empty() {
             return;
         }
@@ -382,7 +382,7 @@ impl Renderer {
     /// de un único rect 2px más grande y opaco (que se veía como un anillo negro duro
     /// pegado al borde), varias capas cada vez más grandes/tenues y desplazadas hacia
     /// abajo, como la sombra real de una ventana flotante en vez de un contorno plano.
-    pub(crate) fn draw_popup_shadow(&self, r: Rect, radius: f32, fade: f32, shadow: Rgba) {
+    pub fn draw_popup_shadow(&self, r: Rect, radius: f32, fade: f32, shadow: Rgba) {
         const LAYERS: [(f32, f32, f32); 4] = [
             // (desplazamiento en Y, crecimiento del rect, multiplicador de alpha)
             (1.0, 1.0, 0.5),
@@ -401,7 +401,7 @@ impl Renderer {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn stroke_line(&self, x0: f32, y0: f32, x1: f32, y1: f32, width: f32, c: Rgba) {
+    pub fn stroke_line(&self, x0: f32, y0: f32, x1: f32, y1: f32, width: f32, c: Rgba) {
         unsafe {
             self.brush.SetColor(&color(c.faded(self.fade.get())));
             self.target.DrawLine(Vector2 { X: x0, Y: y0 }, Vector2 { X: x1, Y: y1 }, &self.brush, width, None);
@@ -409,7 +409,7 @@ impl Renderer {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn stroke_rect(&self, r: Rect, width: f32, c: Rgba) {
+    pub fn stroke_rect(&self, r: Rect, width: f32, c: Rgba) {
         if r.is_empty() {
             return;
         }
@@ -420,7 +420,7 @@ impl Renderer {
     }
 
     /// Círculo centrado en `(cx, cy)` de radio `radius`, sin relleno.
-    pub(crate) fn stroke_circle(&self, cx: f32, cy: f32, radius: f32, width: f32, c: Rgba) {
+    pub fn stroke_circle(&self, cx: f32, cy: f32, radius: f32, width: f32, c: Rgba) {
         unsafe {
             self.brush.SetColor(&color(c.faded(self.fade.get())));
             let ellipse = D2D1_ELLIPSE { point: Vector2 { X: cx, Y: cy }, radiusX: radius, radiusY: radius };
@@ -429,7 +429,7 @@ impl Renderer {
     }
 
     /// Círculo relleno centrado en `(cx, cy)` de radio `radius` (el punto del icono).
-    pub(crate) fn fill_circle(&self, cx: f32, cy: f32, radius: f32, c: Rgba) {
+    pub fn fill_circle(&self, cx: f32, cy: f32, radius: f32, c: Rgba) {
         unsafe {
             self.brush.SetColor(&color(c.faded(self.fade.get())));
             let ellipse = D2D1_ELLIPSE { point: Vector2 { X: cx, Y: cy }, radiusX: radius, radiusY: radius };
@@ -438,7 +438,7 @@ impl Renderer {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn stroke_round_rect(&self, r: Rect, radius: f32, width: f32, c: Rgba) {
+    pub fn stroke_round_rect(&self, r: Rect, radius: f32, width: f32, c: Rgba) {
         if r.is_empty() {
             return;
         }
@@ -456,13 +456,13 @@ impl Renderer {
     /// Dibuja `s` con `fmt` en `r`, centrado verticalmente en su alto (recorte con
     /// «…» si el formato lo tiene configurado).
     #[allow(dead_code)]
-    pub(crate) fn text(&self, s: &str, fmt: &IDWriteTextFormat, r: Rect, c: Rgba) {
+    pub fn text(&self, s: &str, fmt: &IDWriteTextFormat, r: Rect, c: Rgba) {
         self.text_aligned(s, fmt, r, c, false);
     }
 
     /// Igual que `text`, pero alineado a la derecha de `r`.
     #[allow(dead_code)]
-    pub(crate) fn text_right(&self, s: &str, fmt: &IDWriteTextFormat, r: Rect, c: Rgba) {
+    pub fn text_right(&self, s: &str, fmt: &IDWriteTextFormat, r: Rect, c: Rgba) {
         self.text_aligned(s, fmt, r, c, true);
     }
 
@@ -489,7 +489,7 @@ impl Renderer {
     }
 
     /// Ancho de `s` con `fmt`, sin límite (para medir nombres de pestaña, etc.).
-    pub(crate) fn measure(&self, s: &str, fmt: &IDWriteTextFormat) -> f32 {
+    pub fn measure(&self, s: &str, fmt: &IDWriteTextFormat) -> f32 {
         let w = wide(s);
         if w.is_empty() {
             return 0.0;

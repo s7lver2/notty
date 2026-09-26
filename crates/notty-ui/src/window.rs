@@ -620,7 +620,7 @@ unsafe fn setup_chrome(hwnd: HWND, dark: bool) {
 
 /// `DWMWA_USE_IMMERSIVE_DARK_MODE`: oscurece el marco nativo (los 4 px de borde que
 /// sigue dibujando DWM). Se vuelve a llamar cuando cambia el tema (Task 10).
-pub(crate) unsafe fn apply_dark_mode(hwnd: HWND, dark: bool) {
+pub unsafe fn apply_dark_mode(hwnd: HWND, dark: bool) {
     unsafe {
         let value: i32 = if dark { 1 } else { 0 };
         let _ = DwmSetWindowAttribute(
@@ -633,7 +633,7 @@ pub(crate) unsafe fn apply_dark_mode(hwnd: HWND, dark: bool) {
 }
 
 /// Lee `HKCU\...\Personalize\AppsUseLightTheme`. Si no se puede leer, asume modo claro.
-pub(crate) fn system_uses_dark_mode() -> bool {
+pub fn system_uses_dark_mode() -> bool {
     use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
     unsafe {
         let subkey = w!(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
@@ -656,7 +656,7 @@ pub(crate) fn system_uses_dark_mode() -> bool {
 /// Si el usuario desactivó las animaciones del sistema (Accesibilidad → Efectos
 /// visuales), las de notty también se saltan. Se consulta una vez al arrancar la
 /// ventana y se guarda en `WindowState`; no hace falta escuchar cambios en caliente.
-pub(crate) fn system_animations_enabled() -> bool {
+pub fn system_animations_enabled() -> bool {
     unsafe {
         let mut enabled = windows::core::BOOL(1);
         let ok = windows::Win32::UI::WindowsAndMessaging::SystemParametersInfoW(
