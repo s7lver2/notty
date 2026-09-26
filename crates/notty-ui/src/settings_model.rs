@@ -1,12 +1,107 @@
-//! Modelo puro de la ventana de Ajustes (`SECTIONS` de la maqueta, líneas 993-1027):
-//! qué secciones y filas hay, y qué le pasa a `Config` cuando se toca una. No sabe
-//! dibujar ni de Win32/Direct2D.
+//! Modelo puro de la ventana de Ajustes (maqueta `Prototipo.dc.html`): qué páginas
+//! hay (y cuáles son subpáginas de otra), las opciones de cada selector y qué le
+//! pasa a `Config` cuando se toca algo. No sabe dibujar ni de Win32/Direct2D.
 
 use notty_config::{Config, Files, FontFamily, HotkeyMechanism, MenuBar, Preset, TabsPosition, TempMode, Theme};
 use notty_input::Command;
 
-/// Qué ajuste toca una fila interactiva (`Seg`/`Select`/`Toggle`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Una página de Ajustes. Las de la barra lateral están en `Page::RAIL`; `Fuentes` y
+/// `Ligaduras` son subpáginas de `Apariencia` (como las rutas de la Configuración de
+/// Windows: cabecera con miga de pan y la barra sigue marcando a la madre).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Page {
+    Apariencia,
+    Fuentes,
+    Ligaduras,
+    Ventana,
+    Teclado,
+    Archivos,
+    AtajoGlobal,
+    Actualizaciones,
+    AcercaDe,
+    Ayuda,
+}
+
+impl Page {
+    pub const RAIL: [Page; 8] = [
+        Page::Apariencia,
+        Page::Ventana,
+        Page::Teclado,
+        Page::Archivos,
+        Page::AtajoGlobal,
+        Page::Actualizaciones,
+        Page::AcercaDe,
+        Page::Ayuda,
+    ];
+
+    const ALL: [Page; 10] = [
+        Page::Apariencia,
+        Page::Fuentes,
+        Page::Ligaduras,
+        Page::Ventana,
+        Page::Teclado,
+        Page::Archivos,
+        Page::AtajoGlobal,
+        Page::Actualizaciones,
+        Page::AcercaDe,
+        Page::Ayuda,
+    ];
+
+    /// Lo que se pasa a `open_settings_at` para abrir directamente en esta página.
+    pub fn id(self) -> &'static str {
+        match self {
+            Page::Apariencia => "apariencia",
+            Page::Fuentes => "fuentes",
+            Page::Ligaduras => "ligaduras",
+            Page::Ventana => "ventana",
+            Page::Teclado => "teclado",
+            Page::Archivos => "archivos",
+            Page::AtajoGlobal => "atajo_global",
+            Page::Actualizaciones => "actualizaciones",
+            Page::AcercaDe => "acerca_de",
+            Page::Ayuda => "ayuda",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Page> {
+        Page::ALL.iter().copied().find(|p| p.id() == id)
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Page::Apariencia => "Apariencia",
+            Page::Fuentes => "Fuentes",
+            Page::Ligaduras => "Ligaduras",
+            Page::Ventana => "Ventana",
+            Page::Teclado => "Teclado",
+            Page::Archivos => "Archivos",
+            Page::AtajoGlobal => "Atajo global",
+            Page::Actualizaciones => "Actualizaciones",
+            Page::AcercaDe => "Acerca de",
+            Page::Ayuda => "Ayuda",
+        }
+    }
+
+    /// Página madre de una subpágina.
+    pub fn parent(self) -> Option<Page> {
+        match self {
+            Page::Fuentes | Page::Ligaduras => Some(Page::Apariencia),
+            _ => None,
+        }
+    }
+
+    /// La que se marca en la barra lateral.
+    pub fn rail_page(self) -> Page {
+        self.parent().unwrap_or(self)
+    }
+
+    pub fn rail_index(self) -> usize {
+        Page::RAIL.iter().position(|p| *p == self.rail_page()).unwrap_or(0)
+    }
+}
+
+/// Qué ajuste toca un control.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SettingKey {
     Preset,
     Theme,
@@ -44,261 +139,170 @@ pub enum SettingValue {
     FontFamily(FontFamily),
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum Row {
-    /// Control segmentado (varias opciones, una marcada): `.seg` de la maqueta.
-    Seg { title: &'static str, desc: &'static str, key: SettingKey, options: &'static [(&'static str, SettingValue)] },
-    /// Desplegable de una sola opción a la vez: `.select`.
-    Select { title: &'static str, desc: &'static str, key: SettingKey, options: &'static [(&'static str, SettingValue)] },
-    Toggle { title: &'static str, desc: &'static str, key: SettingKey },
-    /// Atajo de solo lectura (no se puede reasignar desde aquí): `.kbd`.
-    Kbd { title: &'static str, keys: &'static str },
-    /// Atajo reasignable: al pulsarlo se abre la captura de teclas. El título y la
-    /// combinación salen de `cmd` y de `[keys]`.
-    Binding { cmd: Command },
-    /// Enlace de acción, no de ajuste: `.link`.
-    Link { title: &'static str, desc: &'static str, label: &'static str, action: LinkAction },
-    /// Cabecera de subgrupo dentro de una sección: `.sgroup`.
-    Group(&'static str),
-}
+/// Opciones de un selector: `(etiqueta, valor)`.
+pub type Options = &'static [(&'static str, SettingValue)];
 
-/// Qué hace un `Row::Link` al pulsarlo — hacía falta distinguirlo en cuanto hubo más
-/// de un enlace de acción en toda la ventana (antes solo existía "Abrir [keys]").
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub const PRESET_OPTS: Options = &[
+    ("Moderna", SettingValue::Preset(Preset::Moderna)),
+    ("Clásica", SettingValue::Preset(Preset::Clasica)),
+    ("Zen", SettingValue::Preset(Preset::Zen)),
+];
+
+pub const THEME_OPTS: Options = &[
+    ("Sistema", SettingValue::Theme(Theme::System)),
+    ("Claro", SettingValue::Theme(Theme::Light)),
+    ("Oscuro", SettingValue::Theme(Theme::Dark)),
+];
+
+pub const FILES_OPTS: Options = &[
+    ("Pestañas", SettingValue::Files(Files::Tabs)),
+    ("Buffers", SettingValue::Files(Files::Buffers)),
+    ("Paneles", SettingValue::Files(Files::Splits)),
+];
+
+/// Descripción de cada opción de `FILES_OPTS`, en el mismo orden.
+pub const FILES_DESC: [&str; 3] = [
+    "Una pestaña por archivo, visibles arriba.",
+    "Estilo vim: sin pestañas, cambias con Ctrl+Tab o :b.",
+    "Hasta 3 documentos lado a lado; Ctrl+Shift+Enter divide.",
+];
+
+pub const TABS_POSITION_OPTS: Options = &[
+    ("En el título", SettingValue::TabsPosition(TabsPosition::Title)),
+    ("Bajo el menú", SettingValue::TabsPosition(TabsPosition::Below)),
+    ("Si hay más de 1", SettingValue::TabsPosition(TabsPosition::Auto)),
+    ("Ocultas", SettingValue::TabsPosition(TabsPosition::Hidden)),
+];
+
+pub const MENU_BAR_OPTS: Options = &[
+    ("Oculta", SettingValue::MenuBar(MenuBar::Hidden)),
+    ("Visible", SettingValue::MenuBar(MenuBar::Visible)),
+    ("Con Alt", SettingValue::MenuBar(MenuBar::Alt)),
+];
+
+pub const TEMP_MODE_OPTS: Options = &[
+    ("Borrador", SettingValue::TempMode(TempMode::Draft)),
+    ("Volátil", SettingValue::TempMode(TempMode::Volatile)),
+];
+
+pub const HOTKEY_OPTS: Options = &[
+    ("Segundo plano", SettingValue::HotkeyMechanism(HotkeyMechanism::Daemon)),
+    ("Acceso directo", SettingValue::HotkeyMechanism(HotkeyMechanism::Lnk)),
+];
+
+/// Atajos reasignables de Teclado, en el orden en que se listan.
+pub const BINDINGS: &[Command] = Command::ALL;
+
+/// Qué hace un enlace o botón de acción (no un ajuste).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LinkAction {
-    OpenKeys,
+    /// Abre config.toml como documento en la ventana principal.
+    OpenConfig,
     /// Ajustes → Ayuda → "Repetir tutorial": arranca el recorrido guiado directamente
     /// (no vuelve a mostrar la ventana de bienvenida).
     RepeatTutorial,
-    /// Ajustes → Acerca de → "Comprobar ahora": fuerza el chequeo de actualizaciones
-    /// ya mismo, sin esperar a que toque el de una vez al día.
+    /// Actualizaciones → "Buscar actualizaciones": el chequeo ya mismo, sin esperar
+    /// al de una vez al día.
     CheckUpdatesNow,
+    /// Actualizaciones → "Descargar e instalar".
+    DownloadUpdate,
+    /// Notas completas de la versión nueva en GitHub.
+    ReleaseNotes,
+    /// Acerca de → Código fuente.
+    OpenRepo,
+    /// Acerca de → Novedades (todas las releases).
+    OpenChangelog,
+    /// Acerca de → Carpeta de configuración.
+    OpenConfigFolder,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct Section {
-    pub id: &'static str,
-    pub name: &'static str,
-    pub rows: &'static [Row],
+/// Tamaño de letra base del editor (`layout::FONT_MONO`), para traducir el
+/// deslizador "Tamaño" (px) al zoom que guarda `ui.font_scale`.
+const BASE_PX: f32 = crate::layout::FONT_MONO;
+pub const FONT_PX_MIN: u32 = 10;
+pub const FONT_PX_MAX: u32 = 24;
+
+/// Tamaño del texto del editor en px, tal como se enseña en Fuentes.
+pub fn font_px(cfg: &Config) -> u32 {
+    ((BASE_PX * cfg.ui.font_scale).round() as u32).clamp(FONT_PX_MIN, FONT_PX_MAX)
 }
 
-const APARIENCIA: &[Row] = &[
-    Row::Seg {
-        title: "Preset",
-        desc: "Punto de partida. Cambiar cualquier pieza lo convierte en Personalizado.",
-        key: SettingKey::Preset,
-        options: &[
-            ("Moderna", SettingValue::Preset(Preset::Moderna)),
-            ("Clásica", SettingValue::Preset(Preset::Clasica)),
-            ("Zen", SettingValue::Preset(Preset::Zen)),
-        ],
-    },
-    Row::Seg {
-        title: "Tema",
-        desc: "Por defecto sigue al de Windows.",
-        key: SettingKey::Theme,
-        options: &[
-            ("Sistema", SettingValue::Theme(Theme::System)),
-            ("Claro", SettingValue::Theme(Theme::Light)),
-            ("Oscuro", SettingValue::Theme(Theme::Dark)),
-        ],
-    },
-    Row::Toggle { title: "Números de línea", desc: "", key: SettingKey::LineNumbers },
-    Row::Select {
-        title: "Fuente del editor",
-        desc: "Cascadia Mono si el sistema no tiene la elegida.",
-        key: SettingKey::FontFamily,
-        options: &[
-            ("Automática", SettingValue::FontFamily(FontFamily::Auto)),
-            ("Consolas", SettingValue::FontFamily(FontFamily::Consolas)),
-            ("JetBrains Mono", SettingValue::FontFamily(FontFamily::JetbrainsMono)),
-            ("Fira Code", SettingValue::FontFamily(FontFamily::FiraCode)),
-            ("Courier New", SettingValue::FontFamily(FontFamily::CourierNew)),
-            ("Lucida Console", SettingValue::FontFamily(FontFamily::LucidaConsole)),
-        ],
-    },
-    Row::Toggle {
-        title: "Ligaduras",
-        desc: "Sustituye -> => <= etc. por su flecha o símbolo, solo al dibujar.",
-        key: SettingKey::Ligatures,
-    },
-    Row::Link {
-        title: "Personalizar ligaduras",
-        desc: "Añade o cambia sustituciones en config.toml, sección [ligature_overrides].",
-        label: "Abrir config.toml",
-        action: LinkAction::OpenKeys,
-    },
-    Row::Toggle {
-        title: "Resaltado de sintaxis",
-        desc: "Colorea el código según el lenguaje (por la extensión del archivo).",
-        key: SettingKey::SyntaxHighlight,
-    },
-];
-
-const VENTANA: &[Row] = &[
-    Row::Seg {
-        title: "Varios archivos",
-        desc: "Pestañas visibles, buffers estilo vim (Ctrl+Tab, :b) o hasta 3 paneles lado a lado.",
-        key: SettingKey::Files,
-        options: &[
-            ("Pestañas", SettingValue::Files(Files::Tabs)),
-            ("Buffers", SettingValue::Files(Files::Buffers)),
-            ("Paneles", SettingValue::Files(Files::Splits)),
-        ],
-    },
-    Row::Select {
-        title: "Posición de las pestañas",
-        desc: "",
-        key: SettingKey::TabsPosition,
-        options: &[
-            ("En la barra de título", SettingValue::TabsPosition(TabsPosition::Title)),
-            ("Bajo el menú", SettingValue::TabsPosition(TabsPosition::Below)),
-            ("Solo si hay más de 1", SettingValue::TabsPosition(TabsPosition::Auto)),
-            ("Ocultas", SettingValue::TabsPosition(TabsPosition::Hidden)),
-        ],
-    },
-    Row::Select {
-        title: "Barra de menús",
-        desc: "",
-        key: SettingKey::MenuBar,
-        options: &[
-            ("Oculta", SettingValue::MenuBar(MenuBar::Hidden)),
-            ("Visible", SettingValue::MenuBar(MenuBar::Visible)),
-            ("Aparece con Alt", SettingValue::MenuBar(MenuBar::Alt)),
-        ],
-    },
-    Row::Toggle { title: "Barra de atajos", desc: "Estilo nano. Cambia según lo que estés haciendo.", key: SettingKey::HintsBar },
-    Row::Toggle {
-        title: "Barra de estado",
-        desc: "Si la ocultas, reaparece para rutas, búsquedas y avisos.",
-        key: SettingKey::StatusBar,
-    },
-    Row::Toggle {
-        title: "Línea de comandos fusionada",
-        desc: "Una sola línea abajo para estado y comandos, como en Zen.",
-        key: SettingKey::MergedCommandLine,
-    },
-];
-
-const TECLADO: &[Row] = &[
-    Row::Toggle { title: "Modo vim siempre", desc: "Cada ventana arranca en modo vim.", key: SettingKey::VimAlways },
-    Row::Group("Atajos · haz clic en uno para cambiarlo"),
-    Row::Binding { cmd: Command::NewTab },
-    Row::Binding { cmd: Command::NewTempTab },
-    Row::Binding { cmd: Command::CloseTab },
-    Row::Binding { cmd: Command::NextTab },
-    Row::Binding { cmd: Command::PrevTab },
-    Row::Binding { cmd: Command::OpenSettings },
-    Row::Binding { cmd: Command::ToggleVim },
-    Row::Binding { cmd: Command::ToggleRaw },
-    Row::Binding { cmd: Command::ZoomIn },
-    Row::Binding { cmd: Command::ZoomOut },
-    Row::Binding { cmd: Command::ZoomReset },
-    Row::Binding { cmd: Command::SplitPane },
-    Row::Binding { cmd: Command::ClosePane },
-    Row::Binding { cmd: Command::FocusPaneLeft },
-    Row::Binding { cmd: Command::FocusPaneRight },
-    Row::Group("Atajos globales · funcionan aunque notty no tenga el foco"),
-    Row::Kbd { title: "Nuevo temporal", keys: "Win+Alt+N" },
-    Row::Kbd { title: "Nuevo permanente", keys: "Win+Alt+Shift+N" },
-    Row::Link {
-        title: "Todos los atajos",
-        desc: "Cada acción es un comando con nombre. También puedes reasignarlos en config.toml, sección [keys].",
-        label: "Abrir [keys]",
-        action: LinkAction::OpenKeys,
-    },
-];
-
-const ARCHIVOS: &[Row] = &[
-    Row::Seg {
-        title: "Archivos temporales",
-        desc: "Borrador: se guarda solo y se borra al cerrar si no le das ruta. Volátil: nunca toca el disco.",
-        key: SettingKey::TempMode,
-        options: &[
-            ("Borrador", SettingValue::TempMode(TempMode::Draft)),
-            ("Volátil", SettingValue::TempMode(TempMode::Volatile)),
-        ],
-    },
-    Row::Toggle {
-        title: "Autoguardado",
-        desc: "Guarda sola tras dejar de escribir. Solo si el archivo ya tiene ruta.",
-        key: SettingKey::Autosave,
-    },
-    Row::Toggle {
-        title: "Iconos en las sugerencias",
-        desc: "Carpeta o archivo delante de cada sugerencia al escribir una ruta.",
-        key: SettingKey::SuggestionIcons,
-    },
-    Row::Toggle {
-        title: "Selector nativo de Windows",
-        desc: "Abrir y Guardar como usan el diálogo de Windows en vez de la línea de ruta.",
-        key: SettingKey::NativeFileDialog,
-    },
-];
-
-const ATAJO_GLOBAL: &[Row] = &[
-    Row::Seg {
-        title: "Cómo se escucha el atajo",
-        desc: "Segundo plano: ~1 MB de RAM, cualquier combinación, instantáneo. Acceso directo: nada residente, solo Ctrl+Alt+letra.",
-        key: SettingKey::HotkeyMechanism,
-        options: &[
-            ("Segundo plano", SettingValue::HotkeyMechanism(HotkeyMechanism::Daemon)),
-            ("Acceso directo", SettingValue::HotkeyMechanism(HotkeyMechanism::Lnk)),
-        ],
-    },
-    Row::Toggle { title: "Iniciar con Windows", desc: "", key: SettingKey::StartWithWindows },
-];
-
-const ACERCA_DE: &[Row] = &[
-    Row::Toggle {
-        title: "Buscar actualizaciones",
-        desc: "Comprueba una vez al día contra GitHub Releases. Nunca se activa solo.",
-        key: SettingKey::UpdatesCheck,
-    },
-    Row::Link {
-        title: "Comprobar ahora",
-        desc: "Fuerza el chequeo ya mismo, sin esperar al de una vez al día.",
-        label: "Buscar ahora",
-        action: LinkAction::CheckUpdatesNow,
-    },
-];
-
-const AYUDA: &[Row] = &[Row::Link {
-    title: "Repetir tutorial",
-    desc: "Vuelve a mostrar el recorrido guiado por la ventana principal (no la ventana de bienvenida).",
-    label: "Repetir tutorial",
-    action: LinkAction::RepeatTutorial,
-}];
-
-pub const SECTIONS: &[Section] = &[
-    Section { id: "apariencia", name: "Apariencia", rows: APARIENCIA },
-    Section { id: "ventana", name: "Ventana", rows: VENTANA },
-    Section { id: "teclado", name: "Teclado", rows: TECLADO },
-    Section { id: "archivos", name: "Archivos", rows: ARCHIVOS },
-    Section { id: "atajo_global", name: "Atajo global", rows: ATAJO_GLOBAL },
-    Section { id: "acerca_de", name: "Acerca de", rows: ACERCA_DE },
-    Section { id: "ayuda", name: "Ayuda", rows: AYUDA },
-];
-
-/// Las secciones son estáticas (no dependen de `cfg`): el parámetro está para que la
-/// firma cuadre con la maqueta y por si una sección futura sí dependiera de `Config`.
-pub fn sections(_cfg: &Config) -> &'static [Section] {
-    SECTIONS
+pub fn set_font_px(cfg: &mut Config, px: u32) {
+    cfg.ui.font_scale = px.clamp(FONT_PX_MIN, FONT_PX_MAX) as f32 / BASE_PX;
 }
 
-/// Aplica el ajuste `key`/`value` a `cfg`, como `setSetting` de la maqueta (línea 1054):
-/// elegir un preset aplica sus piezas fijas; tocar cualquier otra pieza deja el preset
-/// en `Custom`.
+/// Enciende/apaga una ligadura suelta (de serie o propia).
+pub fn toggle_ligature(cfg: &mut Config, seq: &str) {
+    if let Some(i) = cfg.ligature_disabled.iter().position(|s| s == seq) {
+        cfg.ligature_disabled.remove(i);
+    } else {
+        cfg.ligature_disabled.push(seq.to_string());
+    }
+}
+
+/// Por qué no se puede añadir una ligadura (el botón se queda desactivado).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AddLigatureError {
+    Empty,
+    /// Una secuencia de un solo carácter sustituiría ese carácter en todo el texto.
+    TooShort,
+    /// Tiene espacios: nunca casaría con lo que se escribe como una sola "palabra".
+    Whitespace,
+}
+
+pub fn can_add_ligature(seq: &str, glyph: &str) -> Result<(), AddLigatureError> {
+    let seq = seq.trim();
+    if seq.is_empty() || glyph.trim().is_empty() {
+        return Err(AddLigatureError::Empty);
+    }
+    if seq.chars().any(char::is_whitespace) {
+        return Err(AddLigatureError::Whitespace);
+    }
+    if seq.chars().count() < 2 {
+        return Err(AddLigatureError::TooShort);
+    }
+    Ok(())
+}
+
+/// Añade (o pisa) una ligadura propia `seq → glyph` en `[ligature_overrides]`. Solo
+/// cuenta el primer carácter de `glyph` (ver `ligature::resolve`).
+pub fn add_ligature(cfg: &mut Config, seq: &str, glyph: &str) -> Result<(), AddLigatureError> {
+    can_add_ligature(seq, glyph)?;
+    let seq = seq.trim().to_string();
+    let glyph: String = glyph.trim().chars().take(1).collect();
+    cfg.ligature_disabled.retain(|s| *s != seq);
+    cfg.ligature_overrides.insert(seq, glyph);
+    Ok(())
+}
+
+/// Borra una ligadura propia (o devuelve una de serie a su carácter original).
+pub fn remove_ligature(cfg: &mut Config, seq: &str) {
+    cfg.ligature_overrides.remove(seq);
+    cfg.ligature_disabled.retain(|s| s != seq);
+}
+
+/// Aplica el ajuste `key`/`value` a `cfg`, como `setSetting` de la maqueta: elegir un
+/// preset aplica sus piezas fijas; tocar cualquier otra pieza de Apariencia/Ventana
+/// deja el preset en `Custom`.
 pub fn apply(cfg: &mut Config, key: SettingKey, value: SettingValue) {
     if let (SettingKey::Preset, SettingValue::Preset(p)) = (key, value) {
         notty_config::apply_preset(&mut cfg.ui, p);
         return;
     }
-    // Archivos/Atajo global (y el resaltado, que ningún preset fija) no son piezas
-    // de un preset de Apariencia: se resuelven aparte y no tocan `cfg.ui.preset`.
+    // Archivos/Atajo global (y lo que ningún preset fija: fuente, ligaduras,
+    // resaltado) no son piezas de un preset: se resuelven aparte y no tocan
+    // `cfg.ui.preset`.
     match (key, value) {
         (SettingKey::SyntaxHighlight, SettingValue::Bool(b)) => {
             cfg.ui.syntax_highlight = b;
+            return;
+        }
+        (SettingKey::FontFamily, SettingValue::FontFamily(f)) => {
+            cfg.ui.font_family = f;
+            return;
+        }
+        (SettingKey::Ligatures, SettingValue::Bool(b)) => {
+            cfg.ui.ligatures = b;
             return;
         }
         (SettingKey::TempMode, SettingValue::TempMode(m)) => {
@@ -321,6 +325,14 @@ pub fn apply(cfg: &mut Config, key: SettingKey, value: SettingValue) {
             cfg.updates.check = b;
             return;
         }
+        (SettingKey::SuggestionIcons, SettingValue::Bool(b)) => {
+            cfg.ui.suggestion_icons = b;
+            return;
+        }
+        (SettingKey::NativeFileDialog, SettingValue::Bool(b)) => {
+            cfg.ui.native_file_dialog = b;
+            return;
+        }
         _ => {}
     }
     match (key, value) {
@@ -333,13 +345,86 @@ pub fn apply(cfg: &mut Config, key: SettingKey, value: SettingValue) {
         (SettingKey::StatusBar, SettingValue::Bool(b)) => cfg.ui.status_bar = b,
         (SettingKey::MergedCommandLine, SettingValue::Bool(b)) => cfg.ui.merged_command_line = b,
         (SettingKey::VimAlways, SettingValue::Bool(b)) => cfg.ui.vim_always = b,
-        (SettingKey::FontFamily, SettingValue::FontFamily(f)) => cfg.ui.font_family = f,
-        (SettingKey::Ligatures, SettingValue::Bool(b)) => cfg.ui.ligatures = b,
-        (SettingKey::SuggestionIcons, SettingValue::Bool(b)) => cfg.ui.suggestion_icons = b,
-        (SettingKey::NativeFileDialog, SettingValue::Bool(b)) => cfg.ui.native_file_dialog = b,
         _ => return, // combinación key/value que no tiene sentido: no hace nada
     }
     cfg.ui.preset = Preset::Custom;
+}
+
+/// Valor actual de un ajuste booleano (`false` si `key` no lo es).
+pub fn current_bool(cfg: &Config, key: SettingKey) -> bool {
+    match key {
+        SettingKey::LineNumbers => cfg.ui.line_numbers,
+        SettingKey::HintsBar => cfg.ui.hints_bar,
+        SettingKey::StatusBar => cfg.ui.status_bar,
+        SettingKey::MergedCommandLine => cfg.ui.merged_command_line,
+        SettingKey::VimAlways => cfg.ui.vim_always,
+        SettingKey::Autosave => cfg.files.autosave,
+        SettingKey::SuggestionIcons => cfg.ui.suggestion_icons,
+        SettingKey::NativeFileDialog => cfg.ui.native_file_dialog,
+        SettingKey::Ligatures => cfg.ui.ligatures,
+        SettingKey::SyntaxHighlight => cfg.ui.syntax_highlight,
+        SettingKey::StartWithWindows => cfg.hotkey.start_with_windows,
+        SettingKey::UpdatesCheck => cfg.updates.check,
+        _ => false,
+    }
+}
+
+/// Qué opción de `options` está elegida ahora (`None` si ninguna, p.ej. el preset
+/// `Custom`).
+pub fn selected_index(cfg: &Config, key: SettingKey, options: Options) -> Option<usize> {
+    let current: SettingValue = match key {
+        SettingKey::Preset => SettingValue::Preset(cfg.ui.preset),
+        SettingKey::Theme => SettingValue::Theme(cfg.ui.theme),
+        SettingKey::Files => SettingValue::Files(cfg.ui.files),
+        SettingKey::TabsPosition => SettingValue::TabsPosition(cfg.ui.tabs_position),
+        SettingKey::MenuBar => SettingValue::MenuBar(cfg.ui.menubar),
+        SettingKey::TempMode => SettingValue::TempMode(cfg.files.temp_mode),
+        SettingKey::HotkeyMechanism => SettingValue::HotkeyMechanism(cfg.hotkey.mechanism),
+        SettingKey::FontFamily => SettingValue::FontFamily(cfg.ui.font_family),
+        _ => return None,
+    };
+    options.iter().position(|(_, v)| *v == current)
+}
+
+/// Las opciones de cada selector de `key`.
+pub fn options_for(key: SettingKey) -> Options {
+    match key {
+        SettingKey::Preset => PRESET_OPTS,
+        SettingKey::Theme => THEME_OPTS,
+        SettingKey::Files => FILES_OPTS,
+        SettingKey::TabsPosition => TABS_POSITION_OPTS,
+        SettingKey::MenuBar => MENU_BAR_OPTS,
+        SettingKey::TempMode => TEMP_MODE_OPTS,
+        SettingKey::HotkeyMechanism => HOTKEY_OPTS,
+        _ => &[],
+    }
+}
+
+/// "Última comprobación: hace 3 horas" a partir de dos instantes Unix (segundos).
+pub fn relative_time(now: u64, then: u64) -> String {
+    if then == 0 {
+        return "nunca".to_string();
+    }
+    let d = now.saturating_sub(then);
+    let plural = |n: u64, one: &str, many: &str| if n == 1 { format!("hace 1 {one}") } else { format!("hace {n} {many}") };
+    match d {
+        0..60 => "ahora mismo".to_string(),
+        60..3600 => plural(d / 60, "minuto", "minutos"),
+        3600..86400 => plural(d / 3600, "hora", "horas"),
+        _ => plural(d / 86400, "día", "días"),
+    }
+}
+
+/// Viñetas de las notas de una release (el `body` de GitHub, en Markdown): las
+/// líneas de lista sin su marcador, sin encabezados ni líneas vacías.
+pub fn release_bullets(body: &str, max: usize) -> Vec<String> {
+    body.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .map(|l| l.trim_start_matches(['-', '*', '+']).trim().replace("**", "").replace('`', ""))
+        .filter(|l| !l.is_empty())
+        .take(max)
+        .collect()
 }
 
 #[cfg(test)]
@@ -347,9 +432,43 @@ mod tests {
     use super::*;
 
     #[test]
-    fn archivos_and_atajo_global_sections_exist() {
-        let names: Vec<&str> = SECTIONS.iter().map(|s| s.name).collect();
-        assert_eq!(names, ["Apariencia", "Ventana", "Teclado", "Archivos", "Atajo global", "Acerca de", "Ayuda"]);
+    fn rail_has_updates_between_global_hotkey_and_about() {
+        let names: Vec<&str> = Page::RAIL.iter().map(|p| p.name()).collect();
+        assert_eq!(
+            names,
+            ["Apariencia", "Ventana", "Teclado", "Archivos", "Atajo global", "Actualizaciones", "Acerca de", "Ayuda"]
+        );
+    }
+
+    #[test]
+    fn subpages_belong_to_apariencia() {
+        assert_eq!(Page::Fuentes.parent(), Some(Page::Apariencia));
+        assert_eq!(Page::Ligaduras.rail_page(), Page::Apariencia);
+        assert_eq!(Page::Ligaduras.rail_index(), 0);
+        assert_eq!(Page::Ventana.parent(), None);
+        assert_eq!(Page::Actualizaciones.rail_index(), 5);
+    }
+
+    #[test]
+    fn page_ids_round_trip() {
+        for p in Page::ALL {
+            assert_eq!(Page::from_id(p.id()), Some(p));
+        }
+        assert_eq!(Page::from_id("teclado"), Some(Page::Teclado));
+        assert_eq!(Page::from_id("nada"), None);
+    }
+
+    #[test]
+    fn teclado_lists_every_remappable_command() {
+        for cmd in Command::ALL {
+            assert!(BINDINGS.contains(cmd), "{cmd:?}");
+        }
+    }
+
+    #[test]
+    fn varios_archivos_offers_paneles_with_a_description_each() {
+        assert!(FILES_OPTS.iter().any(|(_, v)| *v == SettingValue::Files(Files::Splits)));
+        assert_eq!(FILES_OPTS.len(), FILES_DESC.len());
     }
 
     #[test]
@@ -362,50 +481,16 @@ mod tests {
     }
 
     #[test]
-    fn ayuda_has_the_repeat_tutorial_link() {
-        assert!(matches!(AYUDA[0], Row::Link { action: LinkAction::RepeatTutorial, .. }));
-    }
-
-    #[test]
-    fn apariencia_has_preset_theme_line_numbers_and_syntax() {
-        assert_eq!(APARIENCIA.len(), 7);
-        assert!(matches!(APARIENCIA[0], Row::Seg { key: SettingKey::Preset, .. }));
-        assert!(matches!(APARIENCIA[2], Row::Toggle { key: SettingKey::LineNumbers, .. }));
-        assert!(matches!(APARIENCIA[3], Row::Select { key: SettingKey::FontFamily, .. }));
-        assert!(matches!(APARIENCIA[4], Row::Toggle { key: SettingKey::Ligatures, .. }));
-        assert!(matches!(APARIENCIA[6], Row::Toggle { key: SettingKey::SyntaxHighlight, .. }));
-    }
-
-    #[test]
-    fn toggling_syntax_highlight_keeps_the_preset() {
+    fn toggling_syntax_highlight_font_or_ligatures_keeps_the_preset() {
         let mut cfg = Config::default();
         let preset_before = cfg.ui.preset;
         apply(&mut cfg, SettingKey::SyntaxHighlight, SettingValue::Bool(false));
+        apply(&mut cfg, SettingKey::Ligatures, SettingValue::Bool(true));
+        apply(&mut cfg, SettingKey::FontFamily, SettingValue::FontFamily(FontFamily::named("Consolas")));
         assert!(!cfg.ui.syntax_highlight);
+        assert!(cfg.ui.ligatures);
+        assert_eq!(cfg.ui.font_family.primary_name(), "Consolas");
         assert_eq!(cfg.ui.preset, preset_before);
-    }
-
-    #[test]
-    fn ventana_has_six_rows() {
-        assert_eq!(VENTANA.len(), 6);
-    }
-
-    #[test]
-    fn varios_archivos_offers_paneles() {
-        let Row::Seg { key: SettingKey::Files, options, .. } = &VENTANA[0] else { panic!("fila 0") };
-        assert!(options.iter().any(|(_, v)| *v == SettingValue::Files(Files::Splits)));
-    }
-
-    #[test]
-    fn teclado_ends_with_the_shortcuts_link() {
-        assert!(matches!(TECLADO.last(), Some(Row::Link { label: "Abrir [keys]", .. })));
-    }
-
-    #[test]
-    fn teclado_lists_every_remappable_command() {
-        for cmd in Command::ALL {
-            assert!(TECLADO.iter().any(|r| matches!(r, Row::Binding { cmd: c } if c == cmd)), "{cmd:?}");
-        }
     }
 
     #[test]
@@ -424,6 +509,7 @@ mod tests {
         apply(&mut cfg, SettingKey::TabsPosition, SettingValue::TabsPosition(TabsPosition::Below));
         assert_eq!(cfg.ui.tabs_position, TabsPosition::Below);
         assert_eq!(cfg.ui.preset, Preset::Custom);
+        assert_eq!(selected_index(&cfg, SettingKey::Preset, PRESET_OPTS), None);
     }
 
     #[test]
@@ -431,6 +517,7 @@ mod tests {
         let mut cfg = Config::default();
         apply(&mut cfg, SettingKey::HintsBar, SettingValue::Bool(false));
         assert!(!cfg.ui.hints_bar);
+        assert!(!current_bool(&cfg, SettingKey::HintsBar));
         assert_eq!(cfg.ui.preset, Preset::Custom);
     }
 
@@ -443,23 +530,75 @@ mod tests {
     }
 
     #[test]
-    fn applying_temp_mode_and_autosave_touches_files_not_ui_preset() {
+    fn applying_temp_mode_and_hotkey_touch_their_section_only() {
         let mut cfg = Config::default();
         let preset_before = cfg.ui.preset;
-        apply(&mut cfg, SettingKey::TempMode, SettingValue::TempMode(notty_config::TempMode::Volatile));
+        apply(&mut cfg, SettingKey::TempMode, SettingValue::TempMode(TempMode::Volatile));
         apply(&mut cfg, SettingKey::Autosave, SettingValue::Bool(true));
-        assert_eq!(cfg.files.temp_mode, notty_config::TempMode::Volatile);
+        apply(&mut cfg, SettingKey::HotkeyMechanism, SettingValue::HotkeyMechanism(HotkeyMechanism::Lnk));
+        apply(&mut cfg, SettingKey::StartWithWindows, SettingValue::Bool(false));
+        assert_eq!(cfg.files.temp_mode, TempMode::Volatile);
         assert!(cfg.files.autosave);
-        // Archivos/Atajo global no son piezas de un preset de Apariencia: no lo tocan.
+        assert_eq!(cfg.hotkey.mechanism, HotkeyMechanism::Lnk);
+        assert!(!cfg.hotkey.start_with_windows);
         assert_eq!(cfg.ui.preset, preset_before);
+        assert_eq!(selected_index(&cfg, SettingKey::HotkeyMechanism, HOTKEY_OPTS), Some(1));
     }
 
     #[test]
-    fn applying_hotkey_settings_touches_hotkey_not_ui() {
+    fn font_px_maps_onto_font_scale() {
         let mut cfg = Config::default();
-        apply(&mut cfg, SettingKey::HotkeyMechanism, SettingValue::HotkeyMechanism(notty_config::HotkeyMechanism::Lnk));
-        apply(&mut cfg, SettingKey::StartWithWindows, SettingValue::Bool(false));
-        assert_eq!(cfg.hotkey.mechanism, notty_config::HotkeyMechanism::Lnk);
-        assert!(!cfg.hotkey.start_with_windows);
+        assert_eq!(font_px(&cfg), 13);
+        set_font_px(&mut cfg, 20);
+        assert_eq!(font_px(&cfg), 20);
+        set_font_px(&mut cfg, 99);
+        assert_eq!(font_px(&cfg), FONT_PX_MAX);
+    }
+
+    #[test]
+    fn ligatures_can_be_added_toggled_and_removed() {
+        let mut cfg = Config::default();
+        assert_eq!(add_ligature(&mut cfg, "|>", "▷x"), Ok(()));
+        assert_eq!(cfg.ligature_overrides.get("|>").map(String::as_str), Some("▷"));
+        toggle_ligature(&mut cfg, "|>");
+        assert_eq!(cfg.ligature_disabled, vec!["|>".to_string()]);
+        toggle_ligature(&mut cfg, "|>");
+        assert!(cfg.ligature_disabled.is_empty());
+        toggle_ligature(&mut cfg, "->");
+        remove_ligature(&mut cfg, "|>");
+        assert!(cfg.ligature_overrides.is_empty());
+        assert_eq!(cfg.ligature_disabled, vec!["->".to_string()]);
+    }
+
+    #[test]
+    fn relative_times_in_spanish() {
+        assert_eq!(relative_time(1000, 0), "nunca");
+        assert_eq!(relative_time(1000, 990), "ahora mismo");
+        assert_eq!(relative_time(10_000, 10_000 - 120), "hace 2 minutos");
+        assert_eq!(relative_time(10_000, 10_000 - 3600), "hace 1 hora");
+        assert_eq!(relative_time(1_000_000, 1_000_000 - 3 * 86400), "hace 3 días");
+    }
+
+    #[test]
+    fn release_bullets_strip_markdown() {
+        let b = release_bullets("## Novedades
+
+- Paneles lado a lado
+* **Ligaduras** en el editor
+Arreglos varios
+", 5);
+        assert_eq!(b, vec!["Paneles lado a lado", "Ligaduras en el editor", "Arreglos varios"]);
+        assert_eq!(release_bullets("- a
+- b
+- c", 2).len(), 2);
+    }
+
+    #[test]
+    fn bad_ligatures_are_rejected() {
+        assert_eq!(can_add_ligature("", "x"), Err(AddLigatureError::Empty));
+        assert_eq!(can_add_ligature("|>", " "), Err(AddLigatureError::Empty));
+        assert_eq!(can_add_ligature("a", "x"), Err(AddLigatureError::TooShort));
+        assert_eq!(can_add_ligature("a b", "x"), Err(AddLigatureError::Whitespace));
+        assert_eq!(can_add_ligature("~>", "↝"), Ok(()));
     }
 }

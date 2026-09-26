@@ -31,6 +31,8 @@ use crate::layout::{self, Rect};
 use crate::theme::{self, Rgba};
 use crate::{EditorState, Viewport, Workspace};
 
+mod extra;
+
 /// Convierte un desplazamiento en chars (relativo al inicio de `text`) a un
 /// desplazamiento en unidades UTF-16, que es lo que espera `IDWriteTextLayout`.
 fn char_offset_to_utf16(text: &str, char_offset: usize) -> u32 {
@@ -279,6 +281,8 @@ pub struct Renderer {
     /// hace falta guardarla para poder recrear `mono_13`/`mono_13_bold` a otro tamaño
     /// cuando cambia el zoom (Ctrl+=/Ctrl+-/Ctrl+0), sin repetir la búsqueda de familia.
     mono_family: String,
+    /// Familia de la interfaz resuelta en `new` (Segoe UI Variable Text o Segoe UI).
+    ui_family: String,
     /// Multiplicador de `layout::FONT_MONO`/`LINE_H` vigente (Ctrl+=/Ctrl+-/Ctrl+0).
     /// Solo afecta al cuerpo del editor y la vista raw, ver `set_font_scale`.
     font_scale: f32,
@@ -400,6 +404,7 @@ impl Renderer {
                 about: None,
                 menu_keys: Vec::new(),
                 mono_family,
+                ui_family,
                 font_scale: 1.0,
                 panes: (Vec::new(), 0),
             })
@@ -416,16 +421,17 @@ impl Renderer {
         self.font_scale
     }
 
-    /// Cambia la familia monoespaciada del editor (Ajustes → Apariencia → Fuente del
-    /// editor). `primary` es el nombre a buscar; si el sistema no la tiene, cae a
-    /// Consolas, igual que hace `Renderer::new` con la familia por defecto.
+    /// Cambia la familia monoespaciada del editor (Ajustes → Apariencia → Fuentes).
+    /// `primary` es el nombre a buscar; si el sistema no la tiene (p.ej. se
+    /// desinstaló), cae a Cascadia Mono, y si tampoco, a Consolas.
     pub fn set_mono_family(&mut self, primary: &str) -> Result<()> {
         let sys_fonts: IDWriteFontCollection = unsafe {
             let mut collection: Option<IDWriteFontCollection> = None;
             self.dwrite.GetSystemFontCollection(&mut collection, false)?;
             collection.expect("GetSystemFontCollection debe devolver una colección")
         };
-        let family = resolve_family(&sys_fonts, primary, "Consolas");
+        let fallback = resolve_family(&sys_fonts, "Cascadia Mono", "Consolas");
+        let family = resolve_family(&sys_fonts, primary, &fallback);
         let size = layout::FONT_MONO * self.font_scale;
         self.fonts.mono_13 = make_format(&self.dwrite, &family, size, DWRITE_FONT_WEIGHT_NORMAL)?;
         self.fonts.mono_13_bold = make_format(&self.dwrite, &family, size, DWRITE_FONT_WEIGHT_BOLD)?;
@@ -995,7 +1001,7 @@ impl Renderer {
         ws: &Workspace,
         ui: &UiConfig,
         view: &ViewState,
-        ligature_overrides: &std::collections::BTreeMap<String, String>,
+        ligature_table: &[(String, char)],
     ) {
         self.hits.clear();
         self.pending_dropdown = None;
@@ -1100,8 +1106,7 @@ impl Renderer {
             } else {
                 Vec::new()
             };
-            let ligature_table =
-                if ui.ligatures { crate::ligature::resolve(ligature_overrides) } else { Vec::new() };
+            let ligature_table: &[(String, char)] = if ui.ligatures { ligature_table } else { &[] };
             // Un pincel por color de `syntax::NAMES`, creado la primera vez que hace falta.
             let mut syn_brushes: Vec<Option<ID2D1SolidColorBrush>> = vec![None; crate::syntax::NAMES.len()];
             let mut y = frame.body.top + layout::TEXT_PAD_T;

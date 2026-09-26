@@ -55,32 +55,66 @@ pub enum MenuBar {
     Alt,
 }
 
-/// Fuente monoespaciada del editor. `Auto` es el comportamiento de siempre
-/// (`resolve_family` prueba "Cascadia Mono" y cae a "Consolas" si no está
-/// instalada); el resto fija una familia concreta, con el mismo `Consolas` de
-/// respaldo si tampoco está instalada esa.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum FontFamily {
-    #[default]
-    Auto,
-    Consolas,
-    JetbrainsMono,
-    FiraCode,
-    CourierNew,
-    LucidaConsole,
-}
+/// Fuente monoespaciada del editor: cualquier familia instalada (Ajustes → Apariencia
+/// → Fuentes las lista todas). `AUTO` es el comportamiento de siempre ("Cascadia
+/// Mono"); si la familia elegida no está instalada, el renderer cae a Cascadia Mono.
+///
+/// El nombre se guarda internado (`&'static str`) para que `UiConfig` siga siendo
+/// `Copy`: solo hay tantos nombres distintos como fuentes elija el usuario.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct FontFamily(Option<&'static str>);
 
 impl FontFamily {
-    pub fn primary_name(self) -> &'static str {
-        match self {
-            FontFamily::Auto => "Cascadia Mono",
-            FontFamily::Consolas => "Consolas",
-            FontFamily::JetbrainsMono => "JetBrains Mono",
-            FontFamily::FiraCode => "Fira Code",
-            FontFamily::CourierNew => "Courier New",
-            FontFamily::LucidaConsole => "Lucida Console",
+    pub const AUTO: FontFamily = FontFamily(None);
+
+    pub fn named(name: &str) -> FontFamily {
+        let name = name.trim();
+        if name.is_empty() || name.eq_ignore_ascii_case("auto") {
+            return FontFamily::AUTO;
         }
+        // Valores que guardaba la versión con la lista fija de 6 fuentes.
+        let legacy = match name.to_ascii_lowercase().as_str() {
+            "consolas" => Some("Consolas"),
+            "jetbrainsmono" => Some("JetBrains Mono"),
+            "firacode" => Some("Fira Code"),
+            "couriernew" => Some("Courier New"),
+            "lucidaconsole" => Some("Lucida Console"),
+            _ => None,
+        };
+        FontFamily(Some(legacy.unwrap_or_else(|| intern(name))))
+    }
+
+    pub fn is_auto(self) -> bool {
+        self.0.is_none()
+    }
+
+    /// Familia a pedirle a DirectWrite.
+    pub fn primary_name(self) -> &'static str {
+        self.0.unwrap_or("Cascadia Mono")
+    }
+}
+
+fn intern(name: &str) -> &'static str {
+    static NAMES: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
+    let mut names = NAMES.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(n) = names.iter().find(|n| **n == name) {
+        return n;
+    }
+    let leaked: &'static str = Box::leak(name.to_string().into_boxed_str());
+    names.push(leaked);
+    leaked
+}
+
+impl Serialize for FontFamily {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.0.unwrap_or("auto"))
+    }
+}
+
+impl<'de> Deserialize<'de> for FontFamily {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        Ok(FontFamily::named(&s))
     }
 }
 
@@ -134,7 +168,7 @@ impl Default for UiConfig {
             font_scale: 1.0,
             suggestion_icons: true,
             native_file_dialog: false,
-            font_family: FontFamily::Auto,
+            font_family: FontFamily::AUTO,
             ligatures: false,
             syntax_highlight: true,
         };
@@ -227,6 +261,9 @@ pub struct Config {
     /// tiene efecto si `ui.ligatures` está activo.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub ligature_overrides: BTreeMap<String, String>,
+    /// Secuencias (de serie o propias) apagadas una a una en Ajustes → Ligaduras.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ligature_disabled: Vec<String>,
 }
 
 #[cfg(test)]
@@ -354,11 +391,39 @@ mod tests {
 
     #[test]
     fn font_family_defaults_to_auto_and_round_trips() {
-        assert_eq!(UiConfig::default().font_family, FontFamily::Auto);
-        let cfg = Config { ui: UiConfig { font_family: FontFamily::JetbrainsMono, ..UiConfig::default() }, ..Config::default() };
+        assert_eq!(UiConfig::default().font_family, FontFamily::AUTO);
+        let cfg = Config { ui: UiConfig { font_family: FontFamily::named("Iosevka Term"), ..UiConfig::default() }, ..Config::default() };
         let text = toml::to_string(&cfg).unwrap();
+        assert!(text.contains("font_family = \"Iosevka Term\""));
         let back: Config = toml::from_str(&text).unwrap();
-        assert_eq!(back.ui.font_family, FontFamily::JetbrainsMono);
+        assert_eq!(back.ui.font_family.primary_name(), "Iosevka Term");
+        let auto = toml::to_string(&Config::default()).unwrap();
+        assert!(auto.contains("font_family = \"auto\""));
+    }
+
+    #[test]
+    fn old_fixed_font_values_still_load() {
+        for (old, name) in [("auto", "Cascadia Mono"), ("consolas", "Consolas"), ("jetbrainsmono", "JetBrains Mono"), ("firacode", "Fira Code"), ("couriernew", "Courier New"), ("lucidaconsole", "Lucida Console")] {
+            let cfg: Config = toml::from_str(&format!("[ui]
+font_family = \"{old}\"
+")).unwrap();
+            assert_eq!(cfg.ui.font_family.primary_name(), name, "{old}");
+        }
+    }
+
+    #[test]
+    fn same_font_name_is_the_same_value() {
+        assert_eq!(FontFamily::named("Hack"), FontFamily::named("Hack"));
+        assert_ne!(FontFamily::named("Hack"), FontFamily::AUTO);
+    }
+
+    #[test]
+    fn disabled_ligatures_round_trip_and_are_omitted_when_empty() {
+        assert!(!toml::to_string(&Config::default()).unwrap().contains("ligature_disabled"));
+        let mut cfg = Config { ligature_disabled: vec!["->".to_string()], ..Config::default() };
+        cfg.ligature_overrides.insert("|>".to_string(), "▷".to_string());
+        let back: Config = toml::from_str(&toml::to_string(&cfg).unwrap()).unwrap();
+        assert_eq!(back.ligature_disabled, vec!["->".to_string()]);
     }
 
     #[test]

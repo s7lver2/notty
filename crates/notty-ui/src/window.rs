@@ -667,8 +667,15 @@ fn open_settings_at(w: &WindowState, hwnd: HWND, section: &str) {
             // hace falta que este callback sepa qué ajuste concreto se tocó.
             let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState;
             if let Some(w) = ptr.as_mut() {
-                let family = cfg_for_theme.borrow().ui.font_family;
+                let (family, scale) = {
+                    let c = cfg_for_theme.borrow();
+                    (c.ui.font_family, c.ui.font_scale)
+                };
                 let _ = w.renderer.set_mono_family(family.primary_name());
+                // Ajustes → Fuentes → Tamaño.
+                if (w.renderer.font_scale() - scale).abs() > 1e-3 {
+                    let _ = w.renderer.set_font_scale(scale);
+                }
                 let (body, _) = w.body_and_gutter();
                 let line_h = w.renderer.line_height();
                 w.ws.active_mut().viewport.visible_lines = layout::visible_lines(body, line_h);
@@ -677,6 +684,10 @@ fn open_settings_at(w: &WindowState, hwnd: HWND, section: &str) {
         }),
         Box::new(move |path| open_config_as_document(hwnd, path)),
         Box::new(move || trigger_check_updates_now(hwnd)),
+        Box::new(move || {
+            with_window(hwnd, |w| start_update_download(w, hwnd));
+        }),
+        Box::new(move || with_window(hwnd, |w| settings_update_info(w)).unwrap_or_default()),
         Box::new(move || start_tour(hwnd)),
         section,
         |created_hwnd| OPEN_SETTINGS_HWND.with(|c| c.set(Some(created_hwnd.0 as isize))),
@@ -684,7 +695,28 @@ fn open_settings_at(w: &WindowState, hwnd: HWND, section: &str) {
     OPEN_SETTINGS_HWND.with(|c| c.set(None));
 }
 
-/// "Buscar ahora" desde Ajustes → Acerca de: recupera el `WindowState` de la
+/// Ejecuta `f` sobre el `WindowState` de la ventana principal `hwnd` (Ajustes vive
+/// más que el `&WindowState` con el que se abrió).
+fn with_window<R>(hwnd: HWND, f: impl FnOnce(&mut WindowState) -> R) -> Option<R> {
+    unsafe {
+        let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState;
+        ptr.as_mut().map(f)
+    }
+}
+
+/// Lo que enseña Ajustes → Actualizaciones.
+fn settings_update_info(w: &WindowState) -> crate::settings_window::UpdateInfo {
+    let release = w.update.available.as_ref();
+    crate::settings_window::UpdateInfo {
+        phase: w.update.phase_for_settings(),
+        new_version: release.map(|r| r.version.clone()),
+        notes: release.map(|r| r.body.clone()).unwrap_or_default(),
+        release_url: release.map(|r| format!("https://github.com/{}/releases/tag/{}", w.repo, r.tag)),
+        up_to_date: w.update.up_to_date,
+    }
+}
+
+/// "Buscar ahora" desde Ajustes → Actualizaciones: recupera el `WindowState` de la
 /// ventana principal desde `GWLP_USERDATA` (igual que `open_config_as_document`)
 /// y lanza `check_updates_now` sobre él.
 fn trigger_check_updates_now(hwnd: HWND) {
@@ -1527,8 +1559,11 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     if w.tour.is_some() {
                         w.renderer.hold_next_frame();
                     }
-                    let ligature_overrides = w.cfg.borrow().ligature_overrides.clone();
-                    w.renderer.paint(&w.ws, &ui, &view, &ligature_overrides);
+                    let ligature_table = {
+                        let cfg = w.cfg.borrow();
+                        crate::ligature::resolve(&cfg.ligature_overrides, &cfg.ligature_disabled)
+                    };
+                    w.renderer.paint(&w.ws, &ui, &view, &ligature_table);
                     if w.tour.is_some() {
                         // Se pinta último (capa por encima de todo lo demás), en una
                         // segunda pasada de dibujo sobre el mismo `ID2D1HwndRenderTarget`

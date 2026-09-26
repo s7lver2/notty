@@ -20,17 +20,40 @@ pub const BUILTIN: &[(&str, char)] = &[
 /// para que `display_text` compare primero las más largas. Solo toma el primer
 /// carácter de cada valor de `overrides`: no tiene sentido "sustituir por más de un
 /// carácter" cuando el objetivo es no descuadrar las columnas del texto monoespaciado.
-pub fn resolve(overrides: &std::collections::BTreeMap<String, String>) -> Vec<(String, char)> {
-    let mut table: Vec<(String, char)> = BUILTIN.iter().map(|(s, c)| (s.to_string(), *c)).collect();
-    for (seq, repl) in overrides {
-        let Some(c) = repl.chars().next() else { continue };
-        match table.iter_mut().find(|(s, _)| s == seq) {
-            Some(entry) => entry.1 = c,
-            None => table.push((seq.clone(), c)),
-        }
-    }
+/// `disabled` quita secuencias sueltas (Ajustes → Ligaduras, interruptor de cada una).
+pub fn resolve(overrides: &std::collections::BTreeMap<String, String>, disabled: &[String]) -> Vec<(String, char)> {
+    let mut table: Vec<(String, char)> =
+        entries(overrides, disabled).into_iter().filter(|e| e.enabled).map(|e| (e.seq, e.glyph)).collect();
     table.sort_by_key(|(s, _)| std::cmp::Reverse(s.chars().count()));
     table
+}
+
+/// Una fila de la cuadrícula de Ajustes → Ligaduras.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Entry {
+    pub seq: String,
+    pub glyph: char,
+    /// De `BUILTIN` (aunque `overrides` le haya cambiado el carácter).
+    pub builtin: bool,
+    pub enabled: bool,
+}
+
+/// Todas las ligaduras en el orden en que se enseñan: primero las de serie, luego
+/// las propias por orden alfabético.
+pub fn entries(overrides: &std::collections::BTreeMap<String, String>, disabled: &[String]) -> Vec<Entry> {
+    let mut out: Vec<Entry> =
+        BUILTIN.iter().map(|(s, c)| Entry { seq: s.to_string(), glyph: *c, builtin: true, enabled: true }).collect();
+    for (seq, repl) in overrides {
+        let Some(c) = repl.chars().next() else { continue };
+        match out.iter_mut().find(|e| e.seq == *seq) {
+            Some(e) => e.glyph = c,
+            None => out.push(Entry { seq: seq.clone(), glyph: c, builtin: false, enabled: true }),
+        }
+    }
+    for e in &mut out {
+        e.enabled = !disabled.iter().any(|d| *d == e.seq);
+    }
+    out
 }
 
 /// `text` con cada secuencia de `table` sustituida por su carácter, seguido de
@@ -66,7 +89,7 @@ mod tests {
     use super::*;
 
     fn builtin_table() -> Vec<(String, char)> {
-        resolve(&Default::default())
+        resolve(&Default::default(), &[])
     }
 
     #[test]
@@ -100,16 +123,36 @@ mod tests {
     fn override_can_add_a_new_sequence() {
         let mut overrides = std::collections::BTreeMap::new();
         overrides.insert("~>".to_string(), "↝".to_string());
-        let table = resolve(&overrides);
+        let table = resolve(&overrides, &[]);
         let out = display_text("a ~> b", &table);
         assert!(out.contains('↝'));
+    }
+
+    #[test]
+    fn disabled_sequences_are_left_out() {
+        let table = resolve(&Default::default(), &["->".to_string()]);
+        assert_eq!(display_text("a -> b", &table), "a -> b");
+        assert!(display_text("a => b", &table).contains('⇒'));
+    }
+
+    #[test]
+    fn entries_mark_builtins_and_custom_ones() {
+        let mut overrides = std::collections::BTreeMap::new();
+        overrides.insert("|>".to_string(), "▷".to_string());
+        overrides.insert("->".to_string(), "➜".to_string());
+        let e = entries(&overrides, &["|>".to_string()]);
+        assert_eq!(e.len(), BUILTIN.len() + 1);
+        let arrow = e.iter().find(|x| x.seq == "->").unwrap();
+        assert!(arrow.builtin && arrow.enabled && arrow.glyph == '➜');
+        let pipe = e.last().unwrap();
+        assert!(!pipe.builtin && !pipe.enabled && pipe.glyph == '▷');
     }
 
     #[test]
     fn override_can_replace_a_builtin_symbol() {
         let mut overrides = std::collections::BTreeMap::new();
         overrides.insert("->".to_string(), "➜".to_string());
-        let table = resolve(&overrides);
+        let table = resolve(&overrides, &[]);
         let out = display_text("a -> b", &table);
         assert!(out.contains('➜'));
         assert!(!out.contains('→'));
