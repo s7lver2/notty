@@ -276,6 +276,8 @@ pub struct Renderer {
     about: Option<AboutContent>,
     /// Progreso (`0..1` en 1,8 s) del aviso "Ruta copiada", si hay uno en curso.
     path_copied: Option<f32>,
+    /// Aviso breve de la barra de estado (p. ej. un error al guardar): progreso y texto.
+    notice: Option<(f32, String)>,
     /// Atajos en vigor (tras reasignaciones en `[keys]`) de los elementos de menú que
     /// los tienen, ya en formato corto ("^N").
     menu_keys: Vec<(crate::menu::MenuCmd, String)>,
@@ -407,6 +409,7 @@ impl Renderer {
                 tab_scroll_targets: (None, None),
                 about: None,
                 path_copied: None,
+                notice: None,
                 menu_keys: Vec::new(),
                 syntax_disabled: Vec::new(),
                 mono_family,
@@ -1268,7 +1271,12 @@ impl Renderer {
                 self.draw_dropdown(crate::menu::MENUS[i].items, x, top, checks, view, pal);
             }
 
-            self.draw_path_copied(pal, frame.status.top);
+            if let Some(p) = self.path_copied {
+                self.draw_toast(pal, frame.status.top, p, "Ruta copiada al portapapeles", true);
+            }
+            if let Some((p, label)) = &self.notice {
+                self.draw_toast(pal, frame.status.top, *p, label, false);
+            }
             self.draw_update_panel(pal, frame.status.top, w, view);
             self.draw_about(pal, frame.body, view);
 
@@ -1878,10 +1886,14 @@ impl Renderer {
         self.path_copied = progress;
     }
 
+    pub fn set_notice(&mut self, notice: Option<(f32, String)>) {
+        self.notice = notice;
+    }
+
     /// Aviso "Ruta copiada al portapapeles" (maqueta `Copiado.dc.html`): sube y
-    /// aparece, se queda, y se va hacia arriba; el ✓ se dibuja trazo a trazo.
-    fn draw_path_copied(&self, pal: &theme::Palette, status_top: f32) {
-        let Some(p) = self.path_copied else { return };
+    /// aparece, se queda, y se va hacia arriba; el ✓ se dibuja trazo a trazo. Con
+    /// `ok == false` (avisos de error) lleva un "!" en vez del ✓.
+    fn draw_toast(&self, pal: &theme::Palette, status_top: f32, p: f32, label: &str, ok: bool) {
         let ease = |k: f32| crate::Curve::Out.apply(k.clamp(0.0, 1.0));
         let (alpha, dy, scale) = if p < 0.12 {
             let k = ease(p / 0.12);
@@ -1892,7 +1904,6 @@ impl Renderer {
             let k = ease((p - 0.82) / 0.18);
             (1.0 - k, -4.0 * k, 1.0)
         };
-        let label = "Ruta copiada al portapapeles";
         let tw = self.measure(label, &self.fonts.ui_12);
         let w = 12.0 + 14.0 + 8.0 + tw + 12.0;
         let left = layout::STATUS_PAD_X + 4.0;
@@ -1920,7 +1931,9 @@ impl Renderer {
             let f = (len - seg1) / seg2;
             line.push((ix + (10.0 + 9.0 * f) * k, iy + (17.0 - 10.0 * f) * k));
         }
-        if draw > 0.0 {
+        if !ok {
+            self.text("!", &self.fonts.ui_12, Rect::new(ix + 4.0, r.top, ix + 14.0, r.bottom), pal.warn);
+        } else if draw > 0.0 {
             self.stroke_polyline(&line, 2.0, pal.ok);
         }
         self.text(label, &self.fonts.ui_12, Rect::new(r.left + 34.0, r.top, r.right, r.bottom), pal.text);

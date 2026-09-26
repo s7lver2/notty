@@ -139,6 +139,8 @@ struct WindowState {
     about_open: bool,
     /// Cuándo se copió la ruta por última vez (aviso de 1,8 s).
     path_copied_at: Option<std::time::Instant>,
+    /// Aviso breve en la barra de estado (texto y cuándo apareció), ver `show_notice`.
+    notice: Option<(String, std::time::Instant)>,
     /// Descartar el próximo `WM_CHAR` (la tecla ya se usó en `WM_KEYDOWN`).
     swallow_char: bool,
     /// Paneles de `Files::Splits`. Se mantiene al día también en los otros modos (al
@@ -1063,6 +1065,22 @@ fn path_copied_progress(w: &WindowState) -> Option<f32> {
     Some(if w.animations_enabled { p } else { 0.5 })
 }
 
+/// Enseña `text` unos segundos sobre la barra de estado (mismo aviso que "Ruta copiada").
+fn show_notice(w: &mut WindowState, hwnd: HWND, text: impl Into<String>) {
+    w.path_copied_at = None;
+    w.notice = Some((text.into(), std::time::Instant::now()));
+    ensure_anim_timer(w, hwnd);
+}
+
+fn notice_progress(w: &WindowState) -> Option<(f32, String)> {
+    let (text, t0) = w.notice.as_ref()?;
+    let p = t0.elapsed().as_secs_f32() / 3.5;
+    if p >= 1.0 {
+        return None;
+    }
+    Some((if w.animations_enabled { p } else { 0.5 }, text.clone()))
+}
+
 /// Contenido de "Acerca de notty": versión y enlace al repositorio (si `repo` no es
 /// el marcador de posición de las compilaciones sin configurar).
 fn about_content(repo: &str) -> crate::AboutContent {
@@ -1360,6 +1378,7 @@ fn run_inner(
             tab_anims: Default::default(),
             about_open: false,
             path_copied_at: None,
+            notice: None,
             swallow_char: false,
             splits: crate::splits::Splits::default(),
         });
@@ -1584,6 +1603,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     w.renderer.set_tab_anim(w.tab_anims.frame(std::time::Instant::now()));
                     w.renderer.set_about(if w.about_open { Some(about_content(&w.repo)) } else { None });
                     w.renderer.set_path_copied(path_copied_progress(w));
+                    w.renderer.set_notice(notice_progress(w));
                     if w.tour.is_some() {
                         w.renderer.hold_next_frame();
                     }
@@ -1845,7 +1865,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                                 let st = w.ws.active_mut();
                                 st.vim = if st.vim.is_some() { None } else { Some(crate::VimState::default()) };
                             }
-                            notty_input::Command::ToggleRaw => toggle_raw(w),
+                            notty_input::Command::ToggleRaw => toggle_raw(w, hwnd),
                             notty_input::Command::ZoomIn => {
                                 let target = w.cfg.borrow().ui.font_scale + ZOOM_STEP;
                                 set_font_scale(w, hwnd, target);
@@ -1907,7 +1927,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     };
 
                     if w.ws.active().raw.is_some() {
-                        handle_raw_keydown(w, vk, action);
+                        handle_raw_keydown(w, hwnd, vk, action);
                         update_title(hwnd, w.ws.active());
                         let _ = InvalidateRect(Some(hwnd), None, false);
                         return LRESULT(0);
@@ -2447,7 +2467,8 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             || w.chrome_fade_anim.is_some()
                             || w.theme_anim.is_some()
                             || tour_animating
-                            || path_copied_progress(w).is_some();
+                            || path_copied_progress(w).is_some()
+                            || notice_progress(w).is_some();
                         if !still_animating {
                             let _ = KillTimer(Some(hwnd), ID_ANIM_TIMER);
                             w.anim_timer_running = false;
@@ -2552,7 +2573,7 @@ fn run_menu_item(w: &mut WindowState, hwnd: HWND, menu_idx: usize, item_idx: usi
             let st = w.ws.active_mut();
             st.vim = if st.vim.is_some() { None } else { Some(crate::VimState::default()) };
         }
-        MenuCmd::ToggleRaw => toggle_raw(w),
+        MenuCmd::ToggleRaw => toggle_raw(w, hwnd),
         MenuCmd::ToggleLineNumbers => {
             let mut cfg = w.cfg.borrow_mut();
             cfg.ui.line_numbers = !cfg.ui.line_numbers;
@@ -2582,12 +2603,27 @@ fn run_menu_item(w: &mut WindowState, hwnd: HWND, menu_idx: usize, item_idx: usi
 /// Cambia entre la vista de texto normal y la vista raw (`Ctrl+Shift+H`). Si el
 /// contenido de la vista raw sigue siendo UTF-8 válido al volver a texto, se reconstruye
 /// el `Document`; si no, se queda en raw (no hay forma segura de mostrarlo como texto).
-fn toggle_raw(w: &mut WindowState) {
+fn toggle_raw(w: &mut WindowState, hwnd: HWND) {
+    // Entrar y salir de raw recarga desde disco: con cambios sin guardar se perderían.
+    let st = w.ws.active();
+    if st.raw.as_ref().is_some_and(|r| r.is_dirty()) {
+        show_notice(w, hwnd, "Guarda antes de salir de raw");
+        return;
+    }
+    if st.raw.is_none() && st.doc.is_dirty() {
+        show_notice(w, hwnd, "Guarda antes de ver como raw");
+        return;
+    }
     let st = w.ws.active_mut();
     if let Some(raw) = st.raw.take() {
-        let bytes: Vec<u8> = (0..raw.len()).map(|i| raw.byte(i)).collect();
-        if let Ok(text) = String::from_utf8(bytes) {
-            st.doc = notty_core::Document::new(&text, st.eol.as_str());
+        let reopened = st.path.as_deref().map(crate::open_as_document);
+        if let Some(Ok(opened)) = reopened {
+            st.doc = opened.document;
+            st.encoding = opened.encoding;
+            st.eol = opened.eol;
+            st.open_mtime = notty_io::mtime(&opened.path).ok();
+            // `first_line` venía contando filas hex, no líneas.
+            st.viewport.first_line = 0;
         } else {
             st.raw = Some(raw);
         }
@@ -2602,7 +2638,7 @@ fn toggle_raw(w: &mut WindowState) {
 }
 
 /// Flechas (mueven el byte seleccionado) y `Ctrl+S` (guarda) mientras hay un `RawDoc` activo.
-fn handle_raw_keydown(w: &mut WindowState, vk: u32, action: crate::EditorAction) {
+fn handle_raw_keydown(w: &mut WindowState, hwnd: HWND, vk: u32, action: crate::EditorAction) {
     let len = w.ws.active().raw.as_ref().map(|r| r.len()).unwrap_or(0);
     let delta: i64 = match vk {
         0x25 => -1, // Left
@@ -2625,8 +2661,8 @@ fn handle_raw_keydown(w: &mut WindowState, vk: u32, action: crate::EditorAction)
         return;
     }
     if matches!(action, crate::EditorAction::Save) {
-        if let Some(raw) = w.ws.active_mut().raw.as_mut() {
-            let _ = raw.save();
+        if let Some(Err(e)) = w.ws.active_mut().raw.as_mut().map(|raw| raw.save()) {
+            show_notice(w, hwnd, format!("No se pudo guardar: {e}"));
         }
     }
 }
