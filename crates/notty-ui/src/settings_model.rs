@@ -21,6 +21,7 @@ pub enum SettingKey {
     Autosave,
     HotkeyMechanism,
     StartWithWindows,
+    UpdatesCheck,
 }
 
 /// El valor elegido; `apply` decide qué campo de `Config` toca según `SettingKey`.
@@ -166,12 +167,26 @@ const ATAJO_GLOBAL: &[Row] = &[
     Row::Toggle { title: "Iniciar con Windows", desc: "", key: SettingKey::StartWithWindows },
 ];
 
+const ACERCA_DE: &[Row] = &[
+    Row::Toggle {
+        title: "Buscar actualizaciones",
+        desc: "Comprueba una vez al día contra GitHub Releases. Nunca se activa solo.",
+        key: SettingKey::UpdatesCheck,
+    },
+    Row::Link {
+        title: "Comprobar ahora",
+        desc: "Fuerza el chequeo ya mismo, sin esperar al de una vez al día.",
+        label: "Buscar ahora",
+    },
+];
+
 pub const SECTIONS: &[Section] = &[
     Section { id: "apariencia", name: "Apariencia", rows: APARIENCIA },
     Section { id: "ventana", name: "Ventana", rows: VENTANA },
     Section { id: "teclado", name: "Teclado", rows: TECLADO },
     Section { id: "archivos", name: "Archivos", rows: ARCHIVOS },
     Section { id: "atajo_global", name: "Atajo global", rows: ATAJO_GLOBAL },
+    Section { id: "acerca_de", name: "Acerca de", rows: ACERCA_DE },
 ];
 
 /// Las secciones son estáticas (no dependen de `cfg`): el parámetro está para que la
@@ -207,6 +222,10 @@ pub fn apply(cfg: &mut Config, key: SettingKey, value: SettingValue) {
             cfg.hotkey.start_with_windows = b;
             return;
         }
+        (SettingKey::UpdatesCheck, SettingValue::Bool(b)) => {
+            cfg.updates.check = b;
+            return;
+        }
         _ => {}
     }
     match (key, value) {
@@ -231,7 +250,16 @@ mod tests {
     #[test]
     fn archivos_and_atajo_global_sections_exist() {
         let names: Vec<&str> = SECTIONS.iter().map(|s| s.name).collect();
-        assert_eq!(names, ["Apariencia", "Ventana", "Teclado", "Archivos", "Atajo global"]);
+        assert_eq!(names, ["Apariencia", "Ventana", "Teclado", "Archivos", "Atajo global", "Acerca de"]);
+    }
+
+    #[test]
+    fn applying_updates_check_touches_updates_not_ui() {
+        let mut cfg = Config::default();
+        let preset_before = cfg.ui.preset;
+        apply(&mut cfg, SettingKey::UpdatesCheck, SettingValue::Bool(true));
+        assert!(cfg.updates.check);
+        assert_eq!(cfg.ui.preset, preset_before);
     }
 
     #[test]

@@ -70,6 +70,13 @@ pub enum Hit {
     /// En el prompt de reemplazar: 0 = campo buscar, 1 = campo «por».
     SearchField(u8),
     Body,
+    /// Aviso "Actualización X.Y.Z disponible" en la barra de estado (Task 4 del
+    /// plan del actualizador): clic abre el panel de notas de versión.
+    UpdateNotice,
+    /// Botón "Actualizar" del panel de notas de versión.
+    UpdatePanelActualizar,
+    /// Botón "Cerrar" del panel de notas de versión.
+    UpdatePanelCerrar,
 }
 
 /// Contexto que no vive en `Workspace`/`UiConfig` pero que `paint` necesita para
@@ -184,6 +191,25 @@ pub struct Renderer {
     /// `settings_window` para el fundido de apertura de la ventana (Task 5 del plan de
     /// animaciones): más simple que tocar cada llamada de dibujo una a una.
     fade: std::cell::Cell<f32>,
+    /// Texto del aviso de actualización disponible en la barra de estado (Task 4 del
+    /// plan del actualizador), o `None` si no hay ninguna comprobada/pendiente. Vive en
+    /// el `Renderer` (no en `ViewState`, que es `Copy`) porque es una `String` propia.
+    update_notice: Option<String>,
+    /// Contenido del panel de notas de versión, si está abierto. Ver `UpdatePanelContent`.
+    update_panel: Option<UpdatePanelContent>,
+}
+
+/// Lo que hay que pintar en el panel de notas de versión cuando está abierto
+/// (Task 4 del plan del actualizador). `window.rs` lo reconstruye a partir de
+/// `crate::UpdateState` en cada `WM_PAINT`, antes de llamar a `paint`.
+#[derive(Debug, Clone)]
+pub struct UpdatePanelContent {
+    pub version: String,
+    pub body: String,
+    /// Progreso de descarga, error de verificación, etc.; se dibuja bajo las notas.
+    pub status_line: Option<String>,
+    /// Si se dibuja el botón "Actualizar" (se oculta durante la descarga).
+    pub show_actualizar: bool,
 }
 
 impl Renderer {
@@ -265,6 +291,8 @@ impl Renderer {
                 hits: Vec::new(),
                 pending_dropdown: None,
                 fade: std::cell::Cell::new(1.0),
+                update_notice: None,
+                update_panel: None,
             })
         }
     }
@@ -741,6 +769,8 @@ impl Renderer {
                 self.draw_dropdown(crate::menu::MENUS[i].items, x, top, view, pal);
             }
 
+            self.draw_update_panel(pal, frame.status.top, w);
+
             let _ = self.target.EndDraw(None, None);
         }
     }
@@ -1058,7 +1088,82 @@ impl Renderer {
             } else {
                 self.draw_prompt(&ws.prompt, state, pal, r, merged, view);
             }
+
+            self.draw_update_notice(pal, r, view);
         }
+    }
+
+    /// Aviso "Actualización X.Y.Z disponible" (Task 4 del plan del actualizador):
+    /// se dibuja siempre en la esquina derecha de la barra de estado, por encima de
+    /// cualquier otra cosa que haya ahí (fields, prompts...), si hay una comprobada.
+    /// No se muestra nada si `update_notice` está a `None` (comprobación desactivada,
+    /// sin actualización más nueva, o sin comprobar todavía).
+    unsafe fn draw_update_notice(&mut self, pal: &theme::Palette, r: Rect, view: &ViewState) {
+        let Some(notice) = self.update_notice.clone() else { return };
+        let font = self.fonts.mono_12.clone();
+        let w = self.measure(&notice, &font) + 16.0;
+        let notice_r = Rect::new(r.right - layout::STATUS_PAD_X - w, r.top, r.right - layout::STATUS_PAD_X, r.bottom);
+        if view.hover == Hit::UpdateNotice {
+            self.fill_round(notice_r, 4.0, pal.accent_soft);
+        }
+        self.text(&notice, &font, Rect::new(notice_r.left + 8.0, r.top, notice_r.right - 8.0, r.bottom), pal.accent);
+        self.hits.push((notice_r, Hit::UpdateNotice));
+    }
+
+    /// Fija (o borra, con `None`) el texto del aviso de actualización disponible que
+    /// se dibuja en la barra de estado. Lo llama `notty-ui`/`notty` cuando cambia el
+    /// resultado de la comprobación (Task 4 del plan del actualizador).
+    pub fn set_update_notice(&mut self, notice: Option<String>) {
+        self.update_notice = notice;
+    }
+
+    /// Fija (o borra, con `None`) el contenido del panel de notas de versión.
+    pub fn set_update_panel(&mut self, content: Option<UpdatePanelContent>) {
+        self.update_panel = content;
+    }
+
+    /// Panel flotante con las notas de la release encontrada y un botón "Actualizar"
+    /// (Task 4, Step 2-3 del plan del actualizador): anclado justo encima de la barra
+    /// de estado, a la derecha, con el mismo estilo oscuro que los desplegables.
+    unsafe fn draw_update_panel(&mut self, pal: &theme::Palette, status_top: f32, w: f32) {
+        let Some(content) = self.update_panel.clone() else { return };
+        let panel_w = 340.0f32;
+        let panel_h = 190.0f32;
+        let right = w - layout::STATUS_PAD_X;
+        let r = Rect::new(right - panel_w, status_top - panel_h - 8.0, right, status_top - 8.0);
+
+        self.draw_popup_shadow(r, layout::POPUP_RADIUS, 1.0, pal.shadow);
+        self.fill_round(r, layout::POPUP_RADIUS, pal.chrome);
+        self.stroke_round_rect(r, layout::POPUP_RADIUS, 1.0, pal.line);
+
+        let pad = 14.0;
+        let title = format!("Actualización {} disponible", content.version);
+        self.text(&title, &self.fonts.ui_12_5, Rect::new(r.left + pad, r.top + pad, r.right - pad, r.top + pad + 20.0), pal.text);
+
+        let body_r = Rect::new(r.left + pad, r.top + pad + 26.0, r.right - pad, r.bottom - 60.0);
+        self.text(&content.body, &self.fonts.ui_11, body_r, pal.text_2);
+
+        if let Some(status) = &content.status_line {
+            let status_r = Rect::new(r.left + pad, r.bottom - 56.0, r.right - pad, r.bottom - 40.0);
+            self.text(status, &self.fonts.ui_11, status_r, pal.warn);
+        }
+
+        let btn_h = 28.0;
+        let btn_r = Rect::new(r.right - pad - 100.0, r.bottom - pad - btn_h, r.right - pad, r.bottom - pad);
+        if content.show_actualizar {
+            self.fill_round(btn_r, 6.0, pal.accent);
+            self.text(
+                "Actualizar",
+                &self.fonts.ui_11_5_semibold,
+                Rect::new(btn_r.left, btn_r.top, btn_r.right, btn_r.bottom),
+                pal.surface,
+            );
+            self.hits.push((btn_r, Hit::UpdatePanelActualizar));
+        }
+
+        let close_r = Rect::new(r.left + pad, r.bottom - pad - btn_h, r.left + pad + 80.0, r.bottom - pad);
+        self.text("Cerrar", &self.fonts.ui_11_5, Rect::new(close_r.left, close_r.top, close_r.right, close_r.bottom), pal.text_2);
+        self.hits.push((close_r, Hit::UpdatePanelCerrar));
     }
 
     #[allow(unused_unsafe)]

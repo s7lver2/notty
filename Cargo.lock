@@ -292,6 +292,7 @@ dependencies = [
  "notty-input",
  "notty-ipc",
  "notty-ui",
+ "notty-update",
  "windows",
 ]
 
@@ -344,6 +345,7 @@ dependencies = [
  "notty-input",
  "notty-io",
  "notty-ipc",
+ "notty-update",
  "tempfile",
  "windows",
  "windows-numerics",
