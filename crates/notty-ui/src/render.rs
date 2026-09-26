@@ -274,6 +274,8 @@ pub struct Renderer {
     tab_scroll_targets: (Option<usize>, Option<usize>),
     /// "Acerca de notty" abierto.
     about: Option<AboutContent>,
+    /// Progreso (`0..1` en 1,8 s) del aviso "Ruta copiada", si hay uno en curso.
+    path_copied: Option<f32>,
     /// Atajos en vigor (tras reasignaciones en `[keys]`) de los elementos de menú que
     /// los tienen, ya en formato corto ("^N").
     menu_keys: Vec<(crate::menu::MenuCmd, String)>,
@@ -402,6 +404,7 @@ impl Renderer {
                 tab_anim: Default::default(),
                 tab_scroll_targets: (None, None),
                 about: None,
+                path_copied: None,
                 menu_keys: Vec::new(),
                 mono_family,
                 ui_family,
@@ -1262,6 +1265,7 @@ impl Renderer {
                 self.draw_dropdown(crate::menu::MENUS[i].items, x, top, checks, view, pal);
             }
 
+            self.draw_path_copied(pal, frame.status.top);
             self.draw_update_panel(pal, frame.status.top, w, view);
             self.draw_about(pal, frame.body, view);
 
@@ -1867,6 +1871,60 @@ impl Renderer {
         self.about = about;
     }
 
+    pub fn set_path_copied(&mut self, progress: Option<f32>) {
+        self.path_copied = progress;
+    }
+
+    /// Aviso "Ruta copiada al portapapeles" (maqueta `Copiado.dc.html`): sube y
+    /// aparece, se queda, y se va hacia arriba; el ✓ se dibuja trazo a trazo.
+    fn draw_path_copied(&self, pal: &theme::Palette, status_top: f32) {
+        let Some(p) = self.path_copied else { return };
+        let ease = |k: f32| crate::Curve::Out.apply(k.clamp(0.0, 1.0));
+        let (alpha, dy, scale) = if p < 0.12 {
+            let k = ease(p / 0.12);
+            (k, 8.0 * (1.0 - k), 0.96 + 0.04 * k)
+        } else if p < 0.82 {
+            (1.0, 0.0, 1.0)
+        } else {
+            let k = ease((p - 0.82) / 0.18);
+            (1.0 - k, -4.0 * k, 1.0)
+        };
+        let label = "Ruta copiada al portapapeles";
+        let tw = self.measure(label, &self.fonts.ui_12);
+        let w = 12.0 + 14.0 + 8.0 + tw + 12.0;
+        let left = layout::STATUS_PAD_X + 4.0;
+        let r = Rect::new(left, status_top - 10.0 - 30.0 + dy, left + w, status_top - 10.0 + dy);
+        let c = windows_numerics::Vector2 { X: r.left + w / 2.0, Y: r.top + 15.0 };
+        self.set_transform(Matrix3x2::scale_around(scale, scale, c));
+        let base = self.fade();
+        self.set_fade(base * alpha);
+        self.draw_popup_shadow(r, 6.0, 1.0, pal.shadow);
+        self.fill_round(r, 6.0, pal.chrome);
+        self.stroke_round_rect(r, 6.0, 1.0, pal.shadow_ring);
+        // ✓ que se traza de 0,08 s a 0,43 s (`stroke-dashoffset`).
+        let draw = ease((p * 1.8 - 0.08) / 0.35);
+        let (ix, iy, k) = (r.left + 12.0, r.top + 8.0, 14.0 / 24.0);
+        let pts = [(5.0f32, 12.0f32), (10.0, 17.0), (19.0, 7.0)];
+        let seg1 = 50f32.sqrt();
+        let seg2 = 181f32.sqrt();
+        let len = (seg1 + seg2) * draw;
+        let mut line = vec![(ix + pts[0].0 * k, iy + pts[0].1 * k)];
+        if len <= seg1 {
+            let f = len / seg1;
+            line.push((ix + (5.0 + 5.0 * f) * k, iy + (12.0 + 5.0 * f) * k));
+        } else {
+            line.push((ix + pts[1].0 * k, iy + pts[1].1 * k));
+            let f = (len - seg1) / seg2;
+            line.push((ix + (10.0 + 9.0 * f) * k, iy + (17.0 - 10.0 * f) * k));
+        }
+        if draw > 0.0 {
+            self.stroke_polyline(&line, 2.0, pal.ok);
+        }
+        self.text(label, &self.fonts.ui_12, Rect::new(r.left + 34.0, r.top, r.right, r.bottom), pal.text);
+        self.set_fade(base);
+        self.reset_transform();
+    }
+
     /// Atajos en vigor de los elementos de menú (ver `menu::shortcut_labels`).
     pub fn set_menu_keys(&mut self, keys: Vec<(crate::menu::MenuCmd, String)>) {
         self.menu_keys = keys;
@@ -2084,7 +2142,12 @@ impl Renderer {
                 // barra de estado real de notty tiene más sentido decir qué archivo es.
                 let name = crate::doc_name(state.path.as_deref());
                 let w = self.measure(&name, label_font).min(r.width() * 0.4);
-                self.text(&name, label_font, Rect::new(x, r.top, x + w, r.bottom), pal.text_2);
+                // Recién copiada la ruta, el nombre se ilumina y se apaga despacio.
+                let hit = self.path_copied.map(|p| if p < 0.5 { 1.0 } else { (1.0 - (p - 0.5) / 0.35).clamp(0.0, 1.0) }).unwrap_or(0.0);
+                if hit > 0.0 {
+                    self.fill_round(Rect::new(x - 4.0, r.top + 3.0, x + w + 4.0, r.bottom - 3.0), 3.0, pal.accent.faded(0.16 * hit));
+                }
+                self.text(&name, label_font, Rect::new(x, r.top, x + w, r.bottom), pal.text_2.mix(pal.accent, hit));
                 x += w;
             }
             let left_end = x;

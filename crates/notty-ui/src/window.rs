@@ -137,6 +137,8 @@ struct WindowState {
     tab_anims: crate::tab_anim::TabAnims,
     /// Ventana "Acerca de notty" (menú Ayuda) abierta.
     about_open: bool,
+    /// Cuándo se copió la ruta por última vez (aviso de 1,8 s).
+    path_copied_at: Option<std::time::Instant>,
     /// Descartar el próximo `WM_CHAR` (la tecla ya se usó en `WM_KEYDOWN`).
     swallow_char: bool,
     /// Paneles de `Files::Splits`. Se mantiene al día también en los otros modos (al
@@ -444,7 +446,10 @@ fn run_ctx_cmd(w: &mut WindowState, hwnd: HWND, cmd: crate::context_menu::CtxCmd
         }
         CtxCmd::CopyPath(i) => {
             if let Some(p) = path_of(w, i) {
-                let _ = crate::clipboard::set_clipboard_text(hwnd, &p.display().to_string());
+                if crate::clipboard::set_clipboard_text(hwnd, &p.display().to_string()).is_ok() {
+                    w.path_copied_at = Some(std::time::Instant::now());
+                    ensure_anim_timer(w, hwnd);
+                }
             }
         }
         CtxCmd::OpenFolder(i) => {
@@ -1042,6 +1047,17 @@ fn update_panel_content(update: &crate::UpdateState) -> Option<crate::UpdatePane
     })
 }
 
+/// Progreso del aviso "Ruta copiada" (`None` si no hay o ya terminó). Sin
+/// animaciones se queda quieto y visible el mismo tiempo.
+fn path_copied_progress(w: &WindowState) -> Option<f32> {
+    let t0 = w.path_copied_at?;
+    let p = t0.elapsed().as_secs_f32() / 1.8;
+    if p >= 1.0 {
+        return None;
+    }
+    Some(if w.animations_enabled { p } else { 0.5 })
+}
+
 /// Contenido de "Acerca de notty": versión y enlace al repositorio (si `repo` no es
 /// el marcador de posición de las compilaciones sin configurar).
 fn about_content(repo: &str) -> crate::AboutContent {
@@ -1333,6 +1349,7 @@ fn run_inner(
             menu_sel: None,
             tab_anims: Default::default(),
             about_open: false,
+            path_copied_at: None,
             swallow_char: false,
             splits: crate::splits::Splits::default(),
         });
@@ -1556,6 +1573,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     }
                     w.renderer.set_tab_anim(w.tab_anims.frame(std::time::Instant::now()));
                     w.renderer.set_about(if w.about_open { Some(about_content(&w.repo)) } else { None });
+                    w.renderer.set_path_copied(path_copied_progress(w));
                     if w.tour.is_some() {
                         w.renderer.hold_next_frame();
                     }
@@ -2417,7 +2435,8 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             || w.tab_switch_anim.is_some()
                             || w.chrome_fade_anim.is_some()
                             || w.theme_anim.is_some()
-                            || tour_animating;
+                            || tour_animating
+                            || path_copied_progress(w).is_some();
                         if !still_animating {
                             let _ = KillTimer(Some(hwnd), ID_ANIM_TIMER);
                             w.anim_timer_running = false;
