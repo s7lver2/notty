@@ -1,0 +1,153 @@
+<style>
+  .row2{display:grid;grid-template-columns:1fr;gap:28px}
+  .lbl{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#8a8b8e;margin:0 0 8px 2px}
+  .desk{position:relative;height:470px;background:#141516;border-radius:10px;overflow:hidden}
+  /* notty principal detrás */
+  .app{position:absolute;left:24px;top:22px;width:600px;height:400px;border-radius:8px;border:1px solid #34353a;overflow:hidden;font-family:"Segoe UI Variable Text","Segoe UI",sans-serif;font-size:12px;display:flex;flex-direction:column;transition:background .35s,color .35s,border-color .35s}
+  .app .tb{height:32px;display:flex;align-items:center;gap:6px;padding-left:10px;transition:background .35s}
+  .app .tab{padding:5px 12px;border-radius:6px 6px 0 0;margin-top:6px;transition:background .35s}
+  .app .mb{height:0;overflow:hidden;display:flex;gap:16px;align-items:center;padding:0 12px;font-size:11.5px;transition:height .3s cubic-bezier(.3,0,.2,1),background .35s}
+  .app.clasica .mb{height:26px}
+  .app .doc{flex:1;padding:12px 16px;font-family:"Cascadia Mono",Consolas,monospace;font-size:12px;line-height:1.8}
+  .app .sb{height:24px;display:flex;align-items:center;gap:16px;padding:0 12px;font-size:11px;border-top:1px solid;transition:background .35s,border-color .35s}
+  .app.dark{background:#202124;color:#e5e6e8}.app.dark .tb,.app.dark .mb,.app.dark .sb{background:#2a2b2d;color:#a9aaad;border-color:#34353a}.app.dark .tab{background:#202124;color:#e5e6e8}
+  .app.light{background:#fbfbfc;color:#1a1b1c;border-color:#d6d7da}.app.light .tb,.app.light .mb,.app.light .sb{background:#e8eaeb;color:#54565a;border-color:#d6d7da}.app.light .tab{background:#fbfbfc;color:#1a1b1c}
+  .cur{display:inline-block;width:1px;height:14px;background:currentColor;vertical-align:-2px;animation:bl 1s steps(1) infinite}
+  .cur.block{width:8px;background:rgba(115,182,250,.35);outline:1px solid #73b6fa}
+  @keyframes bl{50%{opacity:0}}
+  .mode{color:#73b6fa;font-weight:600}
+  /* ventana de bienvenida */
+  .wiz{position:absolute;right:22px;top:58px;width:430px;height:380px;background:#202124;border:1px solid #3a3b40;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,.3),0 18px 50px rgba(0,0,0,.55);font-family:"Segoe UI Variable Text","Segoe UI",sans-serif;color:#e5e6e8;font-size:12.5px;display:flex;flex-direction:column;overflow:hidden}
+  .wiz .wt{height:32px;display:flex;align-items:center;justify-content:space-between;padding-left:12px;font-size:11.5px;color:#a9aaad}
+  .wiz .wt span:last-child{width:46px;text-align:center}
+  .wm{flex:1;display:flex;min-height:0}
+  .rail{width:118px;padding:10px 0 0 14px;position:relative}
+  .st{display:flex;align-items:center;gap:9px;height:30px;color:#8a8b8e;font-size:12px;position:relative;z-index:1;transition:color .2s;cursor:pointer}
+  .st i{width:8px;height:8px;border-radius:4px;border:1.5px solid #55565b;background:#202124;transition:all .25s}
+  .st.done{color:#a9aaad}.st.done i{background:#73b6fa;border-color:#73b6fa}
+  .st.on{color:#e5e6e8;font-weight:600}.st.on i{border-color:#73b6fa;box-shadow:0 0 0 3px rgba(115,182,250,.18)}
+  .track{position:absolute;left:17.5px;top:25px;width:1.5px;height:120px;background:#34353a}
+  .track b{display:block;width:100%;height:0;background:#73b6fa;transition:height .4s cubic-bezier(.3,0,.2,1)}
+  .pane{flex:1;padding:10px 18px 0 6px;position:relative;overflow:hidden}
+  .pg{position:absolute;inset:10px 18px 0 6px;opacity:0;transform:translateX(14px);transition:opacity .18s,transform .22s cubic-bezier(.3,0,.2,1);pointer-events:none}
+  .pg.on{opacity:1;transform:none;pointer-events:auto}
+  .pg.out{opacity:0;transform:translateX(-12px)}
+  h4{font-family:"Segoe UI Variable Display","Segoe UI",sans-serif;font-size:18px;font-weight:600;margin:0 0 3px;letter-spacing:-.2px}
+  .sub{color:#a9aaad;margin:0 0 14px;line-height:1.45}
+  .choice{display:flex;gap:10px;align-items:center;padding:10px 12px;border:1px solid #303136;border-radius:6px;background:#28292c;margin-bottom:6px;cursor:pointer;transition:border-color .15s,background .15s}
+  .choice:hover{background:#2c2d31}
+  .choice.on{border-color:#73b6fa;background:#262d36}
+  .rad{width:14px;height:14px;border-radius:7px;border:1.5px solid #8a8b8e;flex:none;position:relative;transition:border-color .15s}
+  .choice.on .rad{border-color:#73b6fa}
+  .choice.on .rad::after{content:"";position:absolute;inset:2.5px;border-radius:50%;background:#73b6fa;animation:rp .2s cubic-bezier(.3,0,.2,1)}
+  @keyframes rp{from{transform:scale(0)}}
+  .choice .t{flex:1}.choice small{display:block;color:#8a8b8e;font-size:11.5px;margin-top:1px}
+  .demo{font-family:"Cascadia Mono",Consolas,monospace;font-size:10.5px;color:#8a8b8e;background:#18191b;border-radius:3px;padding:2px 6px}
+  .wf{height:52px;flex:none;display:flex;justify-content:space-between;align-items:center;padding:0 16px;background:#1b1c1e;border-top:1px solid #2c2d31}
+  .btn{padding:6px 16px;border-radius:4px;background:#73b6fa;color:#0e1216;font-weight:600;font-size:12px;border:1px solid #8cc4fb;cursor:pointer}
+  .btn2{padding:6px 14px;border-radius:4px;background:#2d2e32;border:1px solid #3a3b40;font-size:12px;margin-right:6px;cursor:pointer}
+  .skip{color:#8a8b8e;font-size:12px;cursor:pointer}
+  /* recorrido */
+  .spot{position:absolute;border-radius:6px;box-shadow:0 0 0 2px #73b6fa,0 0 0 9999px rgba(8,8,10,.6);transition:all .45s cubic-bezier(.3,0,.2,1);pointer-events:none;opacity:0}
+  .tour .spot{opacity:1}
+  .tip{position:absolute;width:210px;background:#2b2c30;border:1px solid #3a3b40;border-radius:8px;padding:12px 14px;box-shadow:0 10px 30px rgba(0,0,0,.5);font-family:"Segoe UI Variable Text","Segoe UI",sans-serif;font-size:12px;line-height:1.5;color:#e5e6e8;transition:all .45s cubic-bezier(.3,0,.2,1);opacity:0;pointer-events:none}
+  .tour .tip{opacity:1;pointer-events:auto}
+  .tip b{display:block;font-size:13px;margin-bottom:3px}
+  .tip kbd{font-family:"Cascadia Mono",Consolas,monospace;font-size:10.5px;background:#3a3b40;border-radius:3px;padding:1px 5px;border-bottom:1px solid #4a4b50}
+  .tip .nav{display:flex;justify-content:space-between;align-items:center;margin-top:10px}
+  .pips{display:flex;gap:4px}.pips i{width:5px;height:5px;border-radius:3px;background:#55565b;transition:all .25s}.pips i.on{width:14px;background:#73b6fa}
+  .tip .go{color:#73b6fa;cursor:pointer;font-weight:600}
+  .ctl{display:flex;gap:8px;margin-top:10px}
+  .ctl span{font-size:12px;padding:5px 12px;border:1px solid #3a3b40;border-radius:4px;cursor:pointer;background:#232427}
+  .notes{margin-top:22px;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px 28px;font-size:13px;line-height:1.55}
+  .notes b{display:block;margin-bottom:2px}
+</style>
+
+<h2>Tutorial: ventana guiada (A) que termina en un recorrido (C)</h2>
+<p class="subtitle">Es interactivo: pulsa Siguiente en la ventana de bienvenida y verás cómo cambia el notty de detrás en vivo. Al final, "Enséñame dónde está todo" lanza el recorrido.</p>
+
+<div class="desk" id="desk">
+  <div class="app dark" id="app">
+    <div class="tb"><span class="tab">notas.txt</span><span style="opacity:.6">+</span><span style="margin-left:auto;width:40px;text-align:center" id="gear">⚙</span><span style="width:120px;text-align:right;padding-right:14px;letter-spacing:12px;opacity:.6">—▢✕</span></div>
+    <div class="mb" id="mb"><span>Archivo</span><span>Editar</span><span>Ver</span><span>Ayuda</span></div>
+    <div class="doc" id="doc">Lista de la compra<br>- pan<br>- café<span class="cur" id="cur"></span></div>
+    <div class="sb" id="sb"><span>Ln 3, Col 7</span><span>UTF-8</span><span>CRLF</span><span class="mode" id="mode"></span></div>
+  </div>
+
+  <div class="wiz" id="wiz">
+    <div class="wt"><span>Bienvenido a notty</span><span>✕</span></div>
+    <div class="wm">
+      <div class="rail"><div class="track"><b id="trk"></b></div>
+        <div class="st on" data-i="0"><i></i>Hola</div><div class="st" data-i="1"><i></i>Estilo</div><div class="st" data-i="2"><i></i>Tema</div><div class="st" data-i="3"><i></i>Teclado</div><div class="st" data-i="4"><i></i>Privacidad</div><div class="st" data-i="5"><i></i>Listo</div>
+      </div>
+      <div class="pane">
+        <div class="pg on"><h4>Hola 👋</h4><p class="sub">Cuatro preguntas rápidas y listo. Todo se aplica al momento en la ventana de detrás, y puedes cambiarlo luego en Ajustes.</p></div>
+        <div class="pg"><h4>Estilo</h4><p class="sub">¿Cómo quieres la ventana?</p>
+          <div class="choice on" data-k="style" data-v="moderna"><span class="rad"></span><span class="t">Moderna<small>Pestañas en la barra de título, sin menús</small></span></div>
+          <div class="choice" data-k="style" data-v="clasica"><span class="rad"></span><span class="t">Clásica<small>Menú Archivo · Editar · Ver, como siempre</small></span></div></div>
+        <div class="pg"><h4>Tema</h4><p class="sub">Claro, oscuro o el que use Windows.</p>
+          <div class="choice" data-k="theme" data-v="sys"><span class="rad"></span><span class="t">Usar el de Windows</span></div>
+          <div class="choice" data-k="theme" data-v="light"><span class="rad"></span><span class="t">Claro</span></div>
+          <div class="choice on" data-k="theme" data-v="dark"><span class="rad"></span><span class="t">Oscuro</span></div></div>
+        <div class="pg"><h4>Teclado</h4><p class="sub">Si no sabes qué es vim, deja "Normal".</p>
+          <div class="choice on" data-k="kb" data-v="normal"><span class="rad"></span><span class="t">Normal<small>Como cualquier editor de Windows</small></span></div>
+          <div class="choice" data-k="kb" data-v="vim"><span class="rad"></span><span class="t">Vim <span class="demo">hjkl · dd · :w</span><small>Modos Normal / Insertar / Visual</small></span></div>
+          <div class="choice" data-k="kb" data-v="nano"><span class="rad"></span><span class="t">Nano <span class="demo">^K ^U ^W</span><small>Atajos de nano, sin modos</small></span></div></div>
+        <div class="pg"><h4>Actualizaciones</h4><p class="sub">notty no se conecta a nada sin tu permiso. Si lo activas, solo consulta una vez al día si hay versión nueva en GitHub: sin datos, sin identificadores.</p>
+          <div class="choice" data-k="up" data-v="yes"><span class="rad"></span><span class="t">Avisarme de nuevas versiones</span></div>
+          <div class="choice on" data-k="up" data-v="no"><span class="rad"></span><span class="t">No, lo miraré yo<small>Ajustes → Acerca de → Buscar ahora</small></span></div></div>
+        <div class="pg"><h4>Todo listo</h4><p class="sub">¿Te enseño en 20 segundos dónde está cada cosa?</p>
+          <div class="choice on" id="tourGo"><span class="t" style="font-weight:600;color:#73b6fa">Enséñame dónde está todo →</span></div>
+          <p class="sub" style="font-size:11.5px;margin-top:10px">Puedes repetirlo desde Ajustes → Ayuda.</p></div>
+      </div>
+    </div>
+    <div class="wf"><span class="skip" id="skip">Saltar</span><div><span class="btn2" id="back">Atrás</span><span class="btn" id="next">Empezar</span></div></div>
+  </div>
+
+  <div class="spot" id="spot"></div>
+  <div class="tip" id="tip"><b id="tt"></b><span id="td"></span><div class="nav"><span class="pips" id="pips"></span><span class="go" id="tn">Siguiente</span></div></div>
+</div>
+<div class="ctl"><span id="reset">↺ Reiniciar demo</span></div>
+
+<div class="notes">
+  <div><b>Aplicación en vivo</b>La ventana de bienvenida es no modal y va flotando sobre notty. Cada elección se escribe en la config y notty se repinta con su animación de tema (350ms), así que se ve lo que eliges sin tener que imaginarlo.</div>
+  <div><b>Transiciones</b>Las páginas salen 12px con fundido y entran desde la derecha, y el carril se rellena. Es el mismo sistema de movimiento que el instalador: son dos hermanos.</div>
+  <div><b>Recorrido</b>Un único foco que se desliza y cambia de forma entre objetivos (450ms), en vez de aparecer y desaparecer. El globo lo sigue, con puntos de progreso y atajos en <kbd>kbd</kbd>. Se cierra con Esc o clicando fuera.</div>
+  <div><b>Respeta al usuario</b>"Saltar" siempre visible. Si Windows tiene las animaciones desactivadas, todo pasa a cortes instantáneos. Solo aparece la primera vez, nunca se repite solo.</div>
+</div>
+
+<script>
+(function(){
+  const $=id=>document.getElementById(id);
+  const app=$('app'),wiz=$('wiz'),desk=$('desk');
+  let i=0;const pgs=[...document.querySelectorAll('.pg')],sts=[...document.querySelectorAll('.st')];
+  function show(n){if(n<0||n>=pgs.length)return;pgs[i].classList.remove('on');pgs[i].classList.add('out');const o=pgs[i];setTimeout(()=>o.classList.remove('out'),220);i=n;pgs[i].classList.add('on');
+    sts.forEach((s,k)=>{s.classList.toggle('on',k===i);s.classList.toggle('done',k<i)});$('trk').style.height=(i/(pgs.length-1)*100)+'%';
+    $('next').textContent=i===0?'Empezar':i===pgs.length-1?'Terminar':'Siguiente';$('back').style.visibility=i===0?'hidden':'visible'}
+  $('next').onclick=()=>{if(i===pgs.length-1){wiz.style.display='none';return}show(i+1)};$('back').onclick=()=>show(i-1);
+  sts.forEach(s=>s.onclick=()=>show(+s.dataset.i));$('skip').onclick=()=>{wiz.style.display='none'};
+  document.querySelectorAll('.choice[data-k]').forEach(c=>c.onclick=()=>{document.querySelectorAll('.choice[data-k="'+c.dataset.k+'"]').forEach(x=>x.classList.toggle('on',x===c));apply(c.dataset.k,c.dataset.v)});
+  function apply(k,v){
+    if(k==='style')app.classList.toggle('clasica',v==='clasica');
+    if(k==='theme'){const d=v!=='light';app.classList.toggle('dark',d);app.classList.toggle('light',!d)}
+    if(k==='kb'){$('cur').classList.toggle('block',v==='vim');$('mode').textContent=v==='vim'?'-- NORMAL --':v==='nano'?'nano':''}
+  }
+  // recorrido
+  const stops=[
+    {el:()=>app.querySelector('.tab'),t:'Pestañas',d:'Ctrl+T abre una nueva y Ctrl+W la cierra. Arrastra para reordenar.',side:'below'},
+    {el:()=>$('gear'),t:'Ajustes',d:'Tema, estilo, fuente y modo de teclado, en cualquier momento.',side:'below'},
+    {el:()=>$('doc'),t:'Abrir rápido',d:'<kbd>Ctrl</kbd>+<kbd>O</kbd> abre una ruta con autocompletado, sin diálogo.',side:'right'},
+    {el:()=>$('sb'),t:'Barra de estado',d:'Línea, codificación y fin de línea. Haz clic en cualquiera para cambiarlo.',side:'above'},
+    {el:()=>$('sb'),t:'Para curiosos',d:'<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd> activa vim y <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd> muestra los bytes en crudo.',side:'above'}];
+  let s=0;const pips=$('pips');pips.innerHTML=stops.map(()=>'<i></i>').join('');
+  function place(){const st=stops[s],r=st.el().getBoundingClientRect(),D=desk.getBoundingClientRect();
+    const x=r.left-D.left-4,y=r.top-D.top-4,w=r.width+8,h=r.height+8;Object.assign($('spot').style,{left:x+'px',top:y+'px',width:w+'px',height:h+'px'});
+    $('tt').textContent=st.t;$('td').innerHTML=st.d;[...pips.children].forEach((p,k)=>p.classList.toggle('on',k===s));$('tn').textContent=s===stops.length-1?'Hecho':'Siguiente';
+    let tx=x,ty=y+h+10;if(st.side==='above')ty=y-118;if(st.side==='right'){tx=x+w-230;ty=y+60}tx=Math.max(10,Math.min(tx,D.width-222));
+    Object.assign($('tip').style,{left:tx+'px',top:ty+'px'})}
+  $('tourGo').onclick=()=>{wiz.style.display='none';s=0;desk.classList.add('tour');place()};
+  $('tn').onclick=()=>{if(s===stops.length-1){desk.classList.remove('tour');return}s++;place()};
+  $('reset').onclick=()=>{desk.classList.remove('tour');wiz.style.display='flex';show(0)};
+  show(0);
+})();
+</script>

@@ -1,0 +1,110 @@
+<style>
+  .flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:22px}
+  .cap-t{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#8a8b8e;margin:0 0 8px 2px}
+  .win{background:#202124;border:1px solid #34353a;border-radius:8px;overflow:hidden;font-family:"Segoe UI Variable Text","Segoe UI",sans-serif;color:#e5e6e8;font-size:13px;box-shadow:0 1px 2px rgba(0,0,0,.3),0 8px 28px rgba(0,0,0,.35);height:372px;display:flex;flex-direction:column}
+  .tb{height:32px;flex:none;display:flex;align-items:center;justify-content:space-between;padding-left:12px;font-size:12px;color:#a9aaad}
+  .tb .ic{display:flex;align-items:center;gap:8px}
+  .tb .ic i{width:14px;height:14px;border-radius:3px;border:1.2px solid #a9aaad;display:inline-block}
+  .tb .btns{display:flex;height:100%}
+  .tb .btns span{width:46px;display:flex;align-items:center;justify-content:center;color:#8a8b8e;font-size:11px}
+  .body{flex:1;padding:14px 32px 0;display:flex;flex-direction:column}
+  .foot{flex:none;display:flex;justify-content:space-between;align-items:center;padding:14px 20px;background:#1b1c1e;border-top:1px solid #2c2d31}
+  h4{font-family:"Segoe UI Variable Display","Segoe UI",sans-serif;font-size:20px;font-weight:600;margin:0 0 6px;letter-spacing:-.2px}
+  .sub{color:#a9aaad;line-height:1.5;margin:0 0 18px}
+  .dots{display:flex;gap:6px;align-items:center}
+  .dots i{width:6px;height:6px;border-radius:3px;background:#46474c}
+  .dots i.on{width:18px;background:#73b6fa}
+  .btn{padding:6px 18px;border-radius:4px;background:#73b6fa;color:#0e1216;font-weight:600;font-size:12.5px;display:inline-flex;gap:7px;align-items:center;border:1px solid #8cc4fb}
+  .btn2{padding:6px 16px;border-radius:4px;background:#2d2e32;border:1px solid #3a3b40;font-size:12.5px;margin-right:6px}
+  .shield{width:10px;height:12px;background:#0e1216;clip-path:polygon(50% 0,100% 18%,100% 55%,50% 100%,0 55%,0 18%);opacity:.85}
+  .row{display:flex;gap:12px;padding:9px 0;border-bottom:1px solid #2a2b2f}
+  .row:last-child{border:0}
+  .box{width:16px;height:16px;border-radius:4px;background:#73b6fa;flex:none;position:relative;margin-top:1px}
+  .box.off{background:none;border:1px solid #6b6c70}
+  .box:not(.off)::after{content:"";position:absolute;left:5px;top:2px;width:4px;height:8px;border:solid #0e1216;border-width:0 1.8px 1.8px 0;transform:rotate(45deg)}
+  .row small{display:block;color:#8a8b8e;font-size:11.5px;margin-top:2px}
+  .path{display:flex;align-items:center;gap:8px;background:#18191b;border:1px solid #34353a;border-bottom-color:#73b6fa;border-radius:4px;padding:7px 10px;font-family:"Cascadia Mono",Consolas,monospace;font-size:12px;color:#c9cacd}
+  .path span{margin-left:auto;font-family:"Segoe UI",sans-serif;color:#73b6fa;font-size:12px}
+  .bar{height:3px;background:#34353a;border-radius:2px;overflow:hidden;margin:26px 0 10px}
+  .bar b{display:block;height:100%;width:64%;background:#73b6fa;border-radius:2px;animation:gr 3s cubic-bezier(.4,0,.2,1) infinite alternate}
+  @keyframes gr{from{width:30%}to{width:82%}}
+  .log{font-size:12px;color:#8a8b8e;display:flex;justify-content:space-between}
+  .done{width:44px;height:44px;border-radius:22px;border:2px solid #73b6fa;display:flex;align-items:center;justify-content:center;margin:18px 0 18px}
+  .done svg path{stroke-dasharray:30;stroke-dashoffset:30;animation:dr .6s .2s cubic-bezier(.3,0,.2,1) forwards infinite}
+  @keyframes dr{to{stroke-dashoffset:0}}
+  .notes{background:#18191b;border:1px solid #2c2d31;border-radius:6px;padding:10px 12px;font-size:12px;color:#c9cacd;line-height:1.65}
+  .ver{font-family:"Cascadia Mono",Consolas,monospace;font-size:12px;color:#a9aaad}
+  .ver b{color:#e5e6e8;font-weight:600}
+  .spec{margin-top:26px;display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px 28px;font-size:13px;line-height:1.55}
+  .spec b{display:block;margin-bottom:2px}
+</style>
+
+<h2>A refinado: el flujo completo</h2>
+<p class="subtitle">Cuatro pantallas de instalación y una de actualización (el mismo binario). Ventana fija de 520×372, sin redimensionar, como los diálogos del sistema.</p>
+
+<div class="flow">
+
+  <div><p class="cap-t">1 · Bienvenida</p>
+  <div class="win"><div class="tb"><span class="ic"><i></i>Instalar notty</span><span class="btns"><span>—</span><span>✕</span></span></div>
+    <div class="body">
+      <h4>notty 1.3.0</h4>
+      <p class="sub">Un bloc de notas ligero para Windows. Se instalará para todos los usuarios de este equipo.</p>
+      <p class="cap-t" style="margin-top:4px">Carpeta</p>
+      <div class="path">C:\Program Files\notty<span>Cambiar…</span></div>
+      <p style="color:#8a8b8e;font-size:11.5px;margin-top:10px">2,3 MB · Windows 10 1809 o posterior</p>
+    </div>
+    <div class="foot"><div class="dots"><i class="on"></i><i></i><i></i></div><div><span class="btn">Siguiente</span></div></div>
+  </div></div>
+
+  <div><p class="cap-t">2 · Opciones</p>
+  <div class="win"><div class="tb"><span class="ic"><i></i>Instalar notty</span><span class="btns"><span>—</span><span>✕</span></span></div>
+    <div class="body" style="padding-top:8px">
+      <div class="row"><span class="box"></span><div>Sustituir el Bloc de notas<small>"notepad" abrirá notty. El original queda como notepad_legacy.</small></div></div>
+      <div class="row"><span class="box"></span><div>Abrir con notty en el menú contextual</div></div>
+      <div class="row"><span class="box"></span><div>Ofrecer notty para .txt, .log, .md, .ini<small>Windows te pedirá confirmarlo al terminar.</small></div></div>
+      <div class="row"><span class="box"></span><div>Acceso en el menú Inicio</div></div>
+      <div class="row"><span class="box off"></span><div>Acceso en el escritorio</div></div>
+    </div>
+    <div class="foot"><div class="dots"><i></i><i class="on"></i><i></i></div><div><span class="btn2">Atrás</span><span class="btn"><span class="shield"></span>Instalar</span></div></div>
+  </div></div>
+
+  <div><p class="cap-t">3 · Progreso</p>
+  <div class="win"><div class="tb"><span class="ic"><i></i>Instalar notty</span><span class="btns"><span>—</span><span>✕</span></span></div>
+    <div class="body" style="padding-top:34px">
+      <h4>Instalando…</h4>
+      <p class="sub" style="margin:0">No tardará más de unos segundos.</p>
+      <div class="bar"><b></b></div>
+      <div class="log"><span>Registrando asociaciones de archivo</span><span>64 %</span></div>
+    </div>
+    <div class="foot"><div class="dots"><i></i><i></i><i class="on"></i></div><div><span class="btn2" style="opacity:.45">Cancelar</span></div></div>
+  </div></div>
+
+  <div><p class="cap-t">4 · Listo</p>
+  <div class="win"><div class="tb"><span class="ic"><i></i>Instalar notty</span><span class="btns"><span>—</span><span>✕</span></span></div>
+    <div class="body">
+      <div class="done"><svg width="20" height="16" viewBox="0 0 20 16"><path d="M2 8.5l5.5 5L18 2.5" fill="none" stroke="#73b6fa" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      <h4>notty está listo</h4>
+      <p class="sub">Falta un paso: elegir notty como app predeterminada para .txt en Ajustes de Windows.</p>
+    </div>
+    <div class="foot"><span style="color:#73b6fa;font-size:12.5px">Abrir Aplicaciones predeterminadas</span><div><span class="btn">Abrir notty</span></div></div>
+  </div></div>
+
+  <div><p class="cap-t">Modo actualización (lanzado por notty)</p>
+  <div class="win"><div class="tb"><span class="ic"><i></i>Actualizar notty</span><span class="btns"><span>—</span><span>✕</span></span></div>
+    <div class="body">
+      <h4>Actualización disponible</h4>
+      <p class="ver">1.2.0 → <b>1.3.0</b> · firma verificada ✓</p>
+      <div class="notes" style="margin-top:12px">· Barra de título más compacta<br>· Sombras suaves en los desplegables<br>· Cursor de bloque en vim Normal</div>
+      <p style="color:#8a8b8e;font-size:11.5px;margin-top:10px">Tus pestañas y borradores se restaurarán al terminar.</p>
+    </div>
+    <div class="foot"><span></span><div><span class="btn2">Más tarde</span><span class="btn"><span class="shield"></span>Actualizar</span></div></div>
+  </div></div>
+
+</div>
+
+<div class="spec">
+  <div><b>Movimiento</b>Al cambiar de paso, el contenido sale 12px a la izquierda con fundido (140ms) y el nuevo entra desde la derecha (180ms, ease-out). El pie de la ventana no se mueve.</div>
+  <div><b>Progreso</b>El porcentaje real viene de MSI y la barra lo interpola sin saltos. El texto de estado es el ActionText de MSI traducido y cambia con un fundido.</div>
+  <div><b>Detalles de Windows</b>Escudo UAC en el botón que eleva. Enter pulsa el botón primario y Esc equivale a Atrás o Cancelar. Barra de título de 32px como notty. Sigue el tema claro u oscuro del sistema.</div>
+  <div><b>El ✓</b>Se dibuja con un trazo animado (600ms) al terminar. Es la única animación "de celebración", sin confeti.</div>
+</div>

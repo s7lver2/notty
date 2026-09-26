@@ -1,0 +1,156 @@
+<style>
+  .stage{display:flex;justify-content:center;padding:10px 0 4px}
+  .win{width:760px;height:480px;background:#202124;border:1px solid #34353a;border-radius:8px;overflow:hidden;font-family:"Segoe UI Variable Text","Segoe UI",sans-serif;color:#e5e6e8;font-size:13px;box-shadow:0 1px 2px rgba(0,0,0,.3),0 12px 40px rgba(0,0,0,.4);display:flex;flex-direction:column}
+  .tb{height:32px;flex:none;display:flex;align-items:center;justify-content:space-between;padding-left:12px;font-size:12px;color:#a9aaad}
+  .tb .btns{display:flex;height:100%}.tb .btns span{width:46px;display:flex;align-items:center;justify-content:center;color:#8a8b8e;font-size:11px}
+  .main{flex:1;display:flex;min-height:0}
+  /* rail de pasos */
+  .rail{width:168px;flex:none;padding:18px 0 0 18px;position:relative}
+  .st{display:flex;align-items:center;gap:10px;height:34px;color:#8a8b8e;position:relative;z-index:1;transition:color .2s}
+  .st i{width:8px;height:8px;border-radius:4px;border:1.5px solid #55565b;background:#202124;transition:all .25s}
+  .st.done{color:#a9aaad}.st.done i{background:#73b6fa;border-color:#73b6fa}
+  .st.on{color:#e5e6e8;font-weight:600}.st.on i{border-color:#73b6fa;box-shadow:0 0 0 3px rgba(115,182,250,.18)}
+  .track{position:absolute;left:21.5px;top:35px;width:1.5px;height:102px;background:#34353a}
+  .track b{display:block;width:100%;height:34%;background:#73b6fa;transition:height .4s cubic-bezier(.3,0,.2,1)}
+  /* columna de opciones */
+  .opts{flex:1;overflow:auto;padding:16px 16px 16px 4px;min-width:0}
+  h4{font-family:"Segoe UI Variable Display","Segoe UI",sans-serif;font-size:20px;font-weight:600;margin:0 0 4px;letter-spacing:-.2px}
+  .sub{color:#a9aaad;margin:0 0 14px}
+  .grp{background:#28292c;border:1px solid #303136;border-radius:6px;margin-bottom:6px;overflow:hidden;transition:background .15s}
+  .grp:hover{background:#2c2d31}
+  .gh{display:flex;align-items:center;gap:12px;padding:11px 14px;cursor:pointer;user-select:none}
+  .gic{width:28px;height:28px;flex:none;display:flex;align-items:center;justify-content:center;color:#a9aaad}
+  .gh .t{flex:1}.gh .t small{display:block;color:#8a8b8e;font-size:11.5px;margin-top:1px}
+  .cnt{font-size:11.5px;color:#a9aaad;font-variant-numeric:tabular-nums;transition:opacity .15s}
+  .chev{width:10px;height:10px;border:solid #a9aaad;border-width:0 1.5px 1.5px 0;transform:rotate(45deg) translate(-2px,-2px);transition:transform .22s cubic-bezier(.3,0,.2,1);margin:0 4px 0 8px}
+  .grp.open .chev{transform:rotate(-135deg) translate(-2px,-2px)}
+  .gb{display:grid;grid-template-rows:0fr;transition:grid-template-rows .26s cubic-bezier(.3,0,.2,1)}
+  .grp.open .gb{grid-template-rows:1fr}
+  .gb>div{overflow:hidden}
+  .it{display:flex;align-items:center;gap:12px;padding:9px 14px 9px 54px;border-top:1px solid #303136;opacity:0;transform:translateY(-4px);transition:opacity .2s,transform .2s,background .12s;cursor:pointer}
+  .grp.open .it{opacity:1;transform:none}
+  .grp.open .it:nth-child(2){transition-delay:.03s}.grp.open .it:nth-child(3){transition-delay:.06s}.grp.open .it:nth-child(4){transition-delay:.09s}
+  .it:hover{background:#2f3034}
+  .it .t{flex:1}.it .t small{display:block;color:#8a8b8e;font-size:11.5px;margin-top:1px}
+  /* toggle estilo Windows 11 */
+  .tg{width:38px;height:20px;border-radius:10px;border:1px solid #8a8b8e;position:relative;flex:none;transition:background .18s,border-color .18s}
+  .tg::after{content:"";position:absolute;top:3px;left:3px;width:12px;height:12px;border-radius:6px;background:#c9cacd;transition:left .2s cubic-bezier(.3,0,.2,1),width .12s,background .18s}
+  .it:active .tg::after{width:15px}
+  .tg.on{background:#73b6fa;border-color:#73b6fa}.tg.on::after{left:21px;background:#0e1216}
+  /* vista previa en vivo */
+  .prev{width:236px;flex:none;border-left:1px solid #2c2d31;background:#1b1c1e;padding:16px;display:flex;flex-direction:column;gap:10px}
+  .pl{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#8a8b8e}
+  .canvas{flex:1;border-radius:6px;background:#141517;border:1px solid #2a2b2f;position:relative;overflow:hidden}
+  .scene{position:absolute;inset:0;opacity:0;transform:scale(.97);transition:opacity .25s,transform .3s cubic-bezier(.3,0,.2,1);padding:14px;font-size:11.5px}
+  .scene.on{opacity:1;transform:none}
+  .pcap{font-size:12px;color:#a9aaad;line-height:1.5;min-height:54px}
+  .file{display:flex;align-items:center;gap:6px;padding:4px 6px;border-radius:3px;color:#c9cacd}
+  .file.sel{background:#2a3a4d}
+  .ctx{position:absolute;left:58px;top:52px;width:140px;background:#2b2c30;border:1px solid #3a3b40;border-radius:6px;padding:4px;box-shadow:0 6px 18px rgba(0,0,0,.45);animation:pop .3s cubic-bezier(.3,0,.2,1)}
+  .ctx div{padding:4px 8px;border-radius:3px;color:#c9cacd}.ctx .hl{background:#3a3b40;color:#e5e6e8}
+  @keyframes pop{from{opacity:0;transform:translateY(-6px) scale(.97)}}
+  .term{font-family:"Cascadia Mono",Consolas,monospace;font-size:11px;color:#c9cacd;line-height:1.7}
+  .term .c{display:inline-block;width:6px;height:12px;background:#c9cacd;vertical-align:-2px;animation:bl 1s steps(1) infinite}
+  @keyframes bl{50%{opacity:0}}
+  .typed{display:inline-block;overflow:hidden;white-space:nowrap;vertical-align:bottom;animation:ty 1.4s steps(14) infinite alternate}
+  @keyframes ty{from{width:0}to{width:14ch}}
+  .arrow{color:#73b6fa}
+  .foot{flex:none;display:flex;justify-content:space-between;align-items:center;padding:12px 18px;background:#1b1c1e;border-top:1px solid #2c2d31}
+  .btn{padding:6px 18px;border-radius:4px;background:#73b6fa;color:#0e1216;font-weight:600;font-size:12.5px;display:inline-flex;gap:7px;align-items:center;border:1px solid #8cc4fb}
+  .btn2{padding:6px 16px;border-radius:4px;background:#2d2e32;border:1px solid #3a3b40;font-size:12.5px;margin-right:6px}
+  .shield{width:10px;height:12px;background:#0e1216;clip-path:polygon(50% 0,100% 18%,100% 55%,50% 100%,0 55%,0 18%);opacity:.85}
+  .notes{margin-top:22px;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px 28px;font-size:13px;line-height:1.55}
+  .notes b{display:block;margin-bottom:2px}
+</style>
+
+<h2>Opciones en grupos desplegables + vista previa en vivo</h2>
+<p class="subtitle">Es interactivo: abre y cierra los grupos, activa y desactiva opciones, y pasa el ratón por encima de cada una para ver su vista previa.</p>
+
+<div class="stage"><div class="win">
+  <div class="tb"><span>Instalar notty</span><span class="btns"><span>—</span><span>✕</span></span></div>
+  <div class="main">
+    <div class="rail">
+      <div class="track"><b id="trk"></b></div>
+      <div class="st done"><i></i>Bienvenida</div>
+      <div class="st on"><i></i>Opciones</div>
+      <div class="st"><i></i>Instalar</div>
+      <div class="st"><i></i>Listo</div>
+    </div>
+    <div class="opts">
+      <h4>Opciones</h4>
+      <p class="sub">Todo se puede cambiar después desde Ajustes.</p>
+
+      <div class="grp open">
+        <div class="gh"><span class="gic"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="2" y="3" width="14" height="11" rx="1.5"/><path d="M2 6h14"/></svg></span>
+          <span class="t">Integración con Windows<small>Bloc de notas, menú contextual, terminal</small></span><span class="cnt"></span><span class="chev"></span></div>
+        <div class="gb"><div>
+          <div class="it" data-s="notepad"><span class="t">Sustituir el Bloc de notas<small>"notepad" abre notty · el original queda como notepad_legacy</small></span><span class="tg on"></span></div>
+          <div class="it" data-s="ctx"><span class="t">"Abrir con notty" en el menú contextual</span><span class="tg on"></span></div>
+          <div class="it" data-s="path"><span class="t">Usar notty desde la terminal<small>Añade notty al PATH</small></span><span class="tg on"></span></div>
+        </div></div>
+      </div>
+
+      <div class="grp">
+        <div class="gh"><span class="gic"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M4 2h7l3 3v11H4z"/><path d="M11 2v3h3"/></svg></span>
+          <span class="t">Tipos de archivo<small>Qué archivos ofrece abrir notty</small></span><span class="cnt"></span><span class="chev"></span></div>
+        <div class="gb"><div>
+          <div class="it" data-s="assoc"><span class="t">Texto plano<small>.txt · .log · .text</small></span><span class="tg on"></span></div>
+          <div class="it" data-s="assoc"><span class="t">Configuración<small>.ini · .cfg · .conf · .toml</small></span><span class="tg on"></span></div>
+          <div class="it" data-s="assoc"><span class="t">Markdown<small>.md · .markdown</small></span><span class="tg on"></span></div>
+          <div class="it" data-s="assoc"><span class="t">Código y datos<small>.json · .xml · .csv · .yaml</small></span><span class="tg"></span></div>
+        </div></div>
+      </div>
+
+      <div class="grp">
+        <div class="gh"><span class="gic"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M9 3v8M5.5 7.5L9 11l3.5-3.5M3 14h12"/></svg></span>
+          <span class="t">Accesos directos</span><span class="cnt"></span><span class="chev"></span></div>
+        <div class="gb"><div>
+          <div class="it" data-s="start"><span class="t">Menú Inicio</span><span class="tg on"></span></div>
+          <div class="it" data-s="start"><span class="t">Escritorio</span><span class="tg"></span></div>
+        </div></div>
+      </div>
+
+      <div class="grp">
+        <div class="gh"><span class="gic"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="9" cy="9" r="2.5"/><path d="M9 1.8v2.4M9 13.8v2.4M1.8 9h2.4M13.8 9h2.4M3.9 3.9l1.7 1.7M12.4 12.4l1.7 1.7M3.9 14.1l1.7-1.7M12.4 5.6l1.7-1.7"/></svg></span>
+          <span class="t">Avanzado<small>Carpeta de instalación</small></span><span class="cnt" style="display:none"></span><span class="chev"></span></div>
+        <div class="gb"><div>
+          <div class="it" data-s="dir" style="cursor:default"><span class="t" style="font-family:Cascadia Mono,Consolas,monospace;font-size:12px">C:\Program Files\notty</span><span style="color:#73b6fa;font-size:12px">Cambiar…</span></div>
+        </div></div>
+      </div>
+    </div>
+
+    <div class="prev">
+      <div class="pl">Vista previa</div>
+      <div class="canvas">
+        <div class="scene on" id="s-notepad"><div class="term">C:\&gt; <span class="typed">notepad notas</span><br><span class="arrow">→</span> se abre <b style="color:#e5e6e8">notty</b><br><br>C:\&gt; notepad_legacy<br><span class="arrow">→</span> Bloc de notas original<span class="c"></span></div></div>
+        <div class="scene" id="s-ctx"><div class="file">📄 lista.txt</div><div class="file sel">📄 notas.txt</div><div class="file">📄 ideas.md</div>
+          <div class="ctx"><div>Abrir</div><div class="hl">Abrir con notty</div><div>Copiar ruta</div><div>Propiedades</div></div></div>
+        <div class="scene" id="s-path"><div class="term">PS&gt; <span class="typed">notty .\app.log</span><br><span class="arrow">→</span> abierto en una pestaña nueva<span class="c"></span></div></div>
+        <div class="scene" id="s-assoc"><div class="file">📄 readme.md <span style="margin-left:auto;color:#73b6fa">notty</span></div><div class="file">⚙ app.ini <span style="margin-left:auto;color:#73b6fa">notty</span></div><div class="file">📄 build.log <span style="margin-left:auto;color:#73b6fa">notty</span></div><div class="file" style="opacity:.45">{ } data.json <span style="margin-left:auto">—</span></div></div>
+        <div class="scene" id="s-start"><div style="background:#26272b;border-radius:6px;padding:10px;margin-top:30px"><div style="color:#8a8b8e;font-size:10.5px;margin-bottom:6px">Anclado</div><div class="file sel" style="animation:pop .4s">▤ notty</div><div class="file">▤ Terminal</div></div></div>
+        <div class="scene" id="s-dir"><div class="term" style="color:#8a8b8e">C:\Program Files\notty\<br>&nbsp; notty.exe<br>&nbsp; notepad_legacy.exe</div></div>
+      </div>
+      <div class="pcap" id="pcap">Escribir "notepad" en cualquier sitio abrirá notty. El Bloc de notas original sigue disponible.</div>
+    </div>
+  </div>
+  <div class="foot"><span style="color:#8a8b8e;font-size:12px">2,3 MB</span><div><span class="btn2">Atrás</span><span class="btn"><span class="shield"></span>Instalar</span></div></div>
+</div></div>
+
+<div class="notes">
+  <div><b>Grupos</b>Son expanders como los de Ajustes de Windows 11. La altura se anima con grid-rows (260ms), el chevron gira y los hijos entran escalonados, 30ms cada uno. La cabecera muestra un resumen en vivo del tipo "2 de 3".</div>
+  <div><b>Vista previa en vivo</b>Es un panel lateral que ilustra la opción bajo el ratón: terminal escribiendo, menú contextual apareciendo, asociaciones... Cambia de escena con fundido y escala.</div>
+  <div><b>Carril de pasos</b>A la izquierda, con una línea de progreso que se rellena al avanzar. En "Instalar", esa línea y la barra de progreso real van sincronizadas.</div>
+  <div><b>Escalable</b>Para una opción nueva basta con añadir una fila y, si quieres, una escena. Los grupos absorben el crecimiento sin cambiar el tamaño de la ventana.</div>
+</div>
+
+<script>
+(function(){
+  const caps={notepad:'Escribir "notepad" en cualquier sitio abrirá notty. El Bloc de notas original sigue disponible.',ctx:'Clic derecho sobre cualquier archivo → Abrir con notty. En Windows 11, dentro de "Mostrar más opciones".',path:'Escribe notty seguido de un archivo desde cmd o PowerShell.',assoc:'notty aparecerá en "Abrir con" para estos tipos. Al terminar podrás elegirlo como predeterminado.',start:'notty aparece en la lista de aplicaciones del menú Inicio.',dir:'Dónde se copian los archivos. Hace falta una carpeta con permisos de administrador.'};
+  function count(g){const t=g.querySelectorAll('.tg'),c=g.querySelector('.cnt');if(!t.length||!c)return;const on=[...t].filter(x=>x.classList.contains('on')).length;c.style.opacity=0;setTimeout(()=>{c.textContent=on+' de '+t.length;c.style.opacity=1},120)}
+  document.querySelectorAll('.grp').forEach(g=>{count(g);g.querySelector('.gh').onclick=()=>g.classList.toggle('open')});
+  document.querySelectorAll('.it').forEach(it=>{
+    it.addEventListener('mouseenter',()=>{const s=it.dataset.s;document.querySelectorAll('.scene').forEach(x=>x.classList.toggle('on',x.id==='s-'+s));document.getElementById('pcap').textContent=caps[s]||''});
+    const tg=it.querySelector('.tg');if(tg)it.onclick=()=>{tg.classList.toggle('on');count(it.closest('.grp'))};
+  });
+})();
+</script>
