@@ -76,6 +76,10 @@ pub struct UiConfig {
     /// ruta de abajo. `^O` dentro de la línea de ruta ya lo ofrece siempre como
     /// alternativa puntual; esto lo hace el camino por defecto.
     pub native_file_dialog: bool,
+    /// Colorea el código (tree-sitter) en los archivos con extensión conocida.
+    /// Encendido por defecto: en un `.txt` no cambia nada, y en código es lo que
+    /// cualquiera espera ver al abrirlo.
+    pub syntax_highlight: bool,
 }
 
 impl Default for UiConfig {
@@ -94,6 +98,7 @@ impl Default for UiConfig {
             font_scale: 1.0,
             suggestion_icons: true,
             native_file_dialog: false,
+            syntax_highlight: true,
         };
         let preset = ui.preset;
         crate::apply_preset(&mut ui, preset);
@@ -284,6 +289,15 @@ mod tests {
         let text = toml::to_string(&cfg).unwrap();
         let back: Config = toml::from_str(&text).unwrap();
         assert_eq!(back.ui.font_scale, 1.3);
+    }
+
+    #[test]
+    fn syntax_highlight_defaults_to_on_and_round_trips() {
+        assert!(UiConfig::default().syntax_highlight);
+        let cfg = Config { ui: UiConfig { syntax_highlight: false, ..UiConfig::default() }, ..Config::default() };
+        let text = toml::to_string(&cfg).unwrap();
+        let back: Config = toml::from_str(&text).unwrap();
+        assert!(!back.ui.syntax_highlight);
     }
 
     #[test]
