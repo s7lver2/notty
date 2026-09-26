@@ -324,6 +324,15 @@ impl Renderer {
         }
     }
 
+    /// `BeginDraw` sin `Clear`: para pintar una capa por encima de lo que ya se
+    /// dibujó en el `paint()` normal de esta misma pasada (el recorrido guiado,
+    /// ver `tour.rs`), en vez de repetir todo el dibujo del documento.
+    pub(crate) fn begin_overlay(&self) {
+        unsafe {
+            self.target.BeginDraw();
+        }
+    }
+
     pub(crate) fn end_paint(&self) {
         unsafe {
             let _ = self.target.EndDraw(None, None);
@@ -516,6 +525,15 @@ impl Renderer {
         let gutter_w =
             if ui.line_numbers && !is_raw { layout::gutter_width(total_lines, self.digit_width()) } else { 0.0 };
         (frame.body, gutter_w)
+    }
+
+    /// El `Frame` completo (todas las franjas, no solo `body`) para el tamaño y
+    /// config actuales: lo usa `tour.rs` para saber dónde está cada elemento
+    /// señalado, sin repetir la resolución de `Bands` que ya hace `paint`.
+    pub fn current_frame(&self, ui: &UiConfig, doc_count: usize, menu_bar_visible: bool) -> layout::Frame {
+        let (w, h) = self.size_dips();
+        let bands = Self::resolve_bands(ui, doc_count, menu_bar_visible);
+        layout::frame(w, h, bands)
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {

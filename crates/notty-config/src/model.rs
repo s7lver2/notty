@@ -131,12 +131,32 @@ impl Default for HotkeyConfig {
     }
 }
 
+/// Nota: este tipo mínimo (solo `check`) es lo que el paso "Privacidad" de
+/// `welcome_window` necesita. El plan de actualizaciones (que corre en paralelo, en
+/// otro árbol de trabajo) puede añadir más campos a esta misma tabla — se resolverá
+/// en la fusión manual entre los tres planes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UpdatesConfig {
+    /// Si notty consulta (una vez al día, sin identificadores) si hay versión nueva
+    /// en GitHub. Apagado por defecto: la única forma de encenderlo son el paso
+    /// Privacidad de `welcome_window` o Ajustes → Acerca de.
+    pub check: bool,
+}
+
+impl Default for UpdatesConfig {
+    fn default() -> Self {
+        Self { check: false }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub ui: UiConfig,
     pub files: FilesConfig,
     pub hotkey: HotkeyConfig,
+    pub updates: UpdatesConfig,
     /// Si la ventana de bienvenida (`welcome_window`) ya se mostró una vez. No se
     /// repite sola nunca más; solo vuelve a verse desde Ajustes → Ayuda si el usuario
     /// lo pide expresamente (eso arranca el recorrido directamente, no esta ventana).
@@ -147,6 +167,20 @@ pub struct Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn updates_config_defaults_to_check_disabled() {
+        assert!(!UpdatesConfig::default().check);
+        assert!(!Config::default().updates.check);
+    }
+
+    #[test]
+    fn updates_check_round_trips_through_toml() {
+        let cfg = Config { updates: UpdatesConfig { check: true }, ..Config::default() };
+        let s = toml::to_string_pretty(&cfg).unwrap();
+        let back: Config = toml::from_str(&s).unwrap();
+        assert!(back.updates.check);
+    }
 
     #[test]
     fn first_run_done_defaults_to_false() {

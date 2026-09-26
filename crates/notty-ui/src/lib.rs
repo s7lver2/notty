@@ -17,10 +17,13 @@ pub mod render;
 mod search_prompt;
 pub mod settings_model;
 pub mod settings_window;
+pub mod step_rail;
 mod theme;
+pub mod tour;
 mod viewport;
 mod vim;
 mod vim_cmd;
+pub mod welcome_window;
 pub mod window;
 pub mod workspace;
 
