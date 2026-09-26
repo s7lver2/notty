@@ -304,7 +304,9 @@ fn continue_close(w: &mut WindowState, hwnd: HWND, mut req: crate::CloseRequest)
         unsafe { update_title(hwnd, w.ws.active()) };
         return;
     }
-    w.ws.close_prompt();
+    if matches!(w.ws.prompt, crate::Prompt::CloseUnsaved(_)) {
+        w.ws.close_prompt();
+    }
     let to_recover = w.ws.iter().filter(|st| req.recover.contains(&st.id));
     if let Err(e) = dump_docs_to_recovery(to_recover) {
         show_notice(w, hwnd, format!("No se pudo guardar para recuperar: {e}"));
@@ -867,10 +869,30 @@ fn try_save(w: &mut WindowState) -> SaveOutcome {
     }
     let st = w.ws.active_mut();
     st.autosave_failed_rev = None;
+    st.autosave_paused = false;
     if let Some(path) = st.path.clone() {
         st.open_mtime = notty_io::mtime(&path).ok();
     }
     SaveOutcome::Saved
+}
+
+/// Una pregunta que no puede esperar (conflicto al autoguardar): se cierran menús y,
+/// si la ventana no está delante, parpadea en la barra de tareas.
+fn claim_attention(w: &mut WindowState, hwnd: HWND) {
+    close_menus(w);
+    if !w.active_window {
+        use windows::Win32::UI::WindowsAndMessaging::{FLASHW_ALL, FLASHW_TIMERNOFG, FLASHWINFO, FlashWindowEx};
+        let info = FLASHWINFO {
+            cbSize: std::mem::size_of::<FLASHWINFO>() as u32,
+            hwnd,
+            dwFlags: FLASHW_ALL | FLASHW_TIMERNOFG,
+            uCount: 0,
+            dwTimeout: 0,
+        };
+        unsafe {
+            let _ = FlashWindowEx(&info);
+        }
+    }
 }
 
 enum SaveOutcome {
@@ -901,20 +923,24 @@ fn autosave_tick(w: &mut WindowState, hwnd: HWND) {
     if !w.cfg.borrow().files.autosave {
         return;
     }
-    if matches!(w.ws.prompt, crate::Prompt::Conflict) {
+    if matches!(w.ws.prompt, crate::Prompt::Conflict(_)) {
         return;
     }
     let st = w.ws.active();
     let has_real_path = st.path.is_some() && !matches!(st.temp, Some(notty_config::TempMode::Volatile));
     let already_failed = st.autosave_failed_rev == Some(st.doc.revision());
-    if has_real_path && st.doc.is_dirty() && !already_failed {
-        if let SaveOutcome::Failed(e) = try_save(w) {
-            let st = w.ws.active_mut();
-            let first = st.autosave_failed_rev.is_none();
-            st.autosave_failed_rev = Some(st.doc.revision());
-            if first {
-                show_notice(w, hwnd, format!("No se pudo autoguardar: {e}"));
+    if has_real_path && st.doc.is_dirty() && !already_failed && !st.autosave_paused {
+        match try_save(w) {
+            SaveOutcome::Failed(e) => {
+                let st = w.ws.active_mut();
+                let first = st.autosave_failed_rev.is_none();
+                st.autosave_failed_rev = Some(st.doc.revision());
+                if first {
+                    show_notice(w, hwnd, format!("No se pudo autoguardar: {e}"));
+                }
             }
+            SaveOutcome::Conflict => claim_attention(w, hwnd),
+            SaveOutcome::Saved => {}
         }
     }
     refresh_recovery(w);
@@ -1210,38 +1236,57 @@ fn about_content(repo: &str) -> crate::AboutContent {
     crate::AboutContent { version: crate::app_version().to_string(), url }
 }
 
-/// Resuelve `Prompt::Conflict`: `M` conserva lo escrito en notty y lo guarda, `D`
-/// descarta los cambios locales y recarga lo que hay en disco. Cualquier otra tecla
-/// no hace nada (Esc ya se maneja antes, en `handle_prompt_keydown`).
+/// Teclas de `Prompt::Conflict`: se escribe SI o NO y Enter; Esc cancela y deja el
+/// autoguardado de ese documento en pausa hasta el próximo guardado a mano.
 fn handle_conflict_key(w: &mut WindowState, hwnd: HWND, vk: u32) {
+    let crate::Prompt::Conflict(c) = &mut w.ws.prompt else { return };
+    let now = std::time::Instant::now();
     match vk {
-        0x4D => {
-            // M: el mío.
-            match w.ws.active_mut().save() {
-                Ok(()) => {
-                    let st = w.ws.active_mut();
-                    st.autosave_failed_rev = None;
-                    if let Some(path) = st.path.clone() {
-                        st.open_mtime = notty_io::mtime(&path).ok();
+        0x08 => c.backspace(),
+        0x1B => {
+            let id = c.doc;
+            w.ws.close_prompt();
+            if let Some(st) = w.ws.index_of(id).and_then(|i| w.ws.get_mut(i)) {
+                st.autosave_paused = true;
+                show_notice(w, hwnd, "Autoguardado en pausa hasta que guardes a mano");
+            }
+        }
+        0x0D if c.accepts_input(now) => {
+            let (id, answer) = (c.doc, c.answer());
+            if answer == crate::ConflictAnswer::Invalid {
+                c.invalid = true;
+                c.input.clear();
+                return;
+            }
+            w.ws.close_prompt();
+            let Some(idx) = w.ws.index_of(id) else { return };
+            let Some(st) = w.ws.get_mut(idx) else { return };
+            match answer {
+                crate::ConflictAnswer::KeepMine => match st.save() {
+                    Ok(()) => {
+                        st.autosave_failed_rev = None;
+                        st.autosave_paused = false;
+                        st.open_mtime = st.path.as_deref().and_then(|p| notty_io::mtime(p).ok());
+                    }
+                    Err(e) => show_notice(w, hwnd, format!("No se pudo guardar: {e}")),
+                },
+                crate::ConflictAnswer::UseDisk => {
+                    let reopened = st.path.clone().map(|p| (crate::open_as_document(&p), p));
+                    match reopened {
+                        Some((Ok(opened), path)) => {
+                            st.doc = opened.document;
+                            st.encoding = opened.encoding;
+                            st.eol = opened.eol;
+                            st.open_mtime = notty_io::mtime(&path).ok();
+                            st.lossy_source = opened.lossy.then(|| path.clone());
+                            st.autosave_paused = false;
+                        }
+                        Some((Err(e), _)) => show_notice(w, hwnd, format!("No se pudo leer el archivo: {e}")),
+                        None => {}
                     }
                 }
-                Err(e) => show_notice(w, hwnd, format!("No se pudo guardar: {e}")),
+                crate::ConflictAnswer::Invalid => {}
             }
-            w.ws.close_prompt();
-        }
-        0x44 => {
-            // D: el del disco.
-            if let Some(path) = w.ws.active().path.clone() {
-                if let Ok(opened) = crate::open_as_document(&path) {
-                    let st = w.ws.active_mut();
-                    st.doc = opened.document;
-                    st.encoding = opened.encoding;
-                    st.eol = opened.eol;
-                    st.open_mtime = notty_io::mtime(&path).ok();
-                    st.lossy_source = opened.lossy.then(|| path.clone());
-                }
-            }
-            w.ws.close_prompt();
         }
         _ => {}
     }
@@ -2914,6 +2959,10 @@ fn handle_prompt_keydown(w: &mut WindowState, hwnd: HWND, vk: u32, mods: Modifie
             return;
         }
     }
+    if matches!(w.ws.prompt, crate::Prompt::Conflict(_)) {
+        handle_conflict_key(w, hwnd, vk);
+        return;
+    }
     // Esc cierra cualquier prompt.
     if vk == 0x1B {
         w.ws.close_prompt();
@@ -2925,8 +2974,6 @@ fn handle_prompt_keydown(w: &mut WindowState, hwnd: HWND, vk: u32, mods: Modifie
         handle_search_key(w, vk, mods);
     } else if matches!(w.ws.prompt, crate::Prompt::VimCmdline(_)) {
         handle_vim_cmdline_key(w, hwnd, vk);
-    } else if matches!(w.ws.prompt, crate::Prompt::Conflict) {
-        handle_conflict_key(w, hwnd, vk);
     }
 }
 
@@ -2942,6 +2989,8 @@ fn handle_prompt_char(w: &mut WindowState, ch: char) {
         }
     } else if matches!(w.ws.prompt, crate::Prompt::Find(_) | crate::Prompt::Replace(_)) {
         handle_search_char(w, ch);
+    } else if let crate::Prompt::Conflict(c) = &mut w.ws.prompt {
+        c.type_char(ch, std::time::Instant::now());
     }
 }
 

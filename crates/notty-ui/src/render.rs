@@ -2274,14 +2274,35 @@ impl Renderer {
                     self.text(line, &self.fonts.mono_12_5, Rect::new(fx, r.top, r.right - layout::STATUS_PAD_X, r.bottom), pal.text);
                 }
                 crate::Prompt::CloseUnsaved(req) => self.draw_close_prompt(req, pal, r, view),
-                crate::Prompt::Conflict => {
-                    let msg = "El archivo cambió en disco. [M] guardar el mío   [D] usar el del disco   [Esc] cancelar";
-                    let x = r.left + layout::STATUS_PAD_X;
-                    self.text(msg, &self.fonts.ui_11_5, Rect::new(x, r.top, r.right - layout::STATUS_PAD_X, r.bottom), pal.danger);
-                }
+                crate::Prompt::Conflict(c) => self.draw_conflict_prompt(c, pal, r),
                 crate::Prompt::None => {}
             }
         }
+    }
+
+    /// "El archivo cambió en disco": franja en rojo suave con un campo donde escribir
+    /// SI o NO (ver `ConflictState`).
+    fn draw_conflict_prompt(&mut self, c: &crate::ConflictState, pal: &theme::Palette, r: Rect) {
+        self.fill(r, pal.danger.faded(0.12));
+        let field_w = 70.0;
+        let fr = Rect::new(r.right - layout::STATUS_PAD_X - field_w, r.top + 3.0, r.right - layout::STATUS_PAD_X, r.bottom - 3.0);
+        self.fill_round(fr, 4.0, pal.surface);
+        self.stroke_round_rect(fr, 4.0, 1.0, pal.danger);
+        let tw = self.measure(&c.input, &self.fonts.mono_12_5);
+        let tx = fr.left + 8.0;
+        self.text(&c.input, &self.fonts.mono_12_5, Rect::new(tx, r.top, fr.right - 4.0, r.bottom), pal.text);
+        let caret_x = (tx + tw).min(fr.right - 4.0);
+        self.fill(Rect::new(caret_x, r.top + 6.0, caret_x + 1.0, r.bottom - 6.0), pal.text);
+        let msg = if c.invalid {
+            "Escribe SI o NO y pulsa Enter · Esc cancela".to_string()
+        } else {
+            format!("«{}» cambió en disco · SI + Enter guarda el tuyo encima · NO + Enter carga el del disco · Esc cancela", c.name)
+        };
+        let x = r.left + layout::STATUS_PAD_X;
+        let right = (fr.left - 10.0).max(x);
+        self.push_clip(Rect::new(x, r.top, right, r.bottom));
+        self.text(&msg, &self.fonts.ui_11_5, Rect::new(x, r.top, right, r.bottom), pal.danger);
+        self.pop_clip();
     }
 
     /// "«nombre» tiene cambios sin guardar" con tres botones, como "Ya existe".
