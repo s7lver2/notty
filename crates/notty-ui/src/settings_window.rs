@@ -667,11 +667,7 @@ fn paint(st: &mut State) {
         // Posición final (sin desplazar): la usada para el hit-testing, que no anima.
         let dd = Rect::new(box_r.left, box_r.bottom + 2.0, box_r.right, box_r.bottom + 2.0 + dd_h);
         let draw_dd = Rect::new(dd.left, draw_y(dd.top), dd.right, draw_y(dd.bottom));
-        r.fill_round(
-            Rect::new(draw_dd.left - 2.0, draw_dd.top - 2.0, draw_dd.right + 2.0, draw_dd.bottom + 2.0),
-            10.0,
-            pal.shadow.faded(st_t),
-        );
+        r.draw_popup_shadow(draw_dd, 8.0, st_t, pal.shadow);
         r.fill_round(draw_dd, 8.0, pal.chrome_hi.faded(st_t));
         r.stroke_round_rect(draw_dd, 8.0, 1.0, pal.shadow_ring.faded(st_t));
         let mut oy = dd.top + 4.0;

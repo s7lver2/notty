@@ -378,6 +378,28 @@ impl Renderer {
         }
     }
 
+    /// Sombra difusa bajo un popup (desplegable de menú, sugerencias, `Select`): en vez
+    /// de un único rect 2px más grande y opaco (que se veía como un anillo negro duro
+    /// pegado al borde), varias capas cada vez más grandes/tenues y desplazadas hacia
+    /// abajo, como la sombra real de una ventana flotante en vez de un contorno plano.
+    pub(crate) fn draw_popup_shadow(&self, r: Rect, radius: f32, fade: f32, shadow: Rgba) {
+        const LAYERS: [(f32, f32, f32); 4] = [
+            // (desplazamiento en Y, crecimiento del rect, multiplicador de alpha)
+            (1.0, 1.0, 0.5),
+            (2.0, 3.0, 0.32),
+            (4.0, 6.0, 0.18),
+            (7.0, 10.0, 0.10),
+        ];
+        for (dy, grow, alpha_mul) in LAYERS {
+            let c = Rgba(shadow.0, shadow.1, shadow.2, shadow.3 * alpha_mul);
+            self.fill_round(
+                Rect::new(r.left - grow, r.top - grow + dy, r.right + grow, r.bottom + grow + dy),
+                radius + grow,
+                c.faded(fade),
+            );
+        }
+    }
+
     #[allow(dead_code)]
     pub(crate) fn stroke_line(&self, x0: f32, y0: f32, x1: f32, y1: f32, width: f32, c: Rgba) {
         unsafe {
@@ -680,12 +702,26 @@ impl Renderer {
 
                 if head >= start && head <= text_end {
                     let x = if let Some(l) = text_layout.as_ref() { hit_test_x(l, &text, head - start, text_pad) } else { text_pad };
-                    let caret_color = if state.vim.as_ref().is_some_and(|v| v.mode == crate::VimMode::Normal) {
-                        pal.accent
+                    // Normal/Visual dibujan un cursor de bloque (como una terminal vim de
+                    // verdad) en vez de la misma barrita de 1px que Insert: así se nota de
+                    // un vistazo en qué modo estás sin tener que leer "-- NORMAL --" en la
+                    // barra de estado, que es lo que hacía que teclear "asd" en Normal
+                    // pareciera un bug quieto (entras en Insert con "a" y no se notaba).
+                    let block = state
+                        .vim
+                        .as_ref()
+                        .is_some_and(|v| matches!(v.mode, crate::VimMode::Normal | crate::VimMode::Visual));
+                    if block {
+                        let x1 = if head < text_end {
+                            text_layout.as_ref().map(|l| hit_test_x(l, &text, head + 1 - start, text_pad)).unwrap_or(x + 8.0)
+                        } else {
+                            x + 8.0
+                        };
+                        self.fill(Rect::new(x, y, x1.max(x + 2.0), y + layout::LINE_H), pal.accent_soft);
+                        self.stroke_rect(Rect::new(x, y, x1.max(x + 2.0), y + layout::LINE_H), 1.0, pal.accent);
                     } else {
-                        pal.text
-                    };
-                    self.fill(Rect::new(x, y, x + 1.0, y + layout::LINE_H), caret_color);
+                        self.fill(Rect::new(x, y, x + 1.0, y + layout::LINE_H), pal.text);
+                    }
                 }
 
                 y += layout::LINE_H;
@@ -866,11 +902,7 @@ impl Renderer {
             let box_r = Rect::new(x, top, x + width, top + height);
             let draw_r = Rect::new(box_r.left, draw_y(box_r.top), box_r.right, draw_y(box_r.bottom));
 
-            self.fill_round(
-                Rect::new(draw_r.left - 2.0, draw_r.top - 2.0, draw_r.right + 2.0, draw_r.bottom + 2.0),
-                layout::POPUP_RADIUS + 2.0,
-                pal.shadow.faded(t),
-            );
+            self.draw_popup_shadow(draw_r, layout::POPUP_RADIUS, t, pal.shadow);
             self.fill_round(draw_r, layout::POPUP_RADIUS, pal.chrome_hi.faded(t));
             self.stroke_round_rect(draw_r, layout::POPUP_RADIUS, 1.0, pal.shadow_ring.faded(t));
 
@@ -1227,9 +1259,8 @@ impl Renderer {
     /// primer `entry` visible (para que los clics y el resaltado apunten al candidato
     /// real dentro de la lista completa, no a la posición dentro de la ventana visible).
     /// Con más candidatos que caben, un contador "3/12" avisa de que hay más y que se
-    /// puede seguir con el scroll. Aproxima la sombra difusa de la maqueta con un borde
-    /// de 1 px en `shadow_ring` en vez de los 4 anillos concéntricos exactos (desviación
-    /// menor por tiempo: el resultado es legible y del color correcto, pero menos difuso).
+    /// puede seguir con el scroll. La sombra difusa se aproxima con `draw_popup_shadow`
+    /// (varias capas desplazadas hacia abajo) más un anillo de 1 px en `shadow_ring`.
     #[allow(unused_unsafe, clippy::too_many_arguments)]
     unsafe fn draw_suggestions(
         &mut self,
@@ -1257,11 +1288,7 @@ impl Renderer {
             let box_r = Rect::new(12.0, status.top - 2.0 - height, 12.0 + width, status.top - 2.0);
             let draw_r = Rect::new(box_r.left, draw_y(box_r.top), box_r.right, draw_y(box_r.bottom));
 
-            self.fill_round(
-                Rect::new(draw_r.left - 2.0, draw_r.top - 2.0, draw_r.right + 2.0, draw_r.bottom + 2.0),
-                layout::POPUP_RADIUS + 2.0,
-                pal.shadow.faded(t),
-            );
+            self.draw_popup_shadow(draw_r, layout::POPUP_RADIUS, t, pal.shadow);
             self.fill_round(draw_r, layout::POPUP_RADIUS, pal.chrome_hi.faded(t));
             self.stroke_round_rect(draw_r, layout::POPUP_RADIUS, 1.0, pal.shadow_ring.faded(t));
 
