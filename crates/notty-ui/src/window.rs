@@ -16,7 +16,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DispatchMessageW, GWLP_USERDATA, GetMessageW,
-    GetWindowLongPtrW, HICON, HTCAPTION, HTCLIENT, HTMAXBUTTON, HTTOP, IDC_ARROW, IDC_IBEAM, IsZoomed, KillTimer,
+    GetWindowLongPtrW, HICON, HTCAPTION, HTCLIENT, HTMAXBUTTON, HTTOP, IDC_ARROW, IDC_IBEAM, IsWindow, IsZoomed, KillTimer,
     LoadCursorW, LoadIconW, MSG, NCCALCSIZE_PARAMS, PostQuitMessage, RegisterClassExW, SM_CXPADDEDBORDER,
     SM_CYFRAME, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOSIZE,
     SWP_NOZORDER, SetCursor, SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow,
@@ -540,6 +540,13 @@ fn open_config_as_document(hwnd: HWND, path: std::path::PathBuf) {
     }
 }
 
+thread_local! {
+    /// HWND de la ventana de Ajustes ya abierta, si hay una (Task: "no debería dejarte
+    /// abrir varias pestañas de ajustes a la vez"). Un solo hilo de UI, así que un
+    /// `Cell` de por sí (sin `Mutex`) es seguro.
+    static OPEN_SETTINGS_HWND: std::cell::Cell<Option<isize>> = const { std::cell::Cell::new(None) };
+}
+
 /// Abre la ventana de Ajustes sobre `hwnd`: `Ctrl+,`, el menú Archivo → Ajustes, y el
 /// engranaje de la barra de título llegan todos aquí, para no repetir el `Box::new`.
 fn open_settings(w: &WindowState, hwnd: HWND) {
@@ -547,6 +554,13 @@ fn open_settings(w: &WindowState, hwnd: HWND) {
 }
 
 fn open_settings_at(w: &WindowState, hwnd: HWND, section: &str) {
+    if let Some(raw) = OPEN_SETTINGS_HWND.with(|c| c.get()) {
+        let existing = HWND(raw as *mut _);
+        if unsafe { IsWindow(Some(existing)) }.as_bool() {
+            crate::settings_window::focus_existing(existing, section);
+            return;
+        }
+    }
     let cfg_for_settings = w.cfg.clone();
     let cfg_for_theme = w.cfg.clone();
     let _ = crate::settings_window::open(
@@ -561,7 +575,9 @@ fn open_settings_at(w: &WindowState, hwnd: HWND, section: &str) {
         Box::new(move || trigger_check_updates_now(hwnd)),
         Box::new(move || start_tour(hwnd)),
         section,
+        |created_hwnd| OPEN_SETTINGS_HWND.with(|c| c.set(Some(created_hwnd.0 as isize))),
     );
+    OPEN_SETTINGS_HWND.with(|c| c.set(None));
 }
 
 /// "Buscar ahora" desde Ajustes → Acerca de: recupera el `WindowState` de la

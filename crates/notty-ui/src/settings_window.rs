@@ -21,9 +21,10 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, ReleaseCapture, S
 use windows::Win32::UI::WindowsAndMessaging::{
     CS_DROPSHADOW, CreateWindowExW, DefWindowProcW, DispatchMessageW, GWLP_USERDATA, GetClientRect, GetMessageW,
     GetWindowLongPtrW, GetWindowRect, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCAPTION, HTCLIENT, HTLEFT, HTRIGHT,
-    HTTOP, HTTOPLEFT, HTTOPRIGHT, IDC_ARROW, IsZoomed, KillTimer, LoadCursorW, MINMAXINFO, MSG, NCCALCSIZE_PARAMS,
-    PostMessageW, RegisterClassExW, SC_KEYMENU, SM_CXFRAME, SM_CXPADDEDBORDER, SW_SHOW, SWP_FRAMECHANGED,
-    SWP_NOZORDER, SetTimer, SetWindowLongPtrW, SetWindowPos, ShowWindow, TranslateMessage, WM_CLOSE, WM_DESTROY,
+    HTTOP, HTTOPLEFT, HTTOPRIGHT, IDC_ARROW, IsIconic, IsZoomed, KillTimer, LoadCursorW, MINMAXINFO, MSG,
+    NCCALCSIZE_PARAMS, PostMessageW, RegisterClassExW, SC_KEYMENU, SM_CXFRAME, SM_CXPADDEDBORDER, SW_RESTORE,
+    SW_SHOW, SWP_FRAMECHANGED, SWP_NOZORDER, SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos,
+    ShowWindow, TranslateMessage, WM_CLOSE, WM_DESTROY,
     WM_DPICHANGED, WM_GETMINMAXINFO, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
     WM_MOUSEWHEEL, WM_NCCALCSIZE, WM_NCHITTEST, WM_PAINT, WM_SIZE, WM_SYSCHAR, WM_SYSCOMMAND, WM_SYSKEYDOWN,
     WM_SYSKEYUP, WM_TIMER, WNDCLASSEXW, WS_CLIPSIBLINGS, WS_POPUP, WS_THICKFRAME,
@@ -231,6 +232,7 @@ pub fn open(
     on_check_updates: Box<dyn Fn()>,
     on_repeat_tutorial: Box<dyn Fn()>,
     start_section: &str,
+    on_created: impl Fn(HWND),
 ) -> Result<()> {
     let start_index =
         crate::settings_model::sections(&cfg.borrow()).iter().position(|s| s.id == start_section).unwrap_or(0);
@@ -328,6 +330,8 @@ pub fn open(
                 st.renderer.resize((rc.right - rc.left).max(1) as u32, (rc.bottom - rc.top).max(1) as u32);
             }
         }
+
+        on_created(hwnd);
 
         // Bucle propio hasta que se cierra Ajustes. Sin filtro de `hWnd` a propósito: la
         // ventana principal tiene que seguir repintándose para enseñar al momento cada
@@ -672,21 +676,48 @@ fn hit_test(st: &State, x: f32, y: f32) -> Hit {
     if y < TITLEBAR_H { Hit::Caption } else { Hit::None }
 }
 
+fn goto_section(st: &mut State, hwnd: HWND, i: usize) {
+    if i != st.active_section {
+        st.section_transition =
+            Some(SectionTransition { from: st.active_section, from_scroll: st.scroll, start: Instant::now() });
+        st.active_section = i;
+        st.scroll = 0.0;
+        st.open_select = None;
+        st.toggle_anims.clear();
+        ensure_anim_timer(st, hwnd);
+    }
+    invalidate(hwnd);
+}
+
+/// Ventana de Ajustes ya abierta: en vez de crear otra encima (Task del pedido de
+/// usuario "no debería dejarte abrir varias pestañas de ajustes a la vez"),
+/// `open_settings_at` llama aquí para llevar el foco a la que ya existe y, si se pidió
+/// una sección concreta, cambiar a ella. `hwnd` viene de `on_created` (ver `open`).
+pub fn focus_existing(hwnd: HWND, section: &str) {
+    unsafe {
+        if IsIconic(hwnd).as_bool() {
+            let _ = ShowWindow(hwnd, SW_RESTORE);
+        }
+        let _ = SetForegroundWindow(hwnd);
+        if section.is_empty() {
+            return;
+        }
+        let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut State;
+        if let Some(st) = ptr.as_mut() {
+            let idx = crate::settings_model::sections(&st.cfg.borrow()).iter().position(|s| s.id == section);
+            if let Some(i) = idx {
+                goto_section(st, hwnd, i);
+            }
+        }
+    }
+}
+
 fn handle_click(hwnd: HWND, st: &mut State, x: f32, y: f32) {
     let hit = hit_test(st, x, y);
     match hit {
         Hit::Close => post_close(hwnd),
         Hit::Nav(i) => {
-            if i != st.active_section {
-                st.section_transition =
-                    Some(SectionTransition { from: st.active_section, from_scroll: st.scroll, start: Instant::now() });
-                st.active_section = i;
-                st.scroll = 0.0;
-                st.open_select = None;
-                st.toggle_anims.clear();
-                ensure_anim_timer(st, hwnd);
-            }
-            invalidate(hwnd);
+            goto_section(st, hwnd, i);
         }
         Hit::EditConfig => {
             (st.on_open_path)(notty_config::default_path());
@@ -919,9 +950,13 @@ fn set_row_option(st: &mut State, hwnd: HWND, row: usize, opt: usize) {
     let system_dark = crate::window::system_uses_dark_mode();
     let was_dark = is_dark(st.cfg.borrow().ui.theme, system_dark);
     set_row_option_inner(st, row, opt);
-    if is_dark(st.cfg.borrow().ui.theme, system_dark) != was_dark {
+    let now_dark = is_dark(st.cfg.borrow().ui.theme, system_dark);
+    if now_dark != was_dark {
         st.theme_from = Some((was_dark, Instant::now()));
         ensure_anim_timer(st, hwnd);
+        // Sin esto, el marco que sigue dibujando DWM (los ~4px de borde nativo) se queda
+        // con el tema viejo: se ve un contorno claro alrededor de una ventana ya oscura.
+        unsafe { crate::window::apply_dark_mode(hwnd, now_dark) };
     }
 }
 
