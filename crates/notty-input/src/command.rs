@@ -25,6 +25,9 @@ pub enum Command {
     CloseTab,
     ToggleVim,
     ToggleRaw,
+    ZoomIn,
+    ZoomOut,
+    ZoomReset,
 }
 
 impl Command {
@@ -37,6 +40,9 @@ impl Command {
         Command::OpenSettings,
         Command::ToggleVim,
         Command::ToggleRaw,
+        Command::ZoomIn,
+        Command::ZoomOut,
+        Command::ZoomReset,
     ];
 
     /// Clave en `[keys]` de config.toml.
@@ -50,6 +56,9 @@ impl Command {
             Command::CloseTab => "close_tab",
             Command::ToggleVim => "toggle_vim",
             Command::ToggleRaw => "toggle_raw",
+            Command::ZoomIn => "zoom_in",
+            Command::ZoomOut => "zoom_out",
+            Command::ZoomReset => "zoom_reset",
         }
     }
 
@@ -67,6 +76,9 @@ impl Command {
             Command::CloseTab => "Cerrar pestaña",
             Command::ToggleVim => "Alternar vim en esta ventana",
             Command::ToggleRaw => "Ver como raw",
+            Command::ZoomIn => "Aumentar tamaño del texto",
+            Command::ZoomOut => "Reducir tamaño del texto",
+            Command::ZoomReset => "Restablecer tamaño del texto",
         }
     }
 
@@ -80,6 +92,9 @@ impl Command {
             Command::CloseTab => "Ctrl+W",
             Command::ToggleVim => "Ctrl+Alt+V",
             Command::ToggleRaw => "Ctrl+Shift+H",
+            Command::ZoomIn => "Ctrl+=",
+            Command::ZoomOut => "Ctrl+-",
+            Command::ZoomReset => "Ctrl+0",
         }
     }
 
@@ -91,7 +106,7 @@ impl Command {
             Command::NextTab => Some(UiCommand::NextTab),
             Command::PrevTab => Some(UiCommand::PrevTab),
             Command::CloseTab => Some(UiCommand::CloseTab),
-            Command::ToggleVim | Command::ToggleRaw => None,
+            Command::ToggleVim | Command::ToggleRaw | Command::ZoomIn | Command::ZoomOut | Command::ZoomReset => None,
         }
     }
 }

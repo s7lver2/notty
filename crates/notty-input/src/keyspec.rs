@@ -39,6 +39,7 @@ fn key_code(lower: &str, original: &str) -> Option<u32> {
             ',' => Some(0xBC),
             '.' => Some(0xBE),
             '-' => Some(0xBD),
+            '=' => Some(0xBB),
             _ => None,
         };
     }
@@ -88,6 +89,7 @@ pub fn key_name(vk: u32) -> Option<String> {
         0xBC => ",",
         0xBE => ".",
         0xBD => "-",
+        0xBB => "=",
         0x09 => "Tab",
         0x0D => "Enter",
         0x1B => "Esc",
@@ -154,7 +156,10 @@ mod tests {
 
     #[test]
     fn format_round_trips_through_parse() {
-        for spec in ["Ctrl+N", "Ctrl+Shift+Tab", "Ctrl+Alt+V", "Ctrl+,", "F3", "Shift+F12", "Alt+PageDown", "Ctrl+-"] {
+        for spec in [
+            "Ctrl+N", "Ctrl+Shift+Tab", "Ctrl+Alt+V", "Ctrl+,", "F3", "Shift+F12", "Alt+PageDown", "Ctrl+-", "Ctrl+=",
+            "Ctrl+0",
+        ] {
             let (vk, m) = parse_key_spec(spec).unwrap();
             assert_eq!(format_key_spec(vk, m).as_deref(), Some(spec));
         }

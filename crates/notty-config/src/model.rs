@@ -53,7 +53,7 @@ pub enum MenuBar {
     Alt,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct UiConfig {
     pub preset: Preset,
@@ -66,6 +66,10 @@ pub struct UiConfig {
     pub status_bar: bool,
     pub vim_always: bool,
     pub merged_command_line: bool,
+    /// Zoom del texto del editor (Ctrl+=/Ctrl+-/Ctrl+0), como multiplicador de
+    /// `layout::FONT_MONO`/`LINE_H`. No afecta a la letra del resto de la interfaz
+    /// (pestañas, barra de estado, Ajustes), solo al cuerpo del documento y la vista raw.
+    pub font_scale: f32,
 }
 
 impl Default for UiConfig {
@@ -81,6 +85,7 @@ impl Default for UiConfig {
             status_bar: true,
             vim_always: false,
             merged_command_line: false,
+            font_scale: 1.0,
         };
         let preset = ui.preset;
         crate::apply_preset(&mut ui, preset);
@@ -149,7 +154,7 @@ impl Default for UpdatesConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub ui: UiConfig,
@@ -262,6 +267,15 @@ mod tests {
     #[test]
     fn invalid_preset_value_is_a_parse_error() {
         assert!(toml::from_str::<Config>("[ui]\npreset = \"no-existe\"\n").is_err());
+    }
+
+    #[test]
+    fn font_scale_defaults_to_one_and_round_trips() {
+        assert_eq!(UiConfig::default().font_scale, 1.0);
+        let cfg = Config { ui: UiConfig { font_scale: 1.3, ..UiConfig::default() }, ..Config::default() };
+        let text = toml::to_string(&cfg).unwrap();
+        let back: Config = toml::from_str(&text).unwrap();
+        assert_eq!(back.ui.font_scale, 1.3);
     }
 
     #[test]

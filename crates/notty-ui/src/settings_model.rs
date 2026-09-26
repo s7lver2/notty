@@ -152,6 +152,9 @@ const TECLADO: &[Row] = &[
     Row::Binding { cmd: Command::OpenSettings },
     Row::Binding { cmd: Command::ToggleVim },
     Row::Binding { cmd: Command::ToggleRaw },
+    Row::Binding { cmd: Command::ZoomIn },
+    Row::Binding { cmd: Command::ZoomOut },
+    Row::Binding { cmd: Command::ZoomReset },
     Row::Link {
         title: "Todos los atajos",
         desc: "Cada acción es un comando con nombre. También puedes reasignarlos en config.toml, sección [keys].",

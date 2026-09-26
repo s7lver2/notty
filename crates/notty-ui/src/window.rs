@@ -553,6 +553,30 @@ fn open_settings(w: &WindowState, hwnd: HWND) {
     open_settings_at(w, hwnd, "");
 }
 
+const ZOOM_STEP: f32 = 0.1;
+
+/// Ctrl+=/Ctrl+-/Ctrl+0: cambia el tamaño del texto del editor y lo deja guardado. El
+/// recorte real (0.5x–3x) lo hace `Renderer::set_font_scale`; aquí solo se guarda lo
+/// que haya quedado tras el recorte, para que Ajustes y el arranque siguiente
+/// coincidan con lo que se ve.
+fn set_font_scale(w: &mut WindowState, hwnd: HWND, scale: f32) {
+    if w.renderer.set_font_scale(scale).is_err() {
+        return;
+    }
+    let applied = w.renderer.font_scale();
+    {
+        let mut cfg = w.cfg.borrow_mut();
+        cfg.ui.font_scale = applied;
+        let _ = notty_config::save(&cfg, &notty_config::default_path());
+    }
+    let (body, _) = w.body_and_gutter();
+    let line_h = w.renderer.line_height();
+    w.ws.active_mut().viewport.visible_lines = layout::visible_lines(body, line_h);
+    unsafe {
+        let _ = InvalidateRect(Some(hwnd), None, false);
+    }
+}
+
 fn open_settings_at(w: &WindowState, hwnd: HWND, section: &str) {
     if let Some(raw) = OPEN_SETTINGS_HWND.with(|c| c.get()) {
         let existing = HWND(raw as *mut _);
@@ -1138,7 +1162,8 @@ fn run_inner(
         }
 
         let dpi = GetDpiForWindow(hwnd);
-        let renderer = Renderer::new(hwnd, dpi)?;
+        let mut renderer = Renderer::new(hwnd, dpi)?;
+        let _ = renderer.set_font_scale(cfg.ui.font_scale);
 
         let total_lines = ws.active().doc.buffer().len_lines();
         let menu_visible0 = cfg.ui.menubar == notty_config::MenuBar::Visible;
@@ -1342,7 +1367,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     // `visible_lines` depende del alto del cuerpo, que cambia no solo con
                     // `WM_SIZE` sino al aparecer/desaparecer bandas o al cambiar de pestaña.
                     let (body, _) = w.body_and_gutter();
-                    w.ws.active_mut().viewport.visible_lines = layout::visible_lines(body);
+                    w.ws.active_mut().viewport.visible_lines = layout::visible_lines(body, w.renderer.line_height());
                     let dark = crate::is_dark(w.cfg.borrow().ui.theme, system_uses_dark_mode());
                     if let Some(prev) = w.last_dark {
                         if prev != dark {
@@ -1399,7 +1424,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     w.ctx_menu = None;
                     w.renderer.resize(width, height);
                     let (body, _gutter_w) = w.body_and_gutter();
-                    w.ws.active_mut().viewport.visible_lines = layout::visible_lines(body);
+                    w.ws.active_mut().viewport.visible_lines = layout::visible_lines(body, w.renderer.line_height());
                     let _ = InvalidateRect(Some(hwnd), None, false);
                 }
                 LRESULT(0)
@@ -1627,6 +1652,15 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                                 st.vim = if st.vim.is_some() { None } else { Some(crate::VimState::default()) };
                             }
                             notty_input::Command::ToggleRaw => toggle_raw(w),
+                            notty_input::Command::ZoomIn => {
+                                let target = w.cfg.borrow().ui.font_scale + ZOOM_STEP;
+                                set_font_scale(w, hwnd, target);
+                            }
+                            notty_input::Command::ZoomOut => {
+                                let target = w.cfg.borrow().ui.font_scale - ZOOM_STEP;
+                                set_font_scale(w, hwnd, target);
+                            }
+                            notty_input::Command::ZoomReset => set_font_scale(w, hwnd, 1.0),
                             notty_input::Command::NewTempTab => {
                                 let cfg = w.cfg.borrow().clone();
                                 open_tab(

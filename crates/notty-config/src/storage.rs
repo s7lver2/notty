@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use crate::Config;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum LoadResult {
     Loaded(Config),
     Defaulted(Config, String),

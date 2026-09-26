@@ -271,6 +271,13 @@ pub struct Renderer {
     /// Atajos en vigor (tras reasignaciones en `[keys]`) de los elementos de menú que
     /// los tienen, ya en formato corto ("^N").
     menu_keys: Vec<(crate::menu::MenuCmd, String)>,
+    /// Familia monoespaciada resuelta en `new` (Cascadia Mono o Consolas de *fallback*):
+    /// hace falta guardarla para poder recrear `mono_13`/`mono_13_bold` a otro tamaño
+    /// cuando cambia el zoom (Ctrl+=/Ctrl+-/Ctrl+0), sin repetir la búsqueda de familia.
+    mono_family: String,
+    /// Multiplicador de `layout::FONT_MONO`/`LINE_H` vigente (Ctrl+=/Ctrl+-/Ctrl+0).
+    /// Solo afecta al cuerpo del editor y la vista raw, ver `set_font_scale`.
+    font_scale: f32,
 }
 
 /// Lo que hay que pintar en el panel de notas de versión cuando está abierto
@@ -385,13 +392,33 @@ impl Renderer {
                 tab_scroll_targets: (None, None),
                 about: None,
                 menu_keys: Vec::new(),
+                mono_family,
+                font_scale: 1.0,
             })
         }
     }
 
-    /// Alto de línea del documento en DIPs (`--lh` de la maqueta).
+    /// Alto de línea del documento en DIPs (`--lh` de la maqueta), ya escalado por el
+    /// zoom de texto (`set_font_scale`).
     pub fn line_height(&self) -> f32 {
-        layout::LINE_H
+        layout::LINE_H * self.font_scale
+    }
+
+    pub fn font_scale(&self) -> f32 {
+        self.font_scale
+    }
+
+    /// Aplica el zoom de texto del editor (Ctrl+=/Ctrl+-/Ctrl+0): recrea `mono_13` y
+    /// `mono_13_bold` (cuerpo del documento, gutter y vista raw — no el resto de la
+    /// interfaz) al nuevo tamaño. `scale` se recorta a un rango razonable para que no
+    /// se pueda dejar el texto ilegible ni desbordar la ventana.
+    pub fn set_font_scale(&mut self, scale: f32) -> Result<()> {
+        let scale = scale.clamp(0.5, 3.0);
+        let size = layout::FONT_MONO * scale;
+        self.fonts.mono_13 = make_format(&self.dwrite, &self.mono_family, size, DWRITE_FONT_WEIGHT_NORMAL)?;
+        self.fonts.mono_13_bold = make_format(&self.dwrite, &self.mono_family, size, DWRITE_FONT_WEIGHT_BOLD)?;
+        self.font_scale = scale;
+        Ok(())
     }
 
     pub fn set_dpi(&mut self, dpi: u32) {
@@ -878,7 +905,7 @@ impl Renderer {
         let buf = state.doc.buffer();
         let total = buf.len_lines();
         let range = state.viewport.range(total);
-        let row = ((y - body.top - layout::TEXT_PAD_T) / layout::LINE_H).floor().max(0.0) as usize;
+        let row = ((y - body.top - layout::TEXT_PAD_T) / self.line_height()).floor().max(0.0) as usize;
         let line = (state.viewport.first_line + row).min(total.saturating_sub(1)).max(range.start);
 
         let start = buf.line_start(line);
@@ -889,7 +916,7 @@ impl Renderer {
             return start;
         }
         let w = wide(&text);
-        let Ok(text_layout) = (unsafe { self.dwrite.CreateTextLayout(&w, &self.fonts.mono_13, f32::MAX, layout::LINE_H) })
+        let Ok(text_layout) = (unsafe { self.dwrite.CreateTextLayout(&w, &self.fonts.mono_13, f32::MAX, self.line_height()) })
         else {
             return start;
         };
@@ -1031,7 +1058,7 @@ impl Renderer {
                 let text_layout = if w16.is_empty() {
                     None
                 } else {
-                    self.dwrite.CreateTextLayout(&w16, &self.fonts.mono_13, f32::MAX, layout::LINE_H).ok()
+                    self.dwrite.CreateTextLayout(&w16, &self.fonts.mono_13, f32::MAX, self.line_height()).ok()
                 };
 
                 if ui.line_numbers && !is_raw {
@@ -1040,7 +1067,7 @@ impl Renderer {
                     self.text_right(
                         &num,
                         &self.fonts.mono_13,
-                        Rect::new(frame.body.left, y, frame.body.left + gutter_w - layout::GUTTER_PAD_R, y + layout::LINE_H),
+                        Rect::new(frame.body.left, y, frame.body.left + gutter_w - layout::GUTTER_PAD_R, y + self.line_height()),
                         num_color,
                     );
                 }
@@ -1062,7 +1089,7 @@ impl Renderer {
                         x1 = x1.max(x0) + 6.0;
                     }
                     x1 = x1.max(x0 + 2.0);
-                    self.fill(Rect::new(x0, y, x1, y + layout::LINE_H), pal.accent_soft);
+                    self.fill(Rect::new(x0, y, x1, y + self.line_height()), pal.accent_soft);
                 }
 
                 for (mi, m) in search_matches.iter().enumerate() {
@@ -1079,7 +1106,7 @@ impl Renderer {
                     let x1 =
                         text_layout.as_ref().map(|l| hit_test_x(l, &text, clamp_end - start, text_pad)).unwrap_or(text_pad);
                     let c = if Some(mi) == search_current { pal.mark_cur } else { pal.mark };
-                    self.fill_round(Rect::new(x0, y, x1.max(x0 + 2.0), y + layout::LINE_H), 2.0, c);
+                    self.fill_round(Rect::new(x0, y, x1.max(x0 + 2.0), y + self.line_height()), 2.0, c);
                 }
 
                 if let Some(l) = &text_layout {
@@ -1109,14 +1136,14 @@ impl Renderer {
                         } else {
                             x + 8.0
                         };
-                        self.fill(Rect::new(x, y, x1.max(x + 2.0), y + layout::LINE_H), pal.accent_soft);
-                        self.stroke_rect(Rect::new(x, y, x1.max(x + 2.0), y + layout::LINE_H), 1.0, pal.accent);
+                        self.fill(Rect::new(x, y, x1.max(x + 2.0), y + self.line_height()), pal.accent_soft);
+                        self.stroke_rect(Rect::new(x, y, x1.max(x + 2.0), y + self.line_height()), 1.0, pal.accent);
                     } else {
-                        self.fill(Rect::new(x, y, x + 1.0, y + layout::LINE_H), pal.text);
+                        self.fill(Rect::new(x, y, x + 1.0, y + self.line_height()), pal.text);
                     }
                 }
 
-                y += layout::LINE_H;
+                y += self.line_height();
                 if y > frame.body.bottom {
                     break;
                 }
@@ -1767,11 +1794,11 @@ impl Renderer {
         let head = state.doc.selection().head;
         let (line, _) = buf.line_col(head);
         let text_pad = body.left + gutter_w + layout::TEXT_PAD_L;
-        let fallback = (text_pad + 16.0, body.top + layout::TEXT_PAD_T + layout::LINE_H);
+        let fallback = (text_pad + 16.0, body.top + layout::TEXT_PAD_T + self.line_height());
         if !state.viewport.range(total).contains(&line) {
             return fallback;
         }
-        let y = body.top + layout::TEXT_PAD_T + (line - state.viewport.first_line) as f32 * layout::LINE_H + layout::LINE_H;
+        let y = body.top + layout::TEXT_PAD_T + (line - state.viewport.first_line) as f32 * self.line_height() + self.line_height();
         if y > body.bottom {
             return fallback;
         }
@@ -1782,7 +1809,7 @@ impl Renderer {
         let x = if w16.is_empty() {
             text_pad
         } else {
-            match unsafe { self.dwrite.CreateTextLayout(&w16, &self.fonts.mono_13, f32::MAX, layout::LINE_H) } {
+            match unsafe { self.dwrite.CreateTextLayout(&w16, &self.fonts.mono_13, f32::MAX, self.line_height()) } {
                 Ok(l) => unsafe { hit_test_x(&l, &text, head.saturating_sub(start), text_pad) },
                 Err(_) => text_pad,
             }
@@ -2332,7 +2359,7 @@ impl Renderer {
             let row_len = (total - row_start).min(16);
 
             let offset_str = format!("{row_start:08x}");
-            self.text(&offset_str, &self.fonts.mono_13, Rect::new(origin_x, y, origin_x + 8.0 * char_w, y + layout::LINE_H), pal.text_3);
+            self.text(&offset_str, &self.fonts.mono_13, Rect::new(origin_x, y, origin_x + 8.0 * char_w, y + self.line_height()), pal.text_3);
 
             for col in 0..row_len {
                 let i = row_start + col;
@@ -2340,7 +2367,7 @@ impl Renderer {
                 let is_sel = row == sel_row && col == sel_col;
                 let modified = raw.is_modified(i);
                 let col_x = origin_x + (PREFIX_COLS + col as f32 * 3.0 + if col >= 8 { 1.0 } else { 0.0 }) * char_w;
-                let cell = Rect::new(col_x, y, col_x + 2.0 * char_w, y + layout::LINE_H);
+                let cell = Rect::new(col_x, y, col_x + 2.0 * char_w, y + self.line_height());
 
                 if is_sel {
                     self.fill_round(cell, 2.0, pal.accent);
@@ -2361,7 +2388,7 @@ impl Renderer {
                 self.text(&label, font, cell, color);
 
                 let ascii_x = origin_x + (ASCII_COL + col as f32) * char_w;
-                let ascii_cell = Rect::new(ascii_x, y, ascii_x + char_w, y + layout::LINE_H);
+                let ascii_cell = Rect::new(ascii_x, y, ascii_x + char_w, y + self.line_height());
                 let ch = if (0x20..=0x7E).contains(&b) { b as char } else { '.' };
                 if is_sel {
                     self.fill(ascii_cell, pal.accent_soft);
@@ -2371,7 +2398,7 @@ impl Renderer {
                 }
             }
 
-            y += layout::LINE_H;
+            y += self.line_height();
         }
     }
 }

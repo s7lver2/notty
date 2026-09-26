@@ -210,8 +210,9 @@ pub fn gutter_width(total_lines: usize, digit_w: f32) -> f32 {
 }
 
 /// Líneas de texto que caben en el cuerpo (con su margen superior de 10 DIPs).
-pub fn visible_lines(body: Rect) -> usize {
-    (((body.height() - TEXT_PAD_T).max(0.0)) / LINE_H).floor().max(1.0) as usize
+/// `line_h` es `LINE_H` ya escalado por el zoom de texto (Ctrl+/Ctrl-), ver `Renderer::line_h`.
+pub fn visible_lines(body: Rect, line_h: f32) -> usize {
+    (((body.height() - TEXT_PAD_T).max(0.0)) / line_h).floor().max(1.0) as usize
 }
 
 /// Tamaño mínimo de la ventana principal en DIPs (`WM_GETMINMAXINFO`): por debajo de
