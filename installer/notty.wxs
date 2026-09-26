@@ -46,7 +46,7 @@
         </Component>
 
         <Component Id="AssocTextReg" Guid="*">
-          <ProgId Id="notty.txt" Description="Documento de texto (notty)">
+          <ProgId Id="notty.txt" Description="Documento de texto (notty)" Icon="icon_text.ico">
             <Extension Id="txt" ContentType="text/plain">
               <Verb Id="open" Command="Abrir" TargetFile="notty.exe" Argument="&quot;%1&quot;" />
             </Extension>
@@ -62,7 +62,7 @@
         </Component>
 
         <Component Id="AssocConfigReg" Guid="*">
-          <ProgId Id="notty.config" Description="Archivo de configuración (notty)">
+          <ProgId Id="notty.config" Description="Archivo de configuración (notty)" Icon="icon_config.ico">
             <Extension Id="ini" ContentType="text/plain">
               <Verb Id="open" Command="Abrir" TargetFile="notty.exe" Argument="&quot;%1&quot;" />
             </Extension>
@@ -81,7 +81,7 @@
         </Component>
 
         <Component Id="AssocMarkdownReg" Guid="*">
-          <ProgId Id="notty.markdown" Description="Documento Markdown (notty)">
+          <ProgId Id="notty.markdown" Description="Documento Markdown (notty)" Icon="icon_markdown.ico">
             <Extension Id="md" ContentType="text/markdown">
               <Verb Id="open" Command="Abrir" TargetFile="notty.exe" Argument="&quot;%1&quot;" />
             </Extension>
@@ -94,7 +94,7 @@
         </Component>
 
         <Component Id="AssocCodeReg" Guid="*">
-          <ProgId Id="notty.code" Description="Código y datos (notty)">
+          <ProgId Id="notty.code" Description="Código y datos (notty)" Icon="icon_code.ico">
             <Extension Id="json" ContentType="application/json">
               <Verb Id="open" Command="Abrir" TargetFile="notty.exe" Argument="&quot;%1&quot;" />
             </Extension>
@@ -110,6 +110,20 @@
             Name=".csv" Value="notty.code" Type="string" />
           <RegistryValue Root="HKLM" Key="SOFTWARE\notty\Capabilities\FileAssociations"
             Name=".yaml" Value="notty.code" Type="string" />
+        </Component>
+
+        <!-- El .ico que el Explorador pone a los archivos de cada ProgId (tools/make-file-icons.ps1). -->
+        <Component Id="AssocTextIcon" Subdirectory="icons">
+          <File Id="icon_text.ico" Source="$(sys.SOURCEFILEDIR)icons\text.ico" />
+        </Component>
+        <Component Id="AssocConfigIcon" Subdirectory="icons">
+          <File Id="icon_config.ico" Source="$(sys.SOURCEFILEDIR)icons\config.ico" />
+        </Component>
+        <Component Id="AssocMarkdownIcon" Subdirectory="icons">
+          <File Id="icon_markdown.ico" Source="$(sys.SOURCEFILEDIR)icons\markdown.ico" />
+        </Component>
+        <Component Id="AssocCodeIcon" Subdirectory="icons">
+          <File Id="icon_code.ico" Source="$(sys.SOURCEFILEDIR)icons\code.ico" />
         </Component>
       </Directory>
     </StandardDirectory>
@@ -157,15 +171,19 @@
     </Feature>
     <Feature Id="AssocText" Title="Texto plano" Level="1">
       <ComponentRef Id="AssocTextReg" />
+      <ComponentRef Id="AssocTextIcon" />
     </Feature>
     <Feature Id="AssocConfig" Title="Configuración" Level="1">
       <ComponentRef Id="AssocConfigReg" />
+      <ComponentRef Id="AssocConfigIcon" />
     </Feature>
     <Feature Id="AssocMarkdown" Title="Markdown" Level="1">
       <ComponentRef Id="AssocMarkdownReg" />
+      <ComponentRef Id="AssocMarkdownIcon" />
     </Feature>
     <Feature Id="AssocCode" Title="Código y datos" Level="1000">
       <ComponentRef Id="AssocCodeReg" />
+      <ComponentRef Id="AssocCodeIcon" />
     </Feature>
     <Feature Id="StartMenu" Title="Menú Inicio" Level="1">
       <ComponentRef Id="StartMenuShortcut" />
