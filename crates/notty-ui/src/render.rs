@@ -18,7 +18,7 @@ use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT_BOLD,
     DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_LINE_SPACING_METHOD_UNIFORM,
     DWRITE_PARAGRAPH_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_NEAR, DWRITE_TEXT_ALIGNMENT_CENTER,
-    DWRITE_TEXT_ALIGNMENT_TRAILING, DWRITE_TRIMMING, DWRITE_TRIMMING_GRANULARITY_CHARACTER,
+    DWRITE_TEXT_ALIGNMENT_TRAILING, DWRITE_TEXT_RANGE, DWRITE_TRIMMING, DWRITE_TRIMMING_GRANULARITY_CHARACTER,
     DWRITE_WORD_WRAPPING_NO_WRAP, DWRITE_WORD_WRAPPING_WRAP, DWriteCreateFactory, IDWriteFactory,
     IDWriteFontCollection, IDWriteTextFormat, IDWriteTextLayout,
 };
@@ -1051,8 +1051,15 @@ impl Renderer {
                     self.draw_hex(raw, state.raw_cursor, state.raw_pending_nibble, state.viewport.first_line, pal, frame);
                 }
             } else {
+            let spans = if ui.syntax_highlight {
+                state.syntax.line_spans(&state.doc, state.path.as_deref(), range.clone())
+            } else {
+                Vec::new()
+            };
+            // Un pincel por color de `syntax::NAMES`, creado la primera vez que hace falta.
+            let mut syn_brushes: Vec<Option<ID2D1SolidColorBrush>> = vec![None; crate::syntax::NAMES.len()];
             let mut y = frame.body.top + layout::TEXT_PAD_T;
-            for line in range {
+            for line in range.clone() {
                 let start = buf.line_start(line);
                 let full_end = if line + 1 < total_lines { buf.line_start(line + 1) } else { buf.len_chars() };
                 let text: String = buf.slice(start..full_end).trim_end_matches(['\r', '\n']).to_string();
@@ -1114,6 +1121,15 @@ impl Renderer {
                 }
 
                 if let Some(l) = &text_layout {
+                    for s in spans.get(line - range.start).map(Vec::as_slice).unwrap_or_default() {
+                        let Some(c) = crate::syntax::color(pal, s.highlight) else { continue };
+                        if syn_brushes[s.highlight].is_none() {
+                            syn_brushes[s.highlight] = self.target.CreateSolidColorBrush(&color(c), None).ok();
+                        }
+                        if let Some(b) = &syn_brushes[s.highlight] {
+                            let _ = l.SetDrawingEffect(b, DWRITE_TEXT_RANGE { startPosition: s.start, length: s.len });
+                        }
+                    }
                     self.brush.SetColor(&color(pal.text));
                     self.target.DrawTextLayout(
                         Vector2 { X: text_pad, Y: y },
