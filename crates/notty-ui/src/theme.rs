@@ -32,7 +32,8 @@ impl Palette {
         }
         m!(
             chrome, chrome_hi, surface, surface_2, cmd, hover, press, line, text, text_2, text_3, text_hint, accent,
-            accent_soft, on_accent, danger, warn, ok, mark, mark_cur, close_hover, close_hover_fg, shadow, shadow_ring
+            accent_soft, on_accent, danger, warn, ok, mark, mark_cur, close_hover, close_hover_fg, shadow, shadow_ring,
+            syn_keyword, syn_string, syn_number, syn_type, syn_function, syn_comment
         )
     }
 }
@@ -65,6 +66,16 @@ pub struct Palette {
     /// Sombra de los desplegables (`--shadow`): color de la sombra difusa y del anillo de 1 px.
     pub shadow: Rgba,
     pub shadow_ring: Rgba,
+    /// Resaltado de sintaxis (`syntax::color`). Palabras clave, cadenas y números
+    /// reutilizan `accent`/`ok`/`warn`, para que el código hable el mismo idioma de
+    /// color que el resto de la interfaz; tipo y función son un turquesa y un violeta
+    /// a la misma luminosidad.
+    pub syn_keyword: Rgba,
+    pub syn_string: Rgba,
+    pub syn_number: Rgba,
+    pub syn_type: Rgba,
+    pub syn_function: Rgba,
+    pub syn_comment: Rgba,
 }
 
 pub const DARK: Palette = Palette {
@@ -92,6 +103,12 @@ pub const DARK: Palette = Palette {
     close_hover_fg: Rgba(0.99, 0.99, 0.99, 1.0),
     shadow: Rgba(0.0, 0.0, 0.0, 0.6),
     shadow_ring: Rgba(0.40, 0.41, 0.42, 0.18),
+    syn_keyword: Rgba(0.4521, 0.7150, 0.9819, 1.0),
+    syn_string: Rgba(0.4496, 0.7659, 0.5214, 1.0),
+    syn_number: Rgba(0.8946, 0.6737, 0.3482, 1.0),
+    syn_type: Rgba(0.3900, 0.7800, 0.7900, 1.0),
+    syn_function: Rgba(0.7600, 0.6300, 0.9700, 1.0),
+    syn_comment: Rgba(0.5914, 0.5974, 0.6038, 1.0),
 };
 
 pub const LIGHT: Palette = Palette {
@@ -119,6 +136,12 @@ pub const LIGHT: Palette = Palette {
     close_hover_fg: Rgba(0.99, 0.99, 0.99, 1.0),
     shadow: Rgba(0.02, 0.03, 0.05, 0.28),
     shadow_ring: Rgba(0.02, 0.03, 0.05, 0.12),
+    syn_keyword: Rgba(0.0000, 0.4173, 0.7526, 1.0),
+    syn_string: Rgba(0.1584, 0.4845, 0.2576, 1.0),
+    syn_number: Rgba(0.6673, 0.4153, 0.0000, 1.0),
+    syn_type: Rgba(0.0000, 0.4600, 0.4900, 1.0),
+    syn_function: Rgba(0.4600, 0.2700, 0.7400, 1.0),
+    syn_comment: Rgba(0.5422, 0.5501, 0.5586, 1.0),
 };
 
 /// `Theme::System` sigue al modo de Windows (`system_dark`); los otros dos lo fuerzan.

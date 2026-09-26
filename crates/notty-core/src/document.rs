@@ -1,4 +1,5 @@
 use std::ops::Range;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use crate::{Buffer, Edit, History};
@@ -31,11 +32,20 @@ pub struct Document {
     sel: Selection,
     newline: &'static str,
     saved: Option<u64>,
+    revision: u64,
+}
+
+/// Global, no por documento: así un `Document` recién creado que sustituye a otro
+/// nunca repite una revisión que un caché ya haya visto.
+static NEXT_REVISION: AtomicU64 = AtomicU64::new(1);
+
+fn next_revision() -> u64 {
+    NEXT_REVISION.fetch_add(1, Ordering::Relaxed)
 }
 
 impl Document {
     pub fn new(text: &str, newline: &'static str) -> Self {
-        Self { buffer: Buffer::new(text), history: History::default(), sel: Selection::default(), newline, saved: None }
+        Self { buffer: Buffer::new(text), history: History::default(), sel: Selection::default(), newline, saved: None, revision: next_revision() }
     }
 
     pub fn text(&self) -> String {
@@ -44,6 +54,11 @@ impl Document {
 
     pub fn buffer(&self) -> &Buffer {
         &self.buffer
+    }
+
+    /// Cambia cada vez que cambia el texto (no la selección).
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     pub fn selection(&self) -> Selection {
@@ -98,6 +113,7 @@ impl Document {
         }
         let edit = Edit { at: range.start, removed, inserted: text.to_string() };
         edit.apply(&mut self.buffer);
+        self.revision = next_revision();
         self.sel = Selection::caret(range.start + text.chars().count());
         self.history.record(edit, now);
     }
@@ -131,6 +147,7 @@ impl Document {
     pub fn undo(&mut self) -> bool {
         match self.history.undo(&mut self.buffer) {
             Some(c) => {
+                self.revision = next_revision();
                 self.sel = Selection::caret(c);
                 true
             }
@@ -141,6 +158,7 @@ impl Document {
     pub fn redo(&mut self) -> bool {
         match self.history.redo(&mut self.buffer) {
             Some(c) => {
+                self.revision = next_revision();
                 self.sel = Selection::caret(c);
                 true
             }
@@ -258,6 +276,23 @@ mod tests {
         d.set_cursor(99);
         assert_eq!(d.selection(), Selection::caret(2));
         assert_eq!(d.line_col(), (0, 2));
+    }
+
+    #[test]
+    fn revision_changes_with_text_not_with_selection() {
+        let mut d = Document::new("ab", "
+");
+        let r0 = d.revision();
+        d.set_cursor(1);
+        assert_eq!(d.revision(), r0);
+        d.insert("x", Instant::now());
+        let r1 = d.revision();
+        assert_ne!(r1, r0);
+        d.undo();
+        assert_ne!(d.revision(), r1);
+        assert_ne!(Document::new("ab", "
+").revision(), Document::new("ab", "
+").revision());
     }
 
     #[test]
