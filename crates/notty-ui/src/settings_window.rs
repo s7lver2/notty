@@ -633,7 +633,8 @@ fn paint(st: &mut State) {
                 let kw = r.measure(keys, &r.fonts().mono_11) + 10.0;
                 let kr = Rect::new(rr.right - 12.0 - kw, rr.top + (rr.height() - 20.0) / 2.0, rr.right - 12.0, rr.top + (rr.height() - 20.0) / 2.0 + 20.0);
                 r.fill_round(kr, 4.0, pal.hover);
-                r.text(keys, &r.fonts().mono_11, kr, pal.text_2);
+                // Igual que en el segmentado: `kw` ya lleva 5px de relleno a cada lado.
+                r.text(keys, &r.fonts().mono_11, Rect::new(kr.left + 5.0, kr.top, kr.right - 5.0, kr.bottom), pal.text_2);
                 ry += rr.height() + 3.0;
             }
             Row::Link { title, desc, label } => {
@@ -776,7 +777,11 @@ fn draw_seg(
             r.fill_round(opt_r, 4.0, pal.press);
         }
         let tc = if j == selected { pal.text } else { pal.text_2 };
-        r.text(label, &r.fonts().ui_12, opt_r, tc);
+        // `w` ya lleva 9px de relleno a cada lado (ver `widths` arriba): dibujar con
+        // `opt_r` entero deja el texto pegado al borde izquierdo y todo el relleno
+        // amontonado a la derecha, en vez de centrado en la pastilla.
+        let label_r = Rect::new(opt_r.left + 9.0, opt_r.top, opt_r.right - 9.0, opt_r.bottom);
+        r.text(label, &r.fonts().ui_12, label_r, tc);
         out.push(opt_r);
         x += w;
     }

@@ -819,7 +819,12 @@ impl Renderer {
                 if hovered {
                     self.fill_round(r, 4.0, pal.hover);
                 }
-                self.text(def.name, &self.fonts.ui_12_5, r, pal.text);
+                // `w` ya incluye MENU_BTN_PAD_X a cada lado: si se dibuja con el rect
+                // `r` entero (sin recortar ese margen), el texto queda pegado al borde
+                // izquierdo y todo el relleno se amontona a la derecha, en vez de quedar
+                // repartido a los dos lados como el resto de botones de la app.
+                let label_r = Rect::new(r.left + layout::MENU_BTN_PAD_X, r.top, r.right - layout::MENU_BTN_PAD_X, r.bottom);
+                self.text(def.name, &self.fonts.ui_12_5, label_r, pal.text);
                 self.hits.push((r, Hit::Menu(i)));
                 if view.open_menu == Some(i) {
                     open_x = Some(x);
