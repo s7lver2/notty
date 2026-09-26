@@ -58,7 +58,8 @@ pub enum CodecError {
 }
 
 /// Decide texto o raw a partir de los primeros bytes del archivo (~8 KB).
-/// Texto: BOM, o UTF-8 válido sin bytes nulos. Todo lo demás: raw.
+/// Texto: BOM, UTF-8 válido sin bytes nulos, o si no es UTF-8 pero apenas tiene
+/// caracteres de control, ANSI (1252). Todo lo demás: raw.
 pub fn detect(sample: &[u8]) -> Detected {
     use TextEncoding::*;
     if sample.starts_with(&[0xEF, 0xBB, 0xBF]) {
@@ -77,8 +78,15 @@ pub fn detect(sample: &[u8]) -> Detected {
         Ok(_) => Detected::Text(Utf8),
         // La muestra puede cortar un carácter multibyte por la mitad.
         Err(e) if e.error_len().is_none() => Detected::Text(Utf8),
+        Err(_) if looks_like_text(sample) => Detected::Text(Windows1252),
         Err(_) => Detected::Raw,
     }
+}
+
+/// Menos de un 1 % de bytes de control (sin contar tab, saltos de línea, FF, EOF y ESC).
+fn looks_like_text(sample: &[u8]) -> bool {
+    let control = sample.iter().filter(|&&b| b < 0x20 && !matches!(b, b'\t' | b'\n' | b'\r' | 0x0C | 0x1A | 0x1B)).count();
+    control * 100 < sample.len()
 }
 
 /// Decodificación estricta: si un solo byte no encaja, error. Quita el BOM.
@@ -142,8 +150,15 @@ mod tests {
     }
 
     #[test]
-    fn invalid_utf8_means_raw() {
-        assert_eq!(detect(&[0xC3, 0x28]), Detected::Raw);
+    fn latin1_text_is_windows_1252() {
+        let bytes = encode("Año: ñandú\r\n", Windows1252).unwrap();
+        assert_eq!(detect(&bytes), Detected::Text(Windows1252));
+        assert_eq!(decode(&bytes, Windows1252).unwrap(), "Año: ñandú\r\n");
+    }
+
+    #[test]
+    fn invalid_utf8_full_of_control_bytes_means_raw() {
+        assert_eq!(detect(&[0xC3, 0x28, 0x01, 0x02, 0x03, 0x04, 0x05]), Detected::Raw);
     }
 
     #[test]

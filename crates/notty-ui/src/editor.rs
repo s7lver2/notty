@@ -24,6 +24,9 @@ pub struct EditorState {
     pub temp: Option<notty_config::TempMode>,
     pub open_mtime: Option<std::time::SystemTime>,
     pub syntax: crate::syntax::SyntaxCache,
+    /// Ruta del archivo si se abrió con bytes que no se pudieron decodificar (se
+    /// ven como U+FFFD): guardar encima destruiría esos bytes, así que `save` se niega.
+    pub lossy_source: Option<PathBuf>,
 }
 
 impl EditorState {
@@ -41,11 +44,13 @@ impl EditorState {
             temp: None,
             open_mtime: None,
             syntax: Default::default(),
+            lossy_source: None,
         }
     }
 
     pub fn from_opened(opened: OpenedDoc) -> Self {
         let open_mtime = notty_io::mtime(&opened.path).ok();
+        let lossy_source = opened.lossy.then(|| opened.path.clone());
         Self {
             doc: opened.document,
             viewport: Viewport { first_line: 0, visible_lines: 1 },
@@ -59,6 +64,7 @@ impl EditorState {
             temp: None,
             open_mtime,
             syntax: Default::default(),
+            lossy_source,
         }
     }
 
@@ -152,6 +158,9 @@ impl EditorState {
 
     pub fn save(&mut self) -> Result<(), notty_io::CodecError> {
         let path = self.path.clone().ok_or_else(|| notty_io::CodecError::Io("sin ruta".to_string()))?;
+        if self.lossy_source.as_deref().is_some_and(|src| crate::same_file(src, &path)) {
+            return Err(notty_io::CodecError::Io("tiene bytes ilegibles; guárdalo con otro nombre".to_string()));
+        }
         crate::save_document(&self.doc, &path, self.encoding)?;
         self.doc.mark_saved();
         Ok(())
@@ -348,6 +357,22 @@ mod tests {
     fn save_without_path_is_an_error() {
         let mut s = state("hola");
         assert!(s.save().is_err());
+    }
+
+    #[test]
+    fn lossy_document_refuses_to_overwrite_its_source() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("roto.txt");
+        // UTF-8 válido al principio (la muestra de detección) y un byte inválido después.
+        let mut bytes = "a".repeat(9000).into_bytes();
+        bytes.push(0xFF);
+        std::fs::write(&p, &bytes).unwrap();
+        let mut s = EditorState::from_opened(crate::open_as_document(&p).unwrap());
+        s.insert_char('x', Instant::now());
+        assert!(s.save().is_err());
+        assert_eq!(std::fs::read(&p).unwrap(), bytes);
+        s.path = Some(dir.path().join("otro.txt"));
+        assert!(s.save().is_ok());
     }
 
     #[test]

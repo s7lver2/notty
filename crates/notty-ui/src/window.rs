@@ -1112,6 +1112,7 @@ fn handle_conflict_key(w: &mut WindowState, vk: u32) {
                     st.encoding = opened.encoding;
                     st.eol = opened.eol;
                     st.open_mtime = notty_io::mtime(&path).ok();
+                    st.lossy_source = opened.lossy.then(|| path.clone());
                 }
             }
             w.ws.close_prompt();
@@ -2625,6 +2626,7 @@ fn toggle_raw(w: &mut WindowState, hwnd: HWND) {
             st.encoding = opened.encoding;
             st.eol = opened.eol;
             st.open_mtime = notty_io::mtime(&opened.path).ok();
+            st.lossy_source = opened.lossy.then(|| opened.path.clone());
             // `first_line` venía contando filas hex, no líneas.
             st.viewport.first_line = 0;
         } else {
