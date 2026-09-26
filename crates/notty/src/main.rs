@@ -64,9 +64,23 @@ pub(crate) fn spawn_pipe_server(sender: std::sync::mpsc::Sender<notty_ipc::Messa
     });
 }
 
+/// Elimina un `argv[1]` que sea la ruta a `notepad.exe` (sin distinguir mayúsculas),
+/// que es lo que IFEO antepone cuando invoca a notty como sustituto del Bloc de
+/// notas real (`... Image File Execution Options\notepad.exe` con `Debugger` = notty).
+/// Sin esto, notty intentaría abrir esa ruta como si fuera un documento.
+pub(crate) fn strip_ifeo_arg(args: &mut Vec<String>) {
+    if let Some(first) = args.first() {
+        if first.to_lowercase().ends_with(r"\notepad.exe") {
+            args.remove(0);
+        }
+    }
+}
+
 fn main() -> windows::core::Result<()> {
-    let args: Vec<String> = std::env::args().collect();
-    if args.get(1).map(String::as_str) == Some("--daemon") {
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    strip_ifeo_arg(&mut args);
+
+    if args.first().map(String::as_str) == Some("--daemon") {
         return daemon::run();
     }
 
@@ -77,10 +91,10 @@ fn main() -> windows::core::Result<()> {
     // el mismo camino que "notty sin argumentos" (documento vacío, ruta `None`): el
     // modo real (borrador/volátil) solo aplica a "--new-temp", que se decide con
     // `cfg.files.temp_mode`.
-    let new_temp = args.get(1).map(String::as_str) == Some("--new-temp");
-    let is_new_permanent = args.get(1).map(String::as_str) == Some("--new-permanent");
+    let new_temp = args.first().map(String::as_str) == Some("--new-temp");
+    let is_new_permanent = args.first().map(String::as_str) == Some("--new-permanent");
 
-    let path = if new_temp || is_new_permanent { None } else { args.get(1).cloned() };
+    let path = if new_temp || is_new_permanent { None } else { args.first().cloned() };
     if let Some(p) = &path {
         let msg = notty_ipc::Message::OpenPath(p.clone());
         if try_forward_to_existing_instance(&msg) {
@@ -101,5 +115,41 @@ fn main() -> windows::core::Result<()> {
         notty_ui::window::run_with_temp(load, Some(rx), cfg.files.temp_mode, cfg.files.default_extension.clone())
     } else {
         notty_ui::window::run_with_ipc(path.as_deref(), load, Some(rx))
+    }
+}
+
+#[cfg(test)]
+mod ifeo_tests {
+    use super::strip_ifeo_arg;
+
+    #[test]
+    fn strips_notepad_path_case_insensitive() {
+        let mut args = vec![
+            r"C:\Windows\System32\notepad.exe".to_string(),
+            "C:\\file.txt".to_string(),
+        ];
+        strip_ifeo_arg(&mut args);
+        assert_eq!(args, vec!["C:\\file.txt".to_string()]);
+    }
+
+    #[test]
+    fn strips_uppercase_notepad_path() {
+        let mut args = vec![r"C:\WINDOWS\SYSTEM32\NOTEPAD.EXE".to_string()];
+        strip_ifeo_arg(&mut args);
+        assert!(args.is_empty());
+    }
+
+    #[test]
+    fn leaves_normal_args_untouched() {
+        let mut args = vec!["C:\\file.txt".to_string()];
+        strip_ifeo_arg(&mut args);
+        assert_eq!(args, vec!["C:\\file.txt".to_string()]);
+    }
+
+    #[test]
+    fn leaves_empty_args_untouched() {
+        let mut args: Vec<String> = vec![];
+        strip_ifeo_arg(&mut args);
+        assert!(args.is_empty());
     }
 }
