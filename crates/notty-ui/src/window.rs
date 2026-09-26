@@ -139,6 +139,9 @@ struct WindowState {
     about_open: bool,
     /// Descartar el próximo `WM_CHAR` (la tecla ya se usó en `WM_KEYDOWN`).
     swallow_char: bool,
+    /// Paneles de `Files::Splits`. Se mantiene al día también en los otros modos (al
+    /// cerrar documentos) para que volver a Paneles no apunte a índices que ya no existen.
+    splits: crate::splits::Splits,
 }
 
 impl WindowState {
@@ -183,10 +186,36 @@ impl WindowState {
 
     /// Rectángulo del cuerpo y ancho del canal de números para el estado actual
     /// (bandas resueltas con la config y el número de pestañas reales).
+    /// En modo Paneles, el cuerpo es el del panel con foco (que siempre muestra el
+    /// documento activo), así que todo el manejo de ratón existente vale tal cual.
     fn body_and_gutter(&self) -> (layout::Rect, f32) {
         let ui = self.cfg.borrow().ui;
         let total = self.ws.active().doc.buffer().len_lines();
-        self.renderer.body_and_gutter(&ui, self.ws.len(), self.menu_bar_visible(), total, self.ws.active().raw.is_some())
+        let (body, gutter_w) =
+            self.renderer.body_and_gutter(&ui, self.ws.len(), self.menu_bar_visible(), total, self.ws.active().raw.is_some());
+        let body = self.pane_rects(body).get(self.splits.focus()).copied().unwrap_or(body);
+        (body, gutter_w)
+    }
+
+    fn splits_on(&self) -> bool {
+        self.cfg.borrow().ui.files == notty_config::Files::Splits
+    }
+
+    /// Rect de cada panel dentro de `body` (uno solo, `body`, fuera del modo Paneles).
+    fn pane_rects(&self, body: layout::Rect) -> Vec<layout::Rect> {
+        let n = if self.splits_on() { self.splits.panes().len() } else { 1 };
+        crate::splits::pane_rects(body, n)
+    }
+
+    /// Índice del panel bajo `(x, y)`, solo si hay más de uno.
+    fn pane_at(&self, x: f32, y: f32) -> Option<usize> {
+        let ui = self.cfg.borrow().ui;
+        let body = self.renderer.current_frame(&ui, self.ws.len(), self.menu_bar_visible()).body;
+        let rects = self.pane_rects(body);
+        if rects.len() < 2 {
+            return None;
+        }
+        rects.iter().position(|r| r.contains(x, y))
     }
 
     /// "Filas" totales del documento activo para la barra de scroll: líneas de texto,
@@ -239,9 +268,35 @@ fn close_tab(w: &mut WindowState, hwnd: HWND, idx: usize) {
     let Some(st) = w.ws.iter().nth(idx) else { return };
     let name = crate::doc_name(st.path.as_deref());
     let dirty = st.doc.is_dirty();
+    w.splits.sync(w.ws.active_index());
     if w.ws.close(idx) {
+        w.splits.on_doc_closed(idx, w.ws.len());
+        w.splits.sync(w.ws.active_index());
         w.tab_anims.on_close(idx, name, dirty, std::time::Instant::now(), w.animations_enabled);
         ensure_anim_timer(w, hwnd);
+    }
+}
+
+/// Parte el panel con foco: el nuevo muestra el primer documento que no se ve en
+/// ningún panel, o uno vacío nuevo si ya se ven todos.
+fn split_pane(w: &mut WindowState, hwnd: HWND) {
+    w.splits.sync(w.ws.active_index());
+    match w.splits.split(w.ws.len()) {
+        Some(Some(doc)) => w.ws.activate(doc),
+        Some(None) => {
+            let cfg = w.cfg.borrow().clone();
+            open_tab(w, hwnd, maybe_vim(EditorState::new_empty(), &cfg));
+        }
+        None => {}
+    }
+    w.splits.sync(w.ws.active_index());
+}
+
+/// Da el foco al panel `i` (clic dentro de él): su documento pasa a ser el activo.
+fn focus_pane(w: &mut WindowState, i: usize) {
+    w.splits.sync(w.ws.active_index());
+    if let Some(doc) = w.splits.focus_pane(i) {
+        w.ws.activate(doc);
     }
 }
 
@@ -1233,6 +1288,7 @@ fn run_inner(
             tab_anims: Default::default(),
             about_open: false,
             swallow_char: false,
+            splits: crate::splits::Splits::default(),
         });
         let ptr = Box::into_raw(window_state);
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, ptr as isize);
@@ -1394,8 +1450,20 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     // `visible_lines` depende del alto del cuerpo, que cambia no solo con
                     // `WM_SIZE` sino al aparecer/desaparecer bandas o al cambiar de pestaña.
                     let (body, _) = w.body_and_gutter();
-                    w.ws.active_mut().viewport.visible_lines = layout::visible_lines(body, w.renderer.line_height());
-                    let dark = crate::is_dark(w.cfg.borrow().ui.theme, system_uses_dark_mode());
+                    let visible = layout::visible_lines(body, w.renderer.line_height());
+                    w.ws.active_mut().viewport.visible_lines = visible;
+                    if w.splits_on() {
+                        w.splits.sync(w.ws.active_index());
+                        for &doc in w.splits.panes() {
+                            if let Some(st) = w.ws.get_mut(doc) {
+                                st.viewport.visible_lines = visible;
+                            }
+                        }
+                        w.renderer.set_panes(w.splits.panes().to_vec(), w.splits.focus());
+                    } else {
+                        w.renderer.set_panes(Vec::new(), 0);
+                    }
+                    let dark =crate::is_dark(w.cfg.borrow().ui.theme, system_uses_dark_mode());
                     if let Some(prev) = w.last_dark {
                         if prev != dark {
                             let from = match w.theme_anim {
@@ -1667,7 +1735,9 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     let ui_mods = notty_input::Modifiers { ctrl: mods.ctrl, shift: mods.shift, alt: alt_down };
                     // Atajos reasignables: se leen de `[keys]` en vivo en cada pulsación, así
                     // un cambio hecho en Ajustes → Teclado vale al instante.
-                    let remapped = notty_input::command_for_key(&w.cfg.borrow(), vk, ui_mods);
+                    let splits_on = w.splits_on();
+                    let remapped = notty_input::command_for_key(&w.cfg.borrow(), vk, ui_mods)
+                        .filter(|c| splits_on || !c.is_pane());
                     if let Some(cmd) = remapped {
                         match cmd {
                             notty_input::Command::NewTab => {
@@ -1712,6 +1782,20 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                                 close_tab(w, hwnd, i);
                             }
                             notty_input::Command::OpenSettings => open_settings(w, hwnd),
+                            notty_input::Command::SplitPane => split_pane(w, hwnd),
+                            notty_input::Command::ClosePane => {
+                                w.splits.sync(w.ws.active_index());
+                                if let Some(doc) = w.splits.close_focused() {
+                                    w.ws.activate(doc);
+                                }
+                            }
+                            notty_input::Command::FocusPaneLeft | notty_input::Command::FocusPaneRight => {
+                                w.splits.sync(w.ws.active_index());
+                                let dir = if cmd == notty_input::Command::FocusPaneLeft { -1 } else { 1 };
+                                if let Some(doc) = w.splits.move_focus(dir) {
+                                    w.ws.activate(doc);
+                                }
+                            }
                         }
                         update_title(hwnd, w.ws.active());
                         let _ = InvalidateRect(Some(hwnd), None, false);
@@ -1855,7 +1939,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         }
                     }
 
-                    let hit = w.renderer.hit(x, y);
+                    let mut hit = w.renderer.hit(x, y);
 
                     // Con un menú contextual abierto, un clic fuera solo lo cierra (se
                     // traga, como los menús de Windows); dentro, ejecuta el elemento.
@@ -1878,6 +1962,20 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         }
                         let _ = InvalidateRect(Some(hwnd), None, false);
                         return LRESULT(0);
+                    }
+
+                    // Clic en otro panel: primero se le da el foco, y el clic sigue hacia
+                    // el documento de ese panel.
+                    if matches!(hit, Hit::Body | Hit::ScrollThumb | Hit::ScrollTrack) {
+                        if let Some(i) = w.pane_at(x, y).filter(|&i| i != w.splits.focus()) {
+                            focus_pane(w, i);
+                            update_title(hwnd, w.ws.active());
+                            // Las barras de scroll registradas son de antes del cambio de
+                            // foco: ese clic solo enfoca.
+                            if hit != Hit::Body {
+                                hit = Hit::None;
+                            }
+                        }
                     }
 
                     match hit {
@@ -2103,6 +2201,12 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     }
                     // Como en cualquier editor: clic derecho fuera de la selección mueve
                     // el cursor ahí; dentro de ella, la conserva (para copiar/buscar).
+                    if hit == Hit::Body {
+                        if let Some(i) = w.pane_at(x, y).filter(|&i| i != w.splits.focus()) {
+                            focus_pane(w, i);
+                            update_title(hwnd, w.ws.active());
+                        }
+                    }
                     if hit == Hit::Body && w.ws.active().raw.is_none() {
                         let (body, gutter_w) = w.body_and_gutter();
                         let idx = w.renderer.char_index_at(w.ws.active(), body, gutter_w, x, y);
@@ -2168,7 +2272,21 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     if let crate::Prompt::Path(p) = &mut w.ws.prompt {
                         p.scroll_by(-notches);
                     } else {
-                        w.ws.active_mut().scroll_by(-notches * 3);
+                        // La rueda desplaza el panel bajo el ratón, sin moverle el foco.
+                        let mut pt = windows::Win32::Foundation::POINT {
+                            x: (lparam.0 as i16) as i32,
+                            y: ((lparam.0 >> 16) as i16) as i32,
+                        };
+                        let _ = windows::Win32::Graphics::Gdi::ScreenToClient(hwnd, &mut pt);
+                        let scale = w.renderer.scale();
+                        w.splits.sync(w.ws.active_index());
+                        let doc = w
+                            .pane_at(pt.x as f32 / scale, pt.y as f32 / scale)
+                            .and_then(|i| w.splits.panes().get(i).copied())
+                            .unwrap_or(w.ws.active_index());
+                        if let Some(st) = w.ws.get_mut(doc) {
+                            st.scroll_by(-notches * 3);
+                        }
                     }
                     let _ = InvalidateRect(Some(hwnd), None, false);
                 }

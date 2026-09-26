@@ -132,9 +132,13 @@ const APARIENCIA: &[Row] = &[
 const VENTANA: &[Row] = &[
     Row::Seg {
         title: "Varios archivos",
-        desc: "Pestañas visibles o buffers estilo vim (Ctrl+Tab, :b).",
+        desc: "Pestañas visibles, buffers estilo vim (Ctrl+Tab, :b) o hasta 3 paneles lado a lado.",
         key: SettingKey::Files,
-        options: &[("Pestañas", SettingValue::Files(Files::Tabs)), ("Buffers", SettingValue::Files(Files::Buffers))],
+        options: &[
+            ("Pestañas", SettingValue::Files(Files::Tabs)),
+            ("Buffers", SettingValue::Files(Files::Buffers)),
+            ("Paneles", SettingValue::Files(Files::Splits)),
+        ],
     },
     Row::Select {
         title: "Posición de las pestañas",
@@ -184,6 +188,10 @@ const TECLADO: &[Row] = &[
     Row::Binding { cmd: Command::ZoomIn },
     Row::Binding { cmd: Command::ZoomOut },
     Row::Binding { cmd: Command::ZoomReset },
+    Row::Binding { cmd: Command::SplitPane },
+    Row::Binding { cmd: Command::ClosePane },
+    Row::Binding { cmd: Command::FocusPaneLeft },
+    Row::Binding { cmd: Command::FocusPaneRight },
     Row::Group("Atajos globales · funcionan aunque notty no tenga el foco"),
     Row::Kbd { title: "Nuevo temporal", keys: "Win+Alt+N" },
     Row::Kbd { title: "Nuevo permanente", keys: "Win+Alt+Shift+N" },
@@ -360,6 +368,12 @@ mod tests {
     #[test]
     fn ventana_has_six_rows() {
         assert_eq!(VENTANA.len(), 6);
+    }
+
+    #[test]
+    fn varios_archivos_offers_paneles() {
+        let Row::Seg { key: SettingKey::Files, options, .. } = &VENTANA[0] else { panic!("fila 0") };
+        assert!(options.iter().any(|(_, v)| *v == SettingValue::Files(Files::Splits)));
     }
 
     #[test]

@@ -282,6 +282,9 @@ pub struct Renderer {
     /// Multiplicador de `layout::FONT_MONO`/`LINE_H` vigente (Ctrl+=/Ctrl+-/Ctrl+0).
     /// Solo afecta al cuerpo del editor y la vista raw, ver `set_font_scale`.
     font_scale: f32,
+    /// Documento de cada panel y cuál tiene el foco (`Files::Splits`). Con menos de 2
+    /// paneles se dibuja solo el documento activo, como siempre.
+    panes: (Vec<usize>, usize),
 }
 
 /// Lo que hay que pintar en el panel de notas de versión cuando está abierto
@@ -398,6 +401,7 @@ impl Renderer {
                 menu_keys: Vec::new(),
                 mono_family,
                 font_scale: 1.0,
+                panes: (Vec::new(), 0),
             })
         }
     }
@@ -969,10 +973,10 @@ impl Renderer {
     /// salte (Task 3 del plan de animaciones, ver `WindowState::last_bands`).
     pub(crate) fn resolve_bands(ui: &UiConfig, doc_count: usize, menu_bar_visible: bool) -> layout::Bands {
         use notty_config::{Files, TabsPosition};
-        let tabs_in_title = ui.files == Files::Tabs
+        let tabs_in_title = ui.files != Files::Buffers
             && (ui.tabs_position == TabsPosition::Title
                 || (ui.tabs_position == TabsPosition::Auto && doc_count > 1));
-        let tabs_below = ui.files == Files::Tabs && ui.tabs_position == TabsPosition::Below;
+        let tabs_below = ui.files != Files::Buffers && ui.tabs_position == TabsPosition::Below;
         layout::Bands {
             tabs_in_title,
             menubar: menu_bar_visible,
@@ -998,14 +1002,7 @@ impl Renderer {
             None => theme::palette(view.dark),
         };
         let state = ws.active();
-        let buf = state.doc.buffer();
         let is_raw = state.raw.is_some();
-        let total_lines = buf.len_lines();
-        let range = state.viewport.range(total_lines);
-        let sel = state.doc.selection();
-        let sel_range = sel.range();
-        let head = sel.head;
-        let cursor_line = state.doc.line_col().0;
 
         let (search_matches, search_current): (Vec<std::ops::Range<usize>>, Option<usize>) = match &ws.prompt {
             crate::Prompt::Find(s) | crate::Prompt::Replace(s) => {
@@ -1024,9 +1021,6 @@ impl Renderer {
         // se registran después (hit() prioriza lo último registrado).
         self.hits.push((frame.titlebar, Hit::Caption));
         self.hits.push((frame.body, Hit::Body));
-
-        let gutter_w = if ui.line_numbers && !is_raw { layout::gutter_width(total_lines, self.digit_width()) } else { 0.0 };
-        let text_pad = frame.body.left + gutter_w + layout::TEXT_PAD_L;
 
         unsafe {
             self.target.BeginDraw();
@@ -1061,6 +1055,33 @@ impl Renderer {
                 self.draw_tabs_row(ws, view, pal, layout::TABS_BELOW_PAD_X, w - layout::TABS_BELOW_PAD_X, frame.tabs_below.bottom);
                 self.set_fade(1.0);
                 self.pop_clip();
+            }
+
+            // Un documento por panel (`Files::Splits`); sin paneles, el activo en todo el cuerpo.
+            let (pane_docs, pane_focus) =
+                if self.panes.0.len() > 1 { self.panes.clone() } else { (vec![ws.active_index()], 0) };
+            let split = pane_docs.len() > 1;
+            let pane_rects = crate::splits::pane_rects(frame.body, pane_docs.len());
+            for (pi, (&doc_i, &pane)) in pane_docs.iter().zip(&pane_rects).enumerate() {
+            let focused = pi == pane_focus;
+            let state = ws.iter().nth(doc_i).unwrap_or(state);
+            let mut frame = frame;
+            frame.body = pane;
+            let buf = state.doc.buffer();
+            let is_raw = state.raw.is_some();
+            let total_lines = buf.len_lines();
+            let range = state.viewport.range(total_lines);
+            let sel = state.doc.selection();
+            let sel_range = sel.range();
+            // Sin caret en los paneles sin foco.
+            let head = if focused { sel.head } else { usize::MAX };
+            let cursor_line = state.doc.line_col().0;
+            let (search_matches, search_current) =
+                if focused { (&search_matches[..], search_current) } else { (&[][..], None) };
+            let gutter_w = if ui.line_numbers && !is_raw { layout::gutter_width(total_lines, self.digit_width()) } else { 0.0 };
+            let text_pad = frame.body.left + gutter_w + layout::TEXT_PAD_L;
+            if split {
+                self.push_clip(pane);
             }
 
             if is_raw {
@@ -1174,6 +1195,16 @@ impl Renderer {
             let total_rows =
                 if is_raw { state.raw.as_ref().map(|r| r.len().div_ceil(16).max(1)).unwrap_or(1) } else { total_lines };
             self.draw_editor_scrollbar(frame.body, &state.viewport, total_rows, pal, view);
+            if split {
+                self.pop_clip();
+                if pi > 0 {
+                    self.fill(Rect::new(pane.left - crate::splits::DIVIDER_W, pane.top, pane.left, pane.bottom), pal.line);
+                }
+                if focused {
+                    self.fill(Rect::new(pane.left, pane.top, pane.right, pane.top + 2.0), pal.accent);
+                }
+            }
+            }
 
             if !frame.hints.is_empty() {
                 let k = frame.hints.height() / layout::HINTS_H;
@@ -1793,6 +1824,10 @@ impl Renderer {
     /// Estado de las animaciones de pestañas para el próximo `paint`.
     pub fn set_tab_anim(&mut self, frame: crate::tab_anim::TabAnimFrame) {
         self.tab_anim = frame;
+    }
+
+    pub fn set_panes(&mut self, panes: Vec<usize>, focus: usize) {
+        self.panes = (panes, focus);
     }
 
     pub fn set_about(&mut self, about: Option<AboutContent>) {

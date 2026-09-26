@@ -28,6 +28,10 @@ pub enum Command {
     ZoomIn,
     ZoomOut,
     ZoomReset,
+    SplitPane,
+    ClosePane,
+    FocusPaneLeft,
+    FocusPaneRight,
 }
 
 impl Command {
@@ -43,6 +47,10 @@ impl Command {
         Command::ZoomIn,
         Command::ZoomOut,
         Command::ZoomReset,
+        Command::SplitPane,
+        Command::ClosePane,
+        Command::FocusPaneLeft,
+        Command::FocusPaneRight,
     ];
 
     /// Clave en `[keys]` de config.toml.
@@ -59,6 +67,10 @@ impl Command {
             Command::ZoomIn => "zoom_in",
             Command::ZoomOut => "zoom_out",
             Command::ZoomReset => "zoom_reset",
+            Command::SplitPane => "split_pane",
+            Command::ClosePane => "close_pane",
+            Command::FocusPaneLeft => "focus_pane_left",
+            Command::FocusPaneRight => "focus_pane_right",
         }
     }
 
@@ -79,6 +91,10 @@ impl Command {
             Command::ZoomIn => "Aumentar tamaño del texto",
             Command::ZoomOut => "Reducir tamaño del texto",
             Command::ZoomReset => "Restablecer tamaño del texto",
+            Command::SplitPane => "Dividir panel",
+            Command::ClosePane => "Cerrar panel",
+            Command::FocusPaneLeft => "Panel de la izquierda",
+            Command::FocusPaneRight => "Panel de la derecha",
         }
     }
 
@@ -95,6 +111,10 @@ impl Command {
             Command::ZoomIn => "Ctrl+=",
             Command::ZoomOut => "Ctrl+-",
             Command::ZoomReset => "Ctrl+0",
+            Command::SplitPane => "Ctrl+Shift+Enter",
+            Command::ClosePane => "Ctrl+Shift+W",
+            Command::FocusPaneLeft => "Ctrl+Shift+Left",
+            Command::FocusPaneRight => "Ctrl+Shift+Right",
         }
     }
 
@@ -106,8 +126,21 @@ impl Command {
             Command::NextTab => Some(UiCommand::NextTab),
             Command::PrevTab => Some(UiCommand::PrevTab),
             Command::CloseTab => Some(UiCommand::CloseTab),
-            Command::ToggleVim | Command::ToggleRaw | Command::ZoomIn | Command::ZoomOut | Command::ZoomReset => None,
+            Command::ToggleVim
+            | Command::ToggleRaw
+            | Command::ZoomIn
+            | Command::ZoomOut
+            | Command::ZoomReset
+            | Command::SplitPane
+            | Command::ClosePane
+            | Command::FocusPaneLeft
+            | Command::FocusPaneRight => None,
         }
+    }
+
+    /// Solo actúan con `Files::Splits`; en otro modo la tecla sigue su camino normal.
+    pub fn is_pane(self) -> bool {
+        matches!(self, Command::SplitPane | Command::ClosePane | Command::FocusPaneLeft | Command::FocusPaneRight)
     }
 }
 
