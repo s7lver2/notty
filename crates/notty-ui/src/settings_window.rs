@@ -60,7 +60,11 @@ enum Hit {
     Close,
     Nav(usize),
     EditConfig,
-    OpenKeys,
+    /// Clic en un `Row::Link` de la sección activa (`row` = su índice): qué acción
+    /// dispara se decide en `handle_click` según el `label` de esa fila (p.ej.
+    /// "Abrir [keys]" reutiliza `on_open_path`; "Buscar ahora" llama a
+    /// `on_check_updates`, Task 4 del plan del actualizador).
+    OpenLink(usize),
     /// Fila `row` (índice dentro de la sección activa), control `Toggle`.
     Toggle(usize),
     /// Fila `row`, opción `opt` de un `Seg`.
@@ -75,6 +79,10 @@ struct State {
     cfg: Rc<RefCell<Config>>,
     on_change: Box<dyn Fn()>,
     on_open_path: Box<dyn Fn(std::path::PathBuf)>,
+    /// "Buscar ahora" en Acerca de (Task 4, Step 4 del plan del actualizador):
+    /// dispara el mismo chequeo que el automático, pero en caliente y siempre con
+    /// un mensaje (nunca en silencio, a diferencia del chequeo de arranque).
+    on_check_updates: Box<dyn Fn()>,
     renderer: Renderer,
     active_section: usize,
     hover: Hit,
@@ -126,6 +134,7 @@ pub fn open(
     cfg: Rc<RefCell<Config>>,
     on_change: Box<dyn Fn()>,
     on_open_path: Box<dyn Fn(std::path::PathBuf)>,
+    on_check_updates: Box<dyn Fn()>,
 ) -> Result<()> {
     unsafe {
         let instance = GetModuleHandleW(None)?;
@@ -188,6 +197,7 @@ pub fn open(
             cfg,
             on_change,
             on_open_path,
+            on_check_updates,
             renderer,
             active_section: 0,
             hover: Hit::None,
@@ -370,8 +380,15 @@ fn handle_click(hwnd: HWND, st: &mut State, x: f32, y: f32) {
         Hit::EditConfig => {
             (st.on_open_path)(notty_config::default_path());
         }
-        Hit::OpenKeys => {
-            (st.on_open_path)(notty_config::default_path());
+        Hit::OpenLink(row) => {
+            let label = crate::settings_model::sections(&st.cfg.borrow())[st.active_section]
+                .rows
+                .get(row)
+                .and_then(|r| if let Row::Link { label, .. } = r { Some(*label) } else { None });
+            match label {
+                Some("Buscar ahora") => (st.on_check_updates)(),
+                _ => (st.on_open_path)(notty_config::default_path()),
+            }
         }
         Hit::Toggle(row) => {
             toggle_row(st, row, hwnd);
@@ -441,6 +458,9 @@ fn current_bool(cfg: &Config, key: SettingKey) -> bool {
         SettingKey::StatusBar => cfg.ui.status_bar,
         SettingKey::MergedCommandLine => cfg.ui.merged_command_line,
         SettingKey::VimAlways => cfg.ui.vim_always,
+        SettingKey::Autosave => cfg.files.autosave,
+        SettingKey::StartWithWindows => cfg.hotkey.start_with_windows,
+        SettingKey::UpdatesCheck => cfg.updates.check,
         _ => false,
     }
 }
@@ -644,12 +664,12 @@ fn paint(st: &mut State) {
                 let lw = r.measure(label, &r.fonts().ui_13);
                 let lr = Rect::new(rr.right - 12.0 - lw, rr.top, rr.right - 12.0, rr.bottom);
                 r.text(label, &r.fonts().ui_13, lr, pal.accent);
-                if st.hover == Hit::OpenKeys {
+                if st.hover == Hit::OpenLink(i) {
                     // Mismo subrayado al pasar el ratón que el pie de la navegación.
                     let uy = (lr.top + lr.bottom) / 2.0 + 8.0;
                     r.stroke_line(lr.left, uy, lr.right, uy, 1.0, pal.accent);
                 }
-                st.hits.push((rr, Hit::OpenKeys));
+                st.hits.push((rr, Hit::OpenLink(i)));
                 ry += rr.height() + 3.0;
             }
         }

@@ -86,6 +86,23 @@ struct WindowState {
     tab_switch_anim: Option<crate::Anim>,
     /// Si el `SetTimer` de animación (`ID_ANIM_TIMER`) está corriendo.
     anim_timer_running: bool,
+    /// Aviso/panel de actualización disponible (Task 4 del plan del actualizador):
+    /// qué release se encontró (si alguna), si el panel de notas está abierto, y el
+    /// progreso de la descarga en curso. Ver `crate::update_panel::UpdateState`.
+    update: crate::UpdateState,
+    /// Extremo receptor del hilo de descarga+verificación lanzado al pulsar
+    /// "Actualizar" (Task 4, Step 3), si hay uno en curso.
+    download_rx: Option<std::sync::mpsc::Receiver<DownloadEvent>>,
+    /// Extremo receptor del hilo de "Buscar ahora" (Task 4, Step 4), si hay uno en
+    /// curso: a diferencia del chequeo automático, siempre deja un mensaje.
+    manual_check_rx: Option<std::sync::mpsc::Receiver<ManualCheckEvent>>,
+    /// Clave pública Ed25519 contra la que se verifica `notty-setup.exe` antes de
+    /// ejecutarlo (Task 4, Step 5 / Task 5 del plan): la define `notty` (el binario
+    /// que se distribuye), nunca `notty-update` — ver `notty::PUBKEY`.
+    pubkey: [u8; 32],
+    /// "owner/repo" de GitHub Releases contra el que se comprueban actualizaciones
+    /// (ver `notty::REPO`): también lo define el binario, no `notty-ui`.
+    repo: String,
 }
 
 impl WindowState {
@@ -235,7 +252,20 @@ fn open_settings(w: &WindowState, hwnd: HWND) {
             let _ = InvalidateRect(Some(hwnd), None, false);
         }),
         Box::new(move |path| open_config_as_document(hwnd, path)),
+        Box::new(move || trigger_check_updates_now(hwnd)),
     );
+}
+
+/// "Buscar ahora" desde Ajustes → Acerca de: recupera el `WindowState` de la
+/// ventana principal desde `GWLP_USERDATA` (igual que `open_config_as_document`)
+/// y lanza `check_updates_now` sobre él.
+fn trigger_check_updates_now(hwnd: HWND) {
+    unsafe {
+        let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState;
+        if let Some(w) = ptr.as_mut() {
+            check_updates_now(w, hwnd);
+        }
+    }
 }
 
 /// Guarda el documento activo, pero antes comprueba si el archivo cambió en disco
@@ -283,21 +313,231 @@ fn autosave_tick(w: &mut WindowState) {
 /// maneja el daemon lanzando `notty.exe --new-temp`/`--new-permanent`, Task 9); si
 /// alguno llegara igualmente, no se hace nada. Devuelve `true` si hubo que repintar.
 fn ipc_tick(w: &mut WindowState) -> bool {
-    let Some(rx) = w.ipc_rx.as_ref() else { return false };
     let mut changed = false;
-    while let Ok(msg) = rx.try_recv() {
-        if let notty_ipc::Message::OpenPath(p) = msg {
-            if !p.is_empty() {
-                let path = std::path::PathBuf::from(p);
-                if let Ok(opened) = crate::open_as_document(&path) {
-                    let cfg = w.cfg.borrow().clone();
-                    w.ws.open(maybe_vim(EditorState::from_opened(opened), &cfg));
+    if let Some(rx) = w.ipc_rx.as_ref() {
+        while let Ok(msg) = rx.try_recv() {
+            match msg {
+                notty_ipc::Message::OpenPath(p) => {
+                    if !p.is_empty() {
+                        let path = std::path::PathBuf::from(p);
+                        if let Ok(opened) = crate::open_as_document(&path) {
+                            let cfg = w.cfg.borrow().clone();
+                            w.ws.open(maybe_vim(EditorState::from_opened(opened), &cfg));
+                            changed = true;
+                        }
+                    }
+                }
+                notty_ipc::Message::UpdateAvailable(r) => {
+                    let release = notty_update::Release { tag: r.tag, version: r.version, body: r.body, setup_url: r.setup_url, sig_url: r.sig_url };
+                    w.update.set_available(release);
                     changed = true;
                 }
+                notty_ipc::Message::NewTemp | notty_ipc::Message::NewPermanent => {}
+            }
+        }
+    }
+    if download_tick(w) {
+        changed = true;
+    }
+    if manual_check_tick(w) {
+        changed = true;
+    }
+    changed
+}
+
+/// Eventos de "Buscar ahora" (Task 4, Step 4): a diferencia del chequeo
+/// automático, siempre acaba en un mensaje (release nueva, ya actualizado, o
+/// error), nunca en silencio.
+#[derive(Debug)]
+enum ManualCheckEvent {
+    Found(notty_update::Release),
+    UpToDate,
+    Error(String),
+}
+
+fn manual_check_tick(w: &mut WindowState) -> bool {
+    let Some(rx) = w.manual_check_rx.as_ref() else { return false };
+    let events: Vec<ManualCheckEvent> = rx.try_iter().collect();
+    let mut changed = false;
+    for ev in events {
+        changed = true;
+        match ev {
+            ManualCheckEvent::Found(release) => w.update.set_available(release),
+            ManualCheckEvent::UpToDate => w.update.set_up_to_date(),
+            ManualCheckEvent::Error(msg) => w.update.set_manual_error(msg),
+        }
+        w.manual_check_rx = None;
+    }
+    changed
+}
+
+/// "Buscar ahora" (Task 4, Step 4 del plan del actualizador): mismo chequeo que el
+/// automático de arranque, pero disparado por el usuario y en un hilo aparte para
+/// no bloquear la UI ("síncrono" en el plan quiere decir "lo pidió el usuario", no
+/// "bloquea"). Siempre deja un resultado claro (nunca en silencio).
+fn check_updates_now(w: &mut WindowState, hwnd: HWND) {
+    let (tx, rx) = std::sync::mpsc::channel();
+    w.manual_check_rx = Some(rx);
+    let repo = w.repo.clone();
+    std::thread::spawn(move || {
+        let ua = format!("notty/{}", env!("CARGO_PKG_VERSION"));
+        let event = match notty_update::http::latest_release(&repo, &ua) {
+            Ok(release) if notty_update::is_newer(env!("CARGO_PKG_VERSION"), &release.version) => ManualCheckEvent::Found(release),
+            Ok(_) => ManualCheckEvent::UpToDate,
+            Err(e) => ManualCheckEvent::Error(e.to_string()),
+        };
+        let _ = tx.send(event);
+    });
+    let _ = unsafe { InvalidateRect(Some(hwnd), None, false) };
+}
+
+/// Sondea `w.download_rx` (Task 4, Step 3: hilo de descarga tras pulsar
+/// "Actualizar") y aplica lo que haya llegado al `UpdateState`. El propio hilo se
+/// borra a sí mismo el receptor cuando termina (éxito o error), así que no hace
+/// falta acordarse de limpiar nada aquí aparte de vaciar la cola.
+fn download_tick(w: &mut WindowState) -> bool {
+    let Some(rx) = w.download_rx.as_ref() else { return false };
+    let events: Vec<DownloadEvent> = rx.try_iter().collect();
+    let mut changed = false;
+    for ev in events {
+        changed = true;
+        match ev {
+            DownloadEvent::Progress(done, total) => w.update.set_progress(done, total),
+            DownloadEvent::VerifyFailed => {
+                w.update.fail_verification();
+                w.download_rx = None;
+            }
+            DownloadEvent::DownloadError(msg) => {
+                w.update.download_error(msg);
+                w.download_rx = None;
+            }
+            DownloadEvent::ReadyToRelaunch(setup_exe) => {
+                relaunch_via_setup(w, &setup_exe);
+                w.download_rx = None;
             }
         }
     }
     changed
+}
+
+/// Eventos del hilo de descarga (Task 4, Step 3 del plan del actualizador): vive
+/// solo entre `start_update_download` y `download_tick`, no cruza procesos (a
+/// diferencia de `notty_ipc::Message`, que sí).
+#[derive(Debug)]
+enum DownloadEvent {
+    Progress(u64, u64),
+    VerifyFailed,
+    DownloadError(String),
+    ReadyToRelaunch(std::path::PathBuf),
+}
+
+/// Clic en "Actualizar" del panel (Task 4, Step 3): descarga `notty-setup.exe` y su
+/// `.sig` a `%TEMP%\notty-update\`, verifica la firma con `w.pubkey`, y si es válida
+/// relanza `notty-setup.exe --update --relaunch`. Si la firma no cuadra o falla la
+/// descarga, borra los archivos y dice por qué en el panel — nunca ejecuta un
+/// binario sin verificar (`Global Constraints` del plan).
+fn start_update_download(w: &mut WindowState, hwnd: HWND) {
+    let Some(release) = w.update.available.clone() else { return };
+    w.update.start_download();
+    let (tx, rx) = std::sync::mpsc::channel();
+    w.download_rx = Some(rx);
+    let pubkey = w.pubkey;
+    let hwnd_usize = hwnd.0 as usize;
+
+    std::thread::spawn(move || {
+        let dir = std::env::temp_dir().join("notty-update");
+        if std::fs::create_dir_all(&dir).is_err() {
+            let _ = tx.send(DownloadEvent::DownloadError("no se pudo crear el directorio temporal".to_string()));
+            return;
+        }
+        let setup_path = dir.join("notty-setup.exe");
+        let sig_path = dir.join("notty-setup.exe.sig");
+
+        let progress_tx = tx.clone();
+        if let Err(e) = notty_update::http::download(&release.setup_url, &setup_path, |done, total| {
+            let _ = progress_tx.send(DownloadEvent::Progress(done, total));
+        }) {
+            let _ = tx.send(DownloadEvent::DownloadError(e.to_string()));
+            return;
+        }
+        if let Err(e) = notty_update::http::download(&release.sig_url, &sig_path, |_, _| {}) {
+            let _ = std::fs::remove_file(&setup_path);
+            let _ = tx.send(DownloadEvent::DownloadError(e.to_string()));
+            return;
+        }
+
+        let (Ok(setup_bytes), Ok(sig_bytes)) = (std::fs::read(&setup_path), std::fs::read(&sig_path)) else {
+            let _ = std::fs::remove_file(&setup_path);
+            let _ = std::fs::remove_file(&sig_path);
+            let _ = tx.send(DownloadEvent::DownloadError("no se pudo leer lo descargado".to_string()));
+            return;
+        };
+        let Ok(sig): std::result::Result<[u8; 64], _> = sig_bytes.try_into() else {
+            let _ = std::fs::remove_file(&setup_path);
+            let _ = std::fs::remove_file(&sig_path);
+            let _ = tx.send(DownloadEvent::VerifyFailed);
+            return;
+        };
+
+        if !notty_update::verify(&setup_bytes, &sig, &pubkey) {
+            let _ = std::fs::remove_file(&setup_path);
+            let _ = std::fs::remove_file(&sig_path);
+            let _ = tx.send(DownloadEvent::VerifyFailed);
+            return;
+        }
+
+        let _ = hwnd_usize; // Reservado por si una relanzada futura necesita notificar a esta ventana.
+        let _ = tx.send(DownloadEvent::ReadyToRelaunch(setup_path));
+    });
+}
+
+/// Lanza `notty-setup.exe --update --relaunch --from <actual> --to <nuevo>` y
+/// cierra esta instancia de notty (Task 4, Step 3). `notty-setup.exe` es del plan
+/// del instalador (sibling plan); aquí solo se construye y lanza el comando.
+///
+/// "Guarda la sesión actual" (spec del plan) se resuelve reutilizando el volcado
+/// de recuperación que ya existe (`refresh_recovery`/`notty_io::recovery_dir`):
+/// no hay un mecanismo de sesión aparte en el resto del código (se buscó en
+/// `daemon.rs` y `notty-ipc` primero, como pedía el plan), así que forzar un
+/// volcado fresco justo antes de relanzar es el equivalente más fiel que hay.
+fn relaunch_via_setup(w: &mut WindowState, setup_exe: &std::path::Path) {
+    refresh_recovery(w);
+    let current = std::env::current_exe().unwrap_or_default();
+    let _ = std::process::Command::new(setup_exe)
+        .arg("--update")
+        .arg("--relaunch")
+        .arg("--from")
+        .arg(&current)
+        .arg("--to")
+        .arg(setup_exe)
+        .spawn();
+    unsafe { PostQuitMessage(0) };
+}
+
+/// Traduce `UpdateState` (Task 4 del plan del actualizador) al contenido que
+/// `render.rs` necesita para pintar el panel de notas de versión, si está abierto.
+/// `None` si no hay panel que pintar (nada encontrado, o cerrado).
+fn update_panel_content(update: &crate::UpdateState) -> Option<crate::UpdatePanelContent> {
+    if !update.panel_open {
+        return None;
+    }
+    let release = update.available.as_ref()?;
+    let status_line = update.error.clone().or_else(|| {
+        update.progress.map(|(done, total)| {
+            if total > 0 {
+                format!("Descargando... {} KB / {} KB", done / 1024, total / 1024)
+            } else {
+                "Descargando...".to_string()
+            }
+        })
+    });
+    let downloading = matches!(update.phase, Some(crate::DownloadPhase::Downloading) | Some(crate::DownloadPhase::Verifying));
+    Some(crate::UpdatePanelContent {
+        version: release.version.clone(),
+        body: release.body.clone(),
+        status_line,
+        show_actualizar: !downloading,
+    })
 }
 
 /// Resuelve `Prompt::Conflict`: `M` conserva lo escrito en notty y lo guarda, `D`
@@ -388,18 +628,23 @@ fn install_recovery_hook(snapshot: &'static RecoverySnapshot) {
 /// `path` es la ruta pasada por línea de comandos, si la hay; `load` es el resultado
 /// de cargar `config.toml` (que puede traer un aviso si el archivo estaba roto).
 pub fn run(path: Option<&str>, load: notty_config::LoadResult) -> Result<()> {
-    run_with_ipc(path, load, None)
+    run_with_ipc(path, load, None, notty_update::PUBKEY_PLACEHOLDER_UNSET, "OWNER/notty".to_string())
 }
 
 /// Igual que `run`, pero además recibe el extremo receptor del pipe de instancia
 /// única (Task 8): cada `notty_ipc::Message::OpenPath` que llegue mientras esta
-/// ventana vive se abre como si se hubiera pedido con `Ctrl+O`.
+/// ventana vive se abre como si se hubiera pedido con `Ctrl+O`. `pubkey`/`repo` son
+/// la clave Ed25519 contra la que se verifica `notty-setup.exe` y el "owner/repo"
+/// de GitHub Releases (Task 4/5 del plan del actualizador): los define `notty`,
+/// no `notty-ui` — ver `notty::PUBKEY`/`notty::REPO`.
 pub fn run_with_ipc(
     path: Option<&str>,
     load: notty_config::LoadResult,
     ipc_rx: Option<std::sync::mpsc::Receiver<notty_ipc::Message>>,
+    pubkey: [u8; 32],
+    repo: String,
 ) -> Result<()> {
-    run_inner(path, load, ipc_rx, None)
+    run_inner(path, load, ipc_rx, None, pubkey, repo)
 }
 
 /// Variante de `run_with_ipc` usada por `notty --new-temp` (Task 9): abre la ventana
@@ -410,8 +655,10 @@ pub fn run_with_temp(
     ipc_rx: Option<std::sync::mpsc::Receiver<notty_ipc::Message>>,
     mode: notty_config::TempMode,
     ext: String,
+    pubkey: [u8; 32],
+    repo: String,
 ) -> Result<()> {
-    run_inner(None, load, ipc_rx, Some((mode, ext)))
+    run_inner(None, load, ipc_rx, Some((mode, ext)), pubkey, repo)
 }
 
 fn run_inner(
@@ -419,6 +666,8 @@ fn run_inner(
     load: notty_config::LoadResult,
     ipc_rx: Option<std::sync::mpsc::Receiver<notty_ipc::Message>>,
     initial_temp: Option<(notty_config::TempMode, String)>,
+    pubkey: [u8; 32],
+    repo: String,
 ) -> Result<()> {
     // Snapshot de recuperación: vive el resto del proceso (`Box::leak`) para que el
     // `panic hook`, instalado una sola vez, tenga una dirección `'static` válida.
@@ -563,6 +812,11 @@ fn run_inner(
             popup_open_anim: None,
             tab_switch_anim: None,
             anim_timer_running: false,
+            update: crate::UpdateState::default(),
+            download_rx: None,
+            manual_check_rx: None,
+            pubkey,
+            repo: repo.clone(),
         });
         let ptr = Box::into_raw(window_state);
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, ptr as isize);
@@ -677,6 +931,8 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 if let Some(w) = ptr.as_mut() {
                     let ui = w.render_ui();
                     let view = w.view_state(hwnd);
+                    w.renderer.set_update_notice(w.update.notice_text());
+                    w.renderer.set_update_panel(update_panel_content(&w.update));
                     w.renderer.paint(&w.ws, &ui, &view);
                 }
                 let _ = ValidateRect(Some(hwnd), None);
@@ -1050,6 +1306,18 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                         crate::Hit::Settings => open_settings(w, hwnd),
+                        crate::Hit::UpdateNotice => {
+                            w.update.toggle_panel();
+                            let _ = InvalidateRect(Some(hwnd), None, false);
+                        }
+                        crate::Hit::UpdatePanelCerrar => {
+                            w.update.close_panel();
+                            let _ = InvalidateRect(Some(hwnd), None, false);
+                        }
+                        crate::Hit::UpdatePanelActualizar => {
+                            start_update_download(w, hwnd);
+                            let _ = InvalidateRect(Some(hwnd), None, false);
+                        }
                         crate::Hit::SearchOpt(k) => {
                             if let crate::Prompt::Find(s) | crate::Prompt::Replace(s) = &mut w.ws.prompt {
                                 match k {

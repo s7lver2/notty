@@ -3,6 +3,19 @@
 pub(crate) mod daemon;
 pub(crate) mod shortcut;
 
+/// "owner/repo" de GitHub Releases contra el que se comprueban actualizaciones
+/// (Task 4/6 del plan del actualizador). PLACEHOLDER: reemplázalo por el repo real
+/// en cuanto exista (`gh repo create <owner>/notty ...`, paso manual que no
+/// ejecuta el agente) — usado también por `tools/release.ps1`.
+pub(crate) const REPO: &str = "OWNER/notty";
+
+/// Clave pública Ed25519 contra la que se verifica `notty-setup.exe` antes de
+/// ejecutarlo (Task 4, Step 5 del plan del actualizador). Todo-cero hasta que se
+/// genere la clave real con `notty-sign --keygen` y se pegue aquí (ver Task 5 y
+/// `tools/release.ps1`): verificar contra una clave de ceros siempre falla, así
+/// que el actualizador es seguro por defecto mientras tanto.
+pub(crate) const PUBKEY: [u8; 32] = [0u8; 32];
+
 /// Intenta reenviar `msg` a una instancia de notty ya en marcha (ventana normal o
 /// `--daemon`) a través del *named pipe* de instancia única. Devuelve `true` si había
 /// alguien escuchando (y por tanto el mensaje se envió): en ese caso el proceso actual
@@ -105,16 +118,22 @@ fn main() -> windows::core::Result<()> {
     // Nadie escuchaba en el pipe: esta instancia se convierte en el servidor mientras
     // viva, además de abrir su propia ventana con normalidad.
     let (tx, rx) = std::sync::mpsc::channel();
+    let update_tx = tx.clone();
     spawn_pipe_server(tx);
 
     let load = notty_config::load(&notty_config::default_path());
+    let cfg_for_check = match &load {
+        notty_config::LoadResult::Loaded(c) | notty_config::LoadResult::Missing(c) | notty_config::LoadResult::Defaulted(c, _) => c.clone(),
+    };
+    spawn_update_check(cfg_for_check, update_tx);
+
     if new_temp {
         let cfg = match &load {
             notty_config::LoadResult::Loaded(c) | notty_config::LoadResult::Missing(c) | notty_config::LoadResult::Defaulted(c, _) => c.clone(),
         };
-        notty_ui::window::run_with_temp(load, Some(rx), cfg.files.temp_mode, cfg.files.default_extension.clone())
+        notty_ui::window::run_with_temp(load, Some(rx), cfg.files.temp_mode, cfg.files.default_extension.clone(), PUBKEY, REPO.to_string())
     } else {
-        notty_ui::window::run_with_ipc(path.as_deref(), load, Some(rx))
+        notty_ui::window::run_with_ipc(path.as_deref(), load, Some(rx), PUBKEY, REPO.to_string())
     }
 }
 
@@ -152,4 +171,47 @@ mod ifeo_tests {
         strip_ifeo_arg(&mut args);
         assert!(args.is_empty());
     }
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+/// Chequeo automático de actualizaciones al arrancar (Task 4, Step 1 del plan del
+/// actualizador): sin red salvo que `cfg.updates.check` esté activo y ya toque
+/// (`notty_update::due`). Falla en silencio (spec: "Silent failure only for the
+/// automatic background check"): un error de red o un JSON roto simplemente deja
+/// `last_check` puesto y no dice nada. Manda el resultado por el mismo canal
+/// `mpsc` que ya existía para el pipe de instancia única, en vez de inventar uno
+/// nuevo — `ipc_tick` en `notty-ui` lo recoge igual que un `OpenPath`.
+fn spawn_update_check(cfg: notty_config::Config, tx: std::sync::mpsc::Sender<notty_ipc::Message>) {
+    if !cfg.updates.check {
+        return;
+    }
+    let now = unix_now();
+    if !notty_update::due(cfg.updates.last_check, now) {
+        return;
+    }
+    std::thread::spawn(move || {
+        let ua = format!("notty/{}", env!("CARGO_PKG_VERSION"));
+        if let Ok(release) = notty_update::http::latest_release(REPO, &ua) {
+            if notty_update::is_newer(env!("CARGO_PKG_VERSION"), &release.version) {
+                let msg = notty_ipc::Message::UpdateAvailable(notty_ipc::UpdateRelease {
+                    tag: release.tag,
+                    version: release.version,
+                    body: release.body,
+                    setup_url: release.setup_url,
+                    sig_url: release.sig_url,
+                });
+                let _ = tx.send(msg);
+            }
+        }
+        // Se persiste `last_check` pase lo que pase (éxito, sin red, JSON roto...):
+        // así no se reintenta cada arranque si GitHub está caído.
+        let mut fresh = match notty_config::load(&notty_config::default_path()) {
+            notty_config::LoadResult::Loaded(c) | notty_config::LoadResult::Missing(c) | notty_config::LoadResult::Defaulted(c, _) => c,
+        };
+        fresh.updates.last_check = unix_now();
+        let _ = notty_config::save(&fresh, &notty_config::default_path());
+    });
 }
