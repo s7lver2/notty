@@ -91,6 +91,12 @@ impl Document {
         self.history.top_id() != self.saved
     }
 
+    /// Marca el documento como pendiente de guardar aunque no tenga ediciones (p. ej.
+    /// texto recuperado tras cerrar sin guardar).
+    pub fn mark_unsaved(&mut self) {
+        self.saved = Some(u64::MAX);
+    }
+
     pub fn mark_saved(&mut self) {
         self.saved = self.history.top_id();
         self.history.seal();

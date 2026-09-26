@@ -15,4 +15,6 @@ pub enum Prompt {
     /// Sin datos propios: `ws.active()` ya tiene ruta y texto en memoria, y basta
     /// con releer el disco al resolver.
     Conflict,
+    /// "Tiene cambios sin guardar" al cerrar uno o varios documentos (o la ventana).
+    CloseUnsaved(crate::CloseRequest),
 }

@@ -1470,6 +1470,9 @@ fn archivos(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
         y = toggle_row(ui, x, y, w, cfg, *key, title, desc) + 4.0;
         ui.end_enter();
     }
+    item(ui, d, rows.len());
+    y = seg_row(ui, x, y, w, cfg, SettingKey::OnCloseUnsaved, "Al cerrar con cambios sin guardar") + 4.0;
+    ui.end_enter();
     blk_end(ui);
     y - 4.0
 }

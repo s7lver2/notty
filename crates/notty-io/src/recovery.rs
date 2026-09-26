@@ -11,17 +11,26 @@ pub fn recovery_dir() -> PathBuf {
 pub struct RecoveryEntry {
     pub name: String,
     pub text: String,
+    /// Ruta original del documento, si tenía (se guarda aparte, en `<nombre>.path`).
+    pub path: Option<PathBuf>,
 }
 
 /// Pensada para llamarse desde un `panic hook`: nunca usa `.unwrap()` y sigue
-/// adelante con el resto de entradas aunque una falle.
+/// adelante con el resto de entradas aunque una falle (devuelve el primer error).
 pub fn dump_recovery(dir: &Path, entries: &[RecoveryEntry]) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
+    let mut result = Ok(());
     for e in entries {
         let safe_name: String = e.name.chars().map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
-        let _ = std::fs::write(dir.join(format!("{safe_name}.txt")), &e.text);
+        let mut r = std::fs::write(dir.join(format!("{safe_name}.txt")), &e.text);
+        if let (Ok(()), Some(p)) = (&r, &e.path) {
+            r = std::fs::write(dir.join(format!("{safe_name}.path")), p.to_string_lossy().as_bytes());
+        }
+        if result.is_ok() {
+            result = r;
+        }
     }
-    Ok(())
+    result
 }
 
 pub fn list_recovery(dir: &Path) -> Vec<RecoveryEntry> {
@@ -31,7 +40,8 @@ pub fn list_recovery(dir: &Path) -> Vec<RecoveryEntry> {
         .filter_map(|e| {
             let text = std::fs::read_to_string(e.path()).ok()?;
             let name = e.path().file_stem()?.to_string_lossy().into_owned();
-            Some(RecoveryEntry { name, text })
+            let path = std::fs::read_to_string(e.path().with_extension("path")).ok().map(PathBuf::from);
+            Some(RecoveryEntry { name, text, path })
         })
         .collect()
 }
@@ -54,15 +64,17 @@ mod tests {
         let dir = tempdir().unwrap();
         let d = dir.path().join("recovery");
         let entries = vec![
-            RecoveryEntry { name: "a".into(), text: "hola".into() },
-            RecoveryEntry { name: "b".into(), text: "mundo".into() },
+            RecoveryEntry { name: "a".into(), text: "hola".into(), path: Some(PathBuf::from(r"C:\docs\a.txt")) },
+            RecoveryEntry { name: "b".into(), text: "mundo".into(), path: None },
         ];
         dump_recovery(&d, &entries).unwrap();
         let mut listed = list_recovery(&d);
         listed.sort_by(|a, b| a.name.cmp(&b.name));
         assert_eq!(listed.len(), 2);
         assert_eq!(listed[0].text, "hola");
+        assert_eq!(listed[0].path, Some(PathBuf::from(r"C:\docs\a.txt")));
         assert_eq!(listed[1].text, "mundo");
+        assert_eq!(listed[1].path, None);
     }
 
     #[test]
@@ -75,7 +87,7 @@ mod tests {
     fn clear_recovery_removes_the_dir() {
         let dir = tempdir().unwrap();
         let d = dir.path().join("recovery");
-        dump_recovery(&d, &[RecoveryEntry { name: "a".into(), text: "x".into() }]).unwrap();
+        dump_recovery(&d, &[RecoveryEntry { name: "a".into(), text: "x".into(), path: None }]).unwrap();
         clear_recovery(&d).unwrap();
         assert!(!d.exists());
     }

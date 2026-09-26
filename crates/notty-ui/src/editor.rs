@@ -5,8 +5,13 @@ use notty_io::{LineEnding, TextEncoding};
 
 use crate::{OpenedDoc, Viewport};
 
+static NEXT_DOC_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
 /// Todo lo que necesita una ventana de notty para saber qué mostrar y qué guardar.
 pub struct EditorState {
+    /// Identidad estable del documento (los índices cambian al cerrar pestañas): con
+    /// ella los prompts saben a qué documento pertenece su respuesta.
+    pub id: u64,
     pub doc: Document,
     pub viewport: Viewport,
     pub encoding: TextEncoding,
@@ -30,11 +35,14 @@ pub struct EditorState {
     /// Revisión del documento en la que falló el último autoguardado: no se reintenta
     /// hasta que haya cambios nuevos (ni se repite el aviso hasta que uno salga bien).
     pub autosave_failed_rev: Option<u64>,
+    /// Autoguardado en pausa hasta el próximo guardado a mano (se canceló un conflicto).
+    pub autosave_paused: bool,
 }
 
 impl EditorState {
     pub fn new_empty() -> Self {
         Self {
+            id: NEXT_DOC_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             doc: Document::new("", LineEnding::Crlf.as_str()),
             viewport: Viewport { first_line: 0, visible_lines: 1 },
             encoding: TextEncoding::Utf8,
@@ -49,6 +57,7 @@ impl EditorState {
             syntax: Default::default(),
             lossy_source: None,
             autosave_failed_rev: None,
+            autosave_paused: false,
         }
     }
 
@@ -57,19 +66,12 @@ impl EditorState {
         let lossy_source = opened.lossy.then(|| opened.path.clone());
         Self {
             doc: opened.document,
-            viewport: Viewport { first_line: 0, visible_lines: 1 },
             encoding: opened.encoding,
             eol: opened.eol,
             path: Some(opened.path),
-            vim: None,
-            raw: None,
-            raw_cursor: 0,
-            raw_pending_nibble: None,
-            temp: None,
             open_mtime,
-            syntax: Default::default(),
             lossy_source,
-            autosave_failed_rev: None,
+            ..Self::new_empty()
         }
     }
 

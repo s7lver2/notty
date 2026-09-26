@@ -96,6 +96,8 @@ pub enum Hit {
     /// Respuesta a "ya existe" en la línea de ruta: 0 = sobrescribir, 1 = abrir el
     /// existente, 2 = cancelar.
     Overwrite(u8),
+    /// Respuesta a "cambios sin guardar" al cerrar: 0 = guardar, 1 = no guardar, 2 = cancelar.
+    CloseChoice(u8),
     /// Enlace al repositorio en "Acerca de notty".
     AboutLink,
     /// Tirador de la barra de scroll del editor (arrastrar desplaza el documento).
@@ -2271,6 +2273,7 @@ impl Renderer {
                     let fx = x + w + 4.0;
                     self.text(line, &self.fonts.mono_12_5, Rect::new(fx, r.top, r.right - layout::STATUS_PAD_X, r.bottom), pal.text);
                 }
+                crate::Prompt::CloseUnsaved(req) => self.draw_close_prompt(req, pal, r, view),
                 crate::Prompt::Conflict => {
                     let msg = "El archivo cambió en disco. [M] guardar el mío   [D] usar el del disco   [Esc] cancelar";
                     let x = r.left + layout::STATUS_PAD_X;
@@ -2279,6 +2282,39 @@ impl Renderer {
                 crate::Prompt::None => {}
             }
         }
+    }
+
+    /// "«nombre» tiene cambios sin guardar" con tres botones, como "Ya existe".
+    fn draw_close_prompt(&mut self, req: &crate::CloseRequest, pal: &theme::Palette, r: Rect, view: &ViewState) {
+        let mut xr = r.right - layout::STATUS_PAD_X;
+        let choices = [("C", "Cancelar", 2u8), ("N", "No guardar", 1u8), ("G", "Guardar", 0u8)];
+        for (key, label, idx) in choices {
+            let kw = self.measure(key, &self.fonts.mono_11_bold);
+            let lw = self.measure(label, &self.fonts.ui_11_5);
+            let w = kw + 5.0 + lw + 14.0;
+            xr -= w;
+            let chip = Rect::new(xr, r.top + 3.0, xr + w, r.bottom - 3.0);
+            let hovered = view.hover == Hit::CloseChoice(idx);
+            let primary = idx == 0;
+            let bg = if hovered { pal.hover } else if primary { pal.accent_soft } else { pal.surface_2 };
+            self.fill_round(chip, 4.0, bg);
+            let kc = if primary { pal.accent } else { pal.text_hint };
+            self.text(key, &self.fonts.mono_11_bold, Rect::new(chip.left + 7.0, r.top, chip.left + 7.0 + kw, r.bottom), kc);
+            let tc = if primary { pal.accent } else { pal.text_2 };
+            self.text(label, &self.fonts.ui_11_5, Rect::new(chip.left + 7.0 + kw + 5.0, r.top, chip.right - 7.0, r.bottom), tc);
+            self.hits.push((chip, Hit::CloseChoice(idx)));
+            xr -= 6.0;
+        }
+        let more = req.ask.len().saturating_sub(1);
+        let msg = if more > 0 {
+            format!("«{}» tiene cambios sin guardar (y {more} más)", req.name)
+        } else {
+            format!("«{}» tiene cambios sin guardar", req.name)
+        };
+        let x = r.left + layout::STATUS_PAD_X;
+        self.push_clip(Rect::new(x, r.top, (xr - 10.0).max(x), r.bottom));
+        self.text(&msg, &self.fonts.ui_11_5, Rect::new(x, r.top, xr - 10.0, r.bottom), pal.warn);
+        self.pop_clip();
     }
 
     #[allow(unused_unsafe)]

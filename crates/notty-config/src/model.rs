@@ -195,6 +195,17 @@ pub enum HotkeyMechanism {
     Lnk,
 }
 
+/// Qué hacer al cerrar un documento (o la ventana) con cambios sin guardar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OnCloseUnsaved {
+    /// Guardar / No guardar / Cancelar.
+    #[default]
+    Preguntar,
+    /// Sin preguntar: se vuelca a la carpeta de recuperación y vuelve al abrir notty.
+    Recuperar,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FilesConfig {
@@ -202,11 +213,18 @@ pub struct FilesConfig {
     pub autosave: bool,
     pub default_extension: String,
     pub large_file_mb: u32,
+    pub on_close_unsaved: OnCloseUnsaved,
 }
 
 impl Default for FilesConfig {
     fn default() -> Self {
-        Self { temp_mode: TempMode::default(), autosave: false, default_extension: ".txt".to_string(), large_file_mb: 50 }
+        Self {
+            temp_mode: TempMode::default(),
+            autosave: false,
+            default_extension: ".txt".to_string(),
+            large_file_mb: 50,
+            on_close_unsaved: OnCloseUnsaved::default(),
+        }
     }
 }
 
@@ -463,6 +481,7 @@ font_family = \"{old}\"
         assert!(!f.autosave);
         assert_eq!(f.default_extension, ".txt");
         assert_eq!(f.large_file_mb, 50);
+        assert_eq!(f.on_close_unsaved, OnCloseUnsaved::Preguntar);
     }
 
     #[test]

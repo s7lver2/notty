@@ -57,6 +57,15 @@ impl Workspace {
         self.docs.get_mut(idx)
     }
 
+    pub fn get(&self, idx: usize) -> Option<&EditorState> {
+        self.docs.get(idx)
+    }
+
+    /// Índice actual del documento con `EditorState::id == id`, si sigue abierto.
+    pub fn index_of(&self, id: u64) -> Option<usize> {
+        self.docs.iter().position(|d| d.id == id)
+    }
+
     /// `EditorState::new_empty`/`from_opened` no conocen el tamaño de la ventana (se
     /// crean con `visible_lines: 1`): se hereda el de la pestaña activa, que sí lo
     /// tiene, para que el documento no se vea "de una línea" hasta el próximo resize.

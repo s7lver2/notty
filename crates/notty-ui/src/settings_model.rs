@@ -2,7 +2,9 @@
 //! hay (y cuáles son subpáginas de otra), las opciones de cada selector y qué le
 //! pasa a `Config` cuando se toca algo. No sabe dibujar ni de Win32/Direct2D.
 
-use notty_config::{Config, Files, FontFamily, HotkeyMechanism, MenuBar, Preset, TabsPosition, TempMode, Theme};
+use notty_config::{
+    Config, Files, FontFamily, HotkeyMechanism, MenuBar, OnCloseUnsaved, Preset, TabsPosition, TempMode, Theme,
+};
 use notty_input::Command;
 
 /// Una página de Ajustes. Las de la barra lateral están en `Page::RAIL`; `Fuentes`,
@@ -127,6 +129,7 @@ pub enum SettingKey {
     FontFamily,
     Ligatures,
     SyntaxHighlight,
+    OnCloseUnsaved,
 }
 
 /// El valor elegido; `apply` decide qué campo de `Config` toca según `SettingKey`.
@@ -141,6 +144,7 @@ pub enum SettingValue {
     TempMode(TempMode),
     HotkeyMechanism(HotkeyMechanism),
     FontFamily(FontFamily),
+    OnCloseUnsaved(OnCloseUnsaved),
 }
 
 /// Opciones de un selector: `(etiqueta, valor)`.
@@ -187,6 +191,11 @@ pub const MENU_BAR_OPTS: Options = &[
 pub const TEMP_MODE_OPTS: Options = &[
     ("Borrador", SettingValue::TempMode(TempMode::Draft)),
     ("Volátil", SettingValue::TempMode(TempMode::Volatile)),
+];
+
+pub const ON_CLOSE_OPTS: Options = &[
+    ("Preguntar", SettingValue::OnCloseUnsaved(OnCloseUnsaved::Preguntar)),
+    ("Recuperar al abrir", SettingValue::OnCloseUnsaved(OnCloseUnsaved::Recuperar)),
 ];
 
 pub const HOTKEY_OPTS: Options = &[
@@ -317,6 +326,10 @@ pub fn apply(cfg: &mut Config, key: SettingKey, value: SettingValue) {
             cfg.files.autosave = b;
             return;
         }
+        (SettingKey::OnCloseUnsaved, SettingValue::OnCloseUnsaved(v)) => {
+            cfg.files.on_close_unsaved = v;
+            return;
+        }
         (SettingKey::HotkeyMechanism, SettingValue::HotkeyMechanism(m)) => {
             cfg.hotkey.mechanism = m;
             return;
@@ -383,6 +396,7 @@ pub fn selected_index(cfg: &Config, key: SettingKey, options: Options) -> Option
         SettingKey::TabsPosition => SettingValue::TabsPosition(cfg.ui.tabs_position),
         SettingKey::MenuBar => SettingValue::MenuBar(cfg.ui.menubar),
         SettingKey::TempMode => SettingValue::TempMode(cfg.files.temp_mode),
+        SettingKey::OnCloseUnsaved => SettingValue::OnCloseUnsaved(cfg.files.on_close_unsaved),
         SettingKey::HotkeyMechanism => SettingValue::HotkeyMechanism(cfg.hotkey.mechanism),
         SettingKey::FontFamily => SettingValue::FontFamily(cfg.ui.font_family),
         _ => return None,
@@ -399,6 +413,7 @@ pub fn options_for(key: SettingKey) -> Options {
         SettingKey::TabsPosition => TABS_POSITION_OPTS,
         SettingKey::MenuBar => MENU_BAR_OPTS,
         SettingKey::TempMode => TEMP_MODE_OPTS,
+        SettingKey::OnCloseUnsaved => ON_CLOSE_OPTS,
         SettingKey::HotkeyMechanism => HOTKEY_OPTS,
         _ => &[],
     }
@@ -545,6 +560,15 @@ mod tests {
         let before = cfg.clone();
         apply(&mut cfg, SettingKey::Theme, SettingValue::Bool(true));
         assert_eq!(cfg, before);
+    }
+
+    #[test]
+    fn on_close_unsaved_is_a_files_setting() {
+        let mut cfg = Config::default();
+        assert_eq!(selected_index(&cfg, SettingKey::OnCloseUnsaved, ON_CLOSE_OPTS), Some(0));
+        apply(&mut cfg, SettingKey::OnCloseUnsaved, ON_CLOSE_OPTS[1].1);
+        assert_eq!(cfg.files.on_close_unsaved, OnCloseUnsaved::Recuperar);
+        assert_eq!(cfg.ui.preset, Config::default().ui.preset);
     }
 
     #[test]
