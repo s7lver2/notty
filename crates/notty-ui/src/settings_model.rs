@@ -2,7 +2,7 @@
 //! qué secciones y filas hay, y qué le pasa a `Config` cuando se toca una. No sabe
 //! dibujar ni de Win32/Direct2D.
 
-use notty_config::{Config, Files, HotkeyMechanism, MenuBar, Preset, TabsPosition, TempMode, Theme};
+use notty_config::{Config, Files, FontFamily, HotkeyMechanism, MenuBar, Preset, TabsPosition, TempMode, Theme};
 use notty_input::Command;
 
 /// Qué ajuste toca una fila interactiva (`Seg`/`Select`/`Toggle`).
@@ -25,6 +25,7 @@ pub enum SettingKey {
     UpdatesCheck,
     SuggestionIcons,
     NativeFileDialog,
+    FontFamily,
 }
 
 /// El valor elegido; `apply` decide qué campo de `Config` toca según `SettingKey`.
@@ -38,6 +39,7 @@ pub enum SettingValue {
     Bool(bool),
     TempMode(TempMode),
     HotkeyMechanism(HotkeyMechanism),
+    FontFamily(FontFamily),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -100,6 +102,19 @@ const APARIENCIA: &[Row] = &[
         ],
     },
     Row::Toggle { title: "Números de línea", desc: "", key: SettingKey::LineNumbers },
+    Row::Select {
+        title: "Fuente del editor",
+        desc: "Cascadia Mono si el sistema no tiene la elegida.",
+        key: SettingKey::FontFamily,
+        options: &[
+            ("Automática", SettingValue::FontFamily(FontFamily::Auto)),
+            ("Consolas", SettingValue::FontFamily(FontFamily::Consolas)),
+            ("JetBrains Mono", SettingValue::FontFamily(FontFamily::JetbrainsMono)),
+            ("Fira Code", SettingValue::FontFamily(FontFamily::FiraCode)),
+            ("Courier New", SettingValue::FontFamily(FontFamily::CourierNew)),
+            ("Lucida Console", SettingValue::FontFamily(FontFamily::LucidaConsole)),
+        ],
+    },
 ];
 
 const VENTANA: &[Row] = &[
@@ -287,6 +302,7 @@ pub fn apply(cfg: &mut Config, key: SettingKey, value: SettingValue) {
         (SettingKey::StatusBar, SettingValue::Bool(b)) => cfg.ui.status_bar = b,
         (SettingKey::MergedCommandLine, SettingValue::Bool(b)) => cfg.ui.merged_command_line = b,
         (SettingKey::VimAlways, SettingValue::Bool(b)) => cfg.ui.vim_always = b,
+        (SettingKey::FontFamily, SettingValue::FontFamily(f)) => cfg.ui.font_family = f,
         (SettingKey::SuggestionIcons, SettingValue::Bool(b)) => cfg.ui.suggestion_icons = b,
         (SettingKey::NativeFileDialog, SettingValue::Bool(b)) => cfg.ui.native_file_dialog = b,
         _ => return, // combinación key/value que no tiene sentido: no hace nada
@@ -320,9 +336,10 @@ mod tests {
 
     #[test]
     fn apariencia_has_preset_theme_and_line_numbers() {
-        assert_eq!(APARIENCIA.len(), 3);
+        assert_eq!(APARIENCIA.len(), 4);
         assert!(matches!(APARIENCIA[0], Row::Seg { key: SettingKey::Preset, .. }));
         assert!(matches!(APARIENCIA[2], Row::Toggle { key: SettingKey::LineNumbers, .. }));
+        assert!(matches!(APARIENCIA[3], Row::Select { key: SettingKey::FontFamily, .. }));
     }
 
     #[test]

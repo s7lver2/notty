@@ -989,6 +989,7 @@ fn selected_option_index(cfg: &Config, key: SettingKey, options: &[(&str, Settin
         SettingKey::MenuBar => SettingValue::MenuBar(cfg.ui.menubar),
         SettingKey::TempMode => SettingValue::TempMode(cfg.files.temp_mode),
         SettingKey::HotkeyMechanism => SettingValue::HotkeyMechanism(cfg.hotkey.mechanism),
+        SettingKey::FontFamily => SettingValue::FontFamily(cfg.ui.font_family),
         _ => return None,
     };
     options.iter().position(|(_, v)| *v == current)

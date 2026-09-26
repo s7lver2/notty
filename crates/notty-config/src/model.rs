@@ -53,6 +53,35 @@ pub enum MenuBar {
     Alt,
 }
 
+/// Fuente monoespaciada del editor. `Auto` es el comportamiento de siempre
+/// (`resolve_family` prueba "Cascadia Mono" y cae a "Consolas" si no está
+/// instalada); el resto fija una familia concreta, con el mismo `Consolas` de
+/// respaldo si tampoco está instalada esa.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FontFamily {
+    #[default]
+    Auto,
+    Consolas,
+    JetbrainsMono,
+    FiraCode,
+    CourierNew,
+    LucidaConsole,
+}
+
+impl FontFamily {
+    pub fn primary_name(self) -> &'static str {
+        match self {
+            FontFamily::Auto => "Cascadia Mono",
+            FontFamily::Consolas => "Consolas",
+            FontFamily::JetbrainsMono => "JetBrains Mono",
+            FontFamily::FiraCode => "Fira Code",
+            FontFamily::CourierNew => "Courier New",
+            FontFamily::LucidaConsole => "Lucida Console",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct UiConfig {
@@ -76,6 +105,7 @@ pub struct UiConfig {
     /// ruta de abajo. `^O` dentro de la línea de ruta ya lo ofrece siempre como
     /// alternativa puntual; esto lo hace el camino por defecto.
     pub native_file_dialog: bool,
+    pub font_family: FontFamily,
 }
 
 impl Default for UiConfig {
@@ -94,6 +124,7 @@ impl Default for UiConfig {
             font_scale: 1.0,
             suggestion_icons: true,
             native_file_dialog: false,
+            font_family: FontFamily::Auto,
         };
         let preset = ui.preset;
         crate::apply_preset(&mut ui, preset);
@@ -284,6 +315,15 @@ mod tests {
         let text = toml::to_string(&cfg).unwrap();
         let back: Config = toml::from_str(&text).unwrap();
         assert_eq!(back.ui.font_scale, 1.3);
+    }
+
+    #[test]
+    fn font_family_defaults_to_auto_and_round_trips() {
+        assert_eq!(UiConfig::default().font_family, FontFamily::Auto);
+        let cfg = Config { ui: UiConfig { font_family: FontFamily::JetbrainsMono, ..UiConfig::default() }, ..Config::default() };
+        let text = toml::to_string(&cfg).unwrap();
+        let back: Config = toml::from_str(&text).unwrap();
+        assert_eq!(back.ui.font_family, FontFamily::JetbrainsMono);
     }
 
     #[test]

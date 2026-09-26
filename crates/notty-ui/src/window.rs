@@ -607,6 +607,17 @@ fn open_settings_at(w: &WindowState, hwnd: HWND, section: &str) {
         Box::new(move || unsafe {
             let dark = crate::is_dark(cfg_for_theme.borrow().ui.theme, system_uses_dark_mode());
             apply_dark_mode(hwnd, dark);
+            // Por si el cambio fue la fuente del editor (Ajustes → Apariencia): se
+            // reaplica siempre, es barato comparado con abrir Ajustes en sí, y así no
+            // hace falta que este callback sepa qué ajuste concreto se tocó.
+            let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState;
+            if let Some(w) = ptr.as_mut() {
+                let family = cfg_for_theme.borrow().ui.font_family;
+                let _ = w.renderer.set_mono_family(family.primary_name());
+                let (body, _) = w.body_and_gutter();
+                let line_h = w.renderer.line_height();
+                w.ws.active_mut().viewport.visible_lines = layout::visible_lines(body, line_h);
+            }
             let _ = InvalidateRect(Some(hwnd), None, false);
         }),
         Box::new(move |path| open_config_as_document(hwnd, path)),
@@ -1177,6 +1188,7 @@ fn run_inner(
 
         let dpi = GetDpiForWindow(hwnd);
         let mut renderer = Renderer::new(hwnd, dpi)?;
+        let _ = renderer.set_mono_family(cfg.ui.font_family.primary_name());
         let _ = renderer.set_font_scale(cfg.ui.font_scale);
 
         let total_lines = ws.active().doc.buffer().len_lines();

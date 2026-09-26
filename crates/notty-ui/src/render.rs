@@ -412,6 +412,23 @@ impl Renderer {
         self.font_scale
     }
 
+    /// Cambia la familia monoespaciada del editor (Ajustes → Apariencia → Fuente del
+    /// editor). `primary` es el nombre a buscar; si el sistema no la tiene, cae a
+    /// Consolas, igual que hace `Renderer::new` con la familia por defecto.
+    pub fn set_mono_family(&mut self, primary: &str) -> Result<()> {
+        let sys_fonts: IDWriteFontCollection = unsafe {
+            let mut collection: Option<IDWriteFontCollection> = None;
+            self.dwrite.GetSystemFontCollection(&mut collection, false)?;
+            collection.expect("GetSystemFontCollection debe devolver una colección")
+        };
+        let family = resolve_family(&sys_fonts, primary, "Consolas");
+        let size = layout::FONT_MONO * self.font_scale;
+        self.fonts.mono_13 = make_format(&self.dwrite, &family, size, DWRITE_FONT_WEIGHT_NORMAL)?;
+        self.fonts.mono_13_bold = make_format(&self.dwrite, &family, size, DWRITE_FONT_WEIGHT_BOLD)?;
+        self.mono_family = family;
+        Ok(())
+    }
+
     /// Aplica el zoom de texto del editor (Ctrl+=/Ctrl+-/Ctrl+0): recrea `mono_13` y
     /// `mono_13_bold` (cuerpo del documento, gutter y vista raw — no el resto de la
     /// interfaz) al nuevo tamaño. `scale` se recorta a un rango razonable para que no
