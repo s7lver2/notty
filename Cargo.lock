@@ -285,7 +285,7 @@ dependencies = [
 
 [[package]]
 name = "notty"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "embed-resource",
  "notty-config",
@@ -345,7 +345,7 @@ dependencies = [
 
 [[package]]
 name = "notty-setup"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "notty-config",
  "notty-ui",
