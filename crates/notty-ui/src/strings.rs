@@ -227,6 +227,10 @@ const TABLE: &[(&str, &str)] = &[
     ("Desactivar todos", "Turn all off"),
     ("Activar todos", "Turn all on"),
     ("Desactivado", "Off"),
+    // --- render.rs: diálogos de cierre / conflicto ---
+    ("Cancelar", "Cancel"),
+    ("No guardar", "Don't save"),
+    ("Escribe SI o NO y pulsa Enter · Esc cancela", "Type YES or NO and press Enter · Esc cancels"),
     // --- tour.rs / welcome_window.rs: bienvenida y recorrido ---
     ("Atrás", "Back"),
     ("Empezar", "Get started"),

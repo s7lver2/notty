@@ -1322,7 +1322,7 @@ impl Renderer {
                 self.pop_clip();
             }
 
-            self.draw_status(ws, state, pal, frame, bands.merged_status, view, ui.suggestion_icons);
+            self.draw_status(ws, state, pal, frame, bands.merged_status, view, ui.suggestion_icons, lang);
 
             if let (Some((x, top)), Some(i)) = (self.pending_dropdown.take(), view.open_menu) {
                 let checks = crate::menu::MenuChecks {
@@ -1909,7 +1909,7 @@ impl Renderer {
     /// Barra de estado (`.status`) o, si hay un prompt activo, lo dibuja en su lugar
     /// (nunca coexisten: mientras hay prompt, la franja inferior es suya por completo).
     #[allow(unused_unsafe)]
-    unsafe fn draw_status(&mut self, ws: &Workspace, state: &EditorState, pal: &theme::Palette, frame: layout::Frame, merged: bool, view: &ViewState, suggestion_icons: bool) {
+    unsafe fn draw_status(&mut self, ws: &Workspace, state: &EditorState, pal: &theme::Palette, frame: layout::Frame, merged: bool, view: &ViewState, suggestion_icons: bool, lang: notty_config::Lang) {
         unsafe {
             let r = frame.status;
             if merged {
@@ -1931,7 +1931,7 @@ impl Renderer {
             };
 
             if prompt_open {
-                self.draw_prompt(&ws.prompt, state, pal, content_r, merged, view, suggestion_icons);
+                self.draw_prompt(&ws.prompt, state, pal, content_r, merged, view, suggestion_icons, lang);
             } else {
                 self.draw_status_normal(state, pal, content_r, merged, view);
             }
@@ -2363,7 +2363,7 @@ impl Renderer {
     /// Prompt activo (ruta, buscar/reemplazar, línea de comandos vim), ocupando la
     /// franja de estado entera.
     #[allow(unused_unsafe)]
-    unsafe fn draw_prompt(&mut self, prompt: &crate::Prompt, state: &EditorState, pal: &theme::Palette, r: Rect, merged: bool, view: &ViewState, suggestion_icons: bool) {
+    unsafe fn draw_prompt(&mut self, prompt: &crate::Prompt, state: &EditorState, pal: &theme::Palette, r: Rect, merged: bool, view: &ViewState, suggestion_icons: bool, lang: notty_config::Lang) {
         unsafe {
             match prompt {
                 crate::Prompt::Path(p) => self.draw_path_prompt(p, pal, r, view, suggestion_icons),
@@ -2377,8 +2377,8 @@ impl Renderer {
                     let fx = x + w + 4.0;
                     self.text(line, &self.fonts.mono_12_5, Rect::new(fx, r.top, r.right - layout::STATUS_PAD_X, r.bottom), pal.text);
                 }
-                crate::Prompt::CloseUnsaved(req) => self.draw_close_prompt(req, pal, r, view),
-                crate::Prompt::Conflict(c) => self.draw_conflict_prompt(c, pal, r),
+                crate::Prompt::CloseUnsaved(req) => self.draw_close_prompt(req, pal, r, view, lang),
+                crate::Prompt::Conflict(c) => self.draw_conflict_prompt(c, pal, r, lang),
                 crate::Prompt::None => {}
             }
         }
@@ -2386,7 +2386,7 @@ impl Renderer {
 
     /// "El archivo cambió en disco": franja en rojo suave con un campo donde escribir
     /// SI o NO (ver `ConflictState`).
-    fn draw_conflict_prompt(&mut self, c: &crate::ConflictState, pal: &theme::Palette, r: Rect) {
+    fn draw_conflict_prompt(&mut self, c: &crate::ConflictState, pal: &theme::Palette, r: Rect, lang: notty_config::Lang) {
         self.fill(r, pal.danger.faded(0.12));
         let field_w = 70.0;
         let fr = Rect::new(r.right - layout::STATUS_PAD_X - field_w, r.top + 3.0, r.right - layout::STATUS_PAD_X, r.bottom - 3.0);
@@ -2398,7 +2398,9 @@ impl Renderer {
         let caret_x = (tx + tw).min(fr.right - 4.0);
         self.fill(Rect::new(caret_x, r.top + 6.0, caret_x + 1.0, r.bottom - 6.0), pal.text);
         let msg = if c.invalid {
-            "Escribe SI o NO y pulsa Enter · Esc cancela".to_string()
+            crate::strings::tr(lang, "Escribe SI o NO y pulsa Enter · Esc cancela").to_string()
+        } else if lang == notty_config::Lang::En {
+            format!("'{}' changed on disk · YES + Enter saves yours over it · NO + Enter loads the one on disk · Esc cancels", c.name)
         } else {
             format!("«{}» cambió en disco · SI + Enter guarda el tuyo encima · NO + Enter carga el del disco · Esc cancela", c.name)
         };
@@ -2410,9 +2412,9 @@ impl Renderer {
     }
 
     /// "«nombre» tiene cambios sin guardar" con tres botones, como "Ya existe".
-    fn draw_close_prompt(&mut self, req: &crate::CloseRequest, pal: &theme::Palette, r: Rect, view: &ViewState) {
+    fn draw_close_prompt(&mut self, req: &crate::CloseRequest, pal: &theme::Palette, r: Rect, view: &ViewState, lang: notty_config::Lang) {
         let mut xr = r.right - layout::STATUS_PAD_X;
-        let choices = [("C", "Cancelar", 2u8), ("N", "No guardar", 1u8), ("G", "Guardar", 0u8)];
+        let choices = [("C", crate::strings::tr(lang, "Cancelar"), 2u8), ("N", crate::strings::tr(lang, "No guardar"), 1u8), ("G", crate::strings::tr(lang, "Guardar"), 0u8)];
         for (key, label, idx) in choices {
             let kw = self.measure(key, &self.fonts.mono_11_bold);
             let lw = self.measure(label, &self.fonts.ui_11_5);
@@ -2431,7 +2433,9 @@ impl Renderer {
             xr -= 6.0;
         }
         let more = req.ask.len().saturating_sub(1);
-        let msg = if more > 0 {
+        let msg = if lang == notty_config::Lang::En {
+            if more > 0 { format!("'{}' has unsaved changes (and {more} more)", req.name) } else { format!("'{}' has unsaved changes", req.name) }
+        } else if more > 0 {
             format!("«{}» tiene cambios sin guardar (y {more} más)", req.name)
         } else {
             format!("«{}» tiene cambios sin guardar", req.name)
