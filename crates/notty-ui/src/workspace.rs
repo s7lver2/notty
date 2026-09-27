@@ -17,9 +17,9 @@ impl Workspace {
     }
 
     /// Pregunta por el conflicto del documento activo.
-    pub fn open_conflict(&mut self) {
+    pub fn open_conflict(&mut self, lang: notty_config::Lang) {
         let st = self.active();
-        let name = crate::doc_name(st.path.as_deref());
+        let name = crate::doc_name_lang(st.path.as_deref(), lang);
         self.prompt = crate::Prompt::Conflict(crate::ConflictState::new(st.id, name, std::time::Instant::now()));
     }
 
@@ -259,7 +259,7 @@ mod tests {
         let mut w = Workspace::new();
         w.open(EditorState::new_empty());
         let id = w.active().id;
-        w.open_conflict();
+        w.open_conflict(notty_config::Lang::Es);
         w.activate(0);
         assert!(matches!(&w.prompt, crate::Prompt::Conflict(c) if c.doc == id));
     }

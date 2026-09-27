@@ -97,6 +97,7 @@ struct State {
     animations_enabled: bool,
     open_anim: Option<crate::Anim>,
     theme_from: Option<(bool, Instant)>,
+    accent_from: Option<(notty_config::AccentColor, Instant)>,
     anim_timer_running: bool,
     /// El último `paint` dijo que hay algo moviéndose (hay que seguir repintando).
     needs_frames: bool,
@@ -250,6 +251,7 @@ pub fn open(
             animations_enabled,
             open_anim: Some(crate::Anim::new_maybe(now, Duration::from_millis(150), animations_enabled)),
             theme_from: None,
+            accent_from: None,
             anim_timer_running: false,
             needs_frames: true,
             tw: Tweens::new(!animations_enabled),
@@ -617,6 +619,9 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         if st.theme_from.is_some_and(|(_, t0)| now.saturating_duration_since(t0) >= Duration::from_millis(THEME_MS)) {
                             st.theme_from = None;
                         }
+                        if st.accent_from.is_some_and(|(_, t0)| now.saturating_duration_since(t0) >= Duration::from_millis(THEME_MS)) {
+                            st.accent_from = None;
+                        }
                         let out_d = Duration::from_millis(CAPTURE_OUT_MS);
                         if st.capture.is_some_and(|c| c.closing.is_some_and(|t0| !st.animations_enabled || now.saturating_duration_since(t0) >= out_d)) {
                             st.capture = None;
@@ -965,12 +970,17 @@ fn run_link(st: &mut State, hwnd: HWND, action: LinkAction) {
 fn set_value(st: &mut State, hwnd: HWND, key: SettingKey, value: SettingValue) {
     let system_dark = crate::window::system_uses_dark_mode();
     let was_dark = is_dark(st.cfg.borrow().ui.theme, system_dark);
+    let was_accent = st.cfg.borrow().ui.accent;
     model::apply(&mut st.cfg.borrow_mut(), key, value);
     save_and_notify(st);
     let now_dark = is_dark(st.cfg.borrow().ui.theme, system_dark);
     if now_dark != was_dark {
         st.theme_from = Some((was_dark, Instant::now()));
         unsafe { crate::window::apply_dark_mode(hwnd, now_dark) };
+    }
+    let now_accent = st.cfg.borrow().ui.accent;
+    if now_accent != was_accent {
+        st.accent_from = Some((was_accent, Instant::now()));
     }
 }
 
@@ -1105,13 +1115,22 @@ fn paint(st: &mut State) {
     let system_dark = crate::window::system_uses_dark_mode();
     let accent = st.cfg.borrow().ui.accent;
     let dark = is_dark(st.cfg.borrow().ui.theme, system_dark);
-    let pal_owned = match st.theme_from {
+    let (from_dark, t_theme) = match st.theme_from {
         Some((from_dark, t0)) if st.animations_enabled => {
-            let p = (now.saturating_duration_since(t0).as_secs_f32() / (THEME_MS as f32 / 1000.0)).clamp(0.0, 1.0);
-            theme::palette(from_dark, accent).mix(&theme::palette(dark, accent), crate::ease_out_cubic(p))
+            (from_dark, crate::ease_out_cubic((now.saturating_duration_since(t0).as_secs_f32() / (THEME_MS as f32 / 1000.0)).clamp(0.0, 1.0)))
         }
-        _ => theme::palette(dark, accent),
+        _ => (dark, 1.0),
     };
+    let (from_accent, t_accent) = match st.accent_from {
+        Some((from_accent, t0)) if st.animations_enabled => {
+            (from_accent, crate::ease_out_cubic((now.saturating_duration_since(t0).as_secs_f32() / (THEME_MS as f32 / 1000.0)).clamp(0.0, 1.0)))
+        }
+        _ => (accent, 1.0),
+    };
+    // Igual que en la ventana principal: cada transición se funde por separado, en
+    // cadena, para que las dos acaben siempre en `(dark, accent)`.
+    let pal_after_theme = theme::palette(from_dark, from_accent).mix(&theme::palette(dark, from_accent), t_theme);
+    let pal_owned = pal_after_theme.mix(&theme::palette(dark, accent), t_accent);
     let pal = &pal_owned;
     st.renderer.recover_device();
     let (w, h) = st.renderer.size_dips();
@@ -1211,6 +1230,7 @@ fn paint(st: &mut State) {
         || st.focus.is_some()
         || st.open_anim.is_some()
         || st.theme_from.is_some()
+        || st.accent_from.is_some()
         || st.capture.is_some()
         || matches!(update.phase, crate::UpdatePhase::Checking | crate::UpdatePhase::Downloading(..))
         || (st.animations_enabled && matches!(update.phase, crate::UpdatePhase::Found));

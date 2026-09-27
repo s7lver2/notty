@@ -385,7 +385,8 @@ impl Tour {
         // El cuerpo se parte en líneas al ancho real del globo y el globo crece con él.
         let body_line_h = 11.5 * 1.45;
         let body_w = TIP_W - TIP_PAD * 2.0 - 18.0;
-        let body_lines_h = r.measure_wrapped(stop.body, &r.fonts().ui_11_5, body_w, Some(body_line_h));
+        let body = r.tr(stop.body);
+        let body_lines_h = r.measure_wrapped(body, &r.fonts().ui_11_5, body_w, Some(body_line_h));
         let tip_h = TIP_PAD * 2.0 + 16.0 + 3.0 + body_lines_h + kbd_h + 8.0 + 18.0;
 
         let (tip, inside) = tip_rect(hole, full, tip_h, dx);
@@ -410,9 +411,9 @@ impl Tour {
         }
 
         let title_r = Rect::new(tip.left + TIP_PAD, tip.top + TIP_PAD, tip.right - TIP_PAD - 18.0, tip.top + TIP_PAD + 16.0);
-        r.text(stop.title, &r.fonts().ui_13, title_r, pal.text);
+        r.text(r.tr(stop.title), &r.fonts().ui_13, title_r, pal.text);
         let body_r = Rect::new(title_r.left, title_r.bottom + 3.0, title_r.left + body_w, title_r.bottom + 3.0 + body_lines_h);
-        r.text_wrapped(stop.body, &r.fonts().ui_11_5, body_r, pal.text_2, Some(body_line_h));
+        r.text_wrapped(body, &r.fonts().ui_11_5, body_r, pal.text_2, Some(body_line_h));
 
         let mut kbd_bottom = body_r.bottom;
         if !stop.kbd.is_empty() {
@@ -439,7 +440,7 @@ impl Tour {
 
         // "Siguiente"/"Hecho" (derecha) + "← Atrás" si no es la primera parada.
         let is_last = self.current + 1 == STOPS.len();
-        let next_label = if is_last { "Hecho" } else { "Siguiente →" };
+        let next_label = r.tr(if is_last { "Hecho" } else { "Siguiente →" });
         let next_w = r.measure(next_label, &r.fonts().ui_12);
         let next_r = Rect::new(nav_r.right - next_w, nav_r.top, nav_r.right, nav_r.bottom);
         r.text(next_label, &r.fonts().ui_12, next_r, pal.accent);
@@ -448,7 +449,7 @@ impl Tour {
         }
 
         if self.current > 0 {
-            let back_label = "← Atrás";
+            let back_label = r.tr("← Atrás");
             let back_w = r.measure(back_label, &r.fonts().ui_12);
             let back_r = Rect::new(next_r.left - 10.0 - back_w, nav_r.top, next_r.left - 10.0, nav_r.bottom);
             r.text(back_label, &r.fonts().ui_12, back_r, pal.text_2);
@@ -554,9 +555,9 @@ impl Tour {
         r.stroke_round_rect(panel, 10.0, 1.0, pal.shadow_ring);
 
         let caption = if all_done {
-            "¡Eso es!".to_string()
+            r.tr("¡Eso es!").to_string()
         } else {
-            format!("Pulsa {}", keys.get(target).map_or(String::new(), |k| k.replace('+', " + ")))
+            format!("{} {}", r.tr("Pulsa"), keys.get(target).map_or(String::new(), |k| k.replace('+', " + ")))
         };
         let cap_r = Rect::new(panel.left + PAD, panel.top + PAD - 2.0, panel.right - PAD, panel.top + PAD + CAPTION_H - 6.0);
         r.text_center(&caption, &r.fonts().ui_12_semibold, cap_r, if all_done { GREEN } else { pal.text });

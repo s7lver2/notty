@@ -389,9 +389,7 @@ fn apariencia(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     blk(ui, d, 4);
     y = label(ui, x, y, w, "Color de acento") + 8.0;
     let sel = model::selected_index(cfg, SettingKey::AccentColor, model::ACCENT_OPTS);
-    y = swatches(ui, x, y, w, SettingKey::AccentColor, model::ACCENT_OPTS, sel) + 16.0;
-    y = seg_row(ui, x, y, w, cfg, SettingKey::Lang, "Idioma") + 4.0;
-    y = label(ui, x, y, w, "El idioma de la interfaz. \"Auto\" sigue el de Windows.") + 12.0;
+    y = cards(ui, x, y, w, SettingKey::AccentColor, sel, accent_thumb) + 16.0;
     blk_end(ui);
 
     blk(ui, d, 5);
@@ -562,33 +560,6 @@ fn cards(
     y + h
 }
 
-/// Fila de círculos de color (Ajustes → Apariencia → Color de acento): más
-/// compacta que `cards()`, que está pensada para miniaturas con forma de ventana.
-fn swatches(ui: &mut Ui, x: f32, y: f32, w: f32, key: SettingKey, opts: model::Options, sel: Option<usize>) -> f32 {
-    let n = opts.len() as f32;
-    let cw = (w - 8.0 * (n - 1.0)) / n;
-    let d = cw.min(40.0);
-    let h = d + 8.0;
-    for (j, (_, value)) in opts.iter().enumerate() {
-        let model::SettingValue::AccentColor(color) = value else { continue };
-        let hit = Hit::Choice(key, j as u8);
-        let cx = x + (cw + 8.0) * j as f32 + cw / 2.0;
-        let cy = y + d / 2.0;
-        let r = Rect::new(cx - cw / 2.0, y, cx - cw / 2.0 + cw, y + d);
-        let selected = sel == Some(j);
-        let hover = ui.hover_t(hit, 350);
-        ui.hit(r, hit);
-        let rgba = crate::theme::accent_swatch(*color);
-        ui.r.fill_circle(cx, cy, d / 2.0 - 2.0, rgba);
-        if selected {
-            ui.r.stroke_circle(cx, cy, d / 2.0, 2.0, ui.pal.text);
-        } else if hover > 0.0 {
-            ui.r.stroke_circle(cx, cy, d / 2.0, 1.5, ui.pal.text_3.faded(hover));
-        }
-    }
-    y + h
-}
-
 fn bar(ui: &Ui, x: f32, y: f32, w: f32, h: f32, c: Rgba) {
     ui.r.fill_round(Rect::new(x, y, x + w, y + h), h / 2.0, c);
 }
@@ -651,6 +622,17 @@ fn theme_thumb(ui: &mut Ui, j: usize, r: Rect, _hover: f32, _system_dark: bool) 
         1 => draw(ui, &crate::theme::LIGHT, r),
         _ => draw(ui, &crate::theme::DARK, r),
     }
+}
+
+/// Miniatura de una tarjeta de `SettingKey::AccentColor`: un círculo relleno con
+/// el tono, igual de simple que el resto de tarjetas (`cards()` ya pone el nombre
+/// debajo, el anillo al elegirla y el ✓ que entra).
+fn accent_thumb(ui: &mut Ui, j: usize, r: Rect, hover: f32) {
+    let Some((_, model::SettingValue::AccentColor(color))) = model::ACCENT_OPTS.get(j) else { return };
+    let rgba = crate::theme::accent_swatch(*color);
+    let cx = r.left + r.width() / 2.0;
+    let cy = r.top + r.height() / 2.0;
+    ui.r.fill_circle(cx, cy, 16.0 + 2.0 * hover, rgba);
 }
 
 /// Tarjeta de código: se redibuja con la fuente, tamaño, resaltado, ligaduras y
@@ -1768,7 +1750,7 @@ fn actualizaciones(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
         UpdatePhase::Downloading(..) => (format!("{} {newv}", ui.tr("Descargando")), ui.tr("Se verifica la firma al terminar.").to_string()),
         UpdatePhase::Error(e) => (
             if up.new_version.is_some() { ui.tr("No se pudo actualizar").to_string() } else { ui.tr("No se pudo comprobar").to_string() },
-            e.clone(),
+            ui.tr(e).to_string(),
         ),
     };
     let has_new = matches!(up.phase, UpdatePhase::Found | UpdatePhase::Downloading(..));
@@ -1930,7 +1912,7 @@ fn actualizaciones(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     let fm = ui.mono(ui.r.mono_family(), 12.0);
     let vw = ui.r.measure(version, &fm);
     ui.r.text(version, &fm, Rect::new(x + aw, y, x + aw + vw + 2.0, y + 18.0), pal.text_2);
-    let last = format!("{}: {}", ui.tr("Última comprobación"), model::relative_time(now, cfg.updates.last_check));
+    let last = format!("{}: {}", ui.tr("Última comprobación"), model::relative_time(now, cfg.updates.last_check, ui.lang));
     ui.text(&last, 12.0, false, Rect::new(x + aw + vw + 16.0, y, x + w, y + 18.0), pal.text_3);
     y += 18.0;
     blk_end(ui);
@@ -2076,6 +2058,11 @@ fn ayuda(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     blk_end(ui);
 
     blk(ui, d, 1);
+    y = seg_row(ui, x, y, w, cfg, SettingKey::Lang, "Idioma") + 4.0;
+    y = label(ui, x, y, w, "El idioma de la interfaz. \"Auto\" sigue el de Windows.") + 16.0;
+    blk_end(ui);
+
+    blk(ui, d, 2);
     let hit = Hit::Link(LinkAction::RepeatTutorial);
     let empezar = ui.tr("Empezar");
     let bw = ui.button_w(empezar, true);
@@ -2102,7 +2089,7 @@ fn ayuda(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     y = r.bottom + 16.0;
     blk_end(ui);
 
-    blk(ui, d, 2);
+    blk(ui, d, 3);
     y = label(ui, x, y, w, "Lo básico") + 8.0;
     let spec = |c: Command| {
         let s = notty_input::binding_spec(cfg, c);

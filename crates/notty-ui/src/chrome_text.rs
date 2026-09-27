@@ -17,7 +17,7 @@ pub enum HintsCtx {
 }
 
 /// Pares (tecla, acción). La tecla va en negrita `--text-hint`, la acción en `--text-2`.
-pub fn hints_items(ctx: HintsCtx) -> &'static [(&'static str, &'static str)] {
+fn hints_items_es(ctx: HintsCtx) -> &'static [(&'static str, &'static str)] {
     match ctx {
         HintsCtx::PathOpen => &[("Tab", "Completar"), ("Enter", "Abrir"), ("Esc", "Cancelar"), ("^O", "Diálogo de Windows")],
         HintsCtx::PathSave => &[("Tab", "Completar"), ("Enter", "Crear"), ("Esc", "Cancelar"), ("^O", "Diálogo de Windows")],
@@ -28,6 +28,11 @@ pub fn hints_items(ctx: HintsCtx) -> &'static [(&'static str, &'static str)] {
         HintsCtx::VimInsert => &[("Esc", "Modo normal"), ("^S", "Guardar")],
         HintsCtx::Normal => &[("^S", "Guardar"), ("^F", "Buscar"), ("^H", "Reemplazar"), ("^O", "Abrir"), ("^Alt+V", "Vim")],
     }
+}
+
+/// Como `hints_items_es`, pero con la acción traducida a `lang` (la tecla no cambia).
+pub fn hints_items(ctx: HintsCtx, lang: notty_config::Lang) -> Vec<(&'static str, &'static str)> {
+    hints_items_es(ctx).iter().map(|(k, a)| (*k, crate::strings::tr(lang, a))).collect()
 }
 
 /// Campos de la derecha de la barra de estado en modo texto: `Ln 1, Col 1`, codificación, EOL.
@@ -49,7 +54,14 @@ pub fn raw_size(len: usize) -> String {
 /// Nombre que se enseña de un documento (pestaña y título): el nombre del archivo, o
 /// `sin ruta` si todavía no tiene (lo que la maqueta llama `CLICKME`).
 pub fn doc_name(path: Option<&std::path::Path>) -> String {
-    path.and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "sin ruta".into())
+    doc_name_lang(path, notty_config::Lang::Es)
+}
+
+/// Como `doc_name`, traducido a `lang`.
+pub fn doc_name_lang(path: Option<&std::path::Path>, lang: notty_config::Lang) -> String {
+    path.and_then(|p| p.file_name())
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| crate::strings::tr(lang, "sin ruta").to_string())
 }
 
 /// Título de la ventana (barra de tareas, y barra de título cuando no hay pestañas en ella):
@@ -65,14 +77,19 @@ mod tests {
 
     #[test]
     fn normal_hints_match_mockup() {
-        assert_eq!(hints_items(HintsCtx::Normal)[0], ("^S", "Guardar"));
-        assert_eq!(hints_items(HintsCtx::Normal).len(), 5);
+        assert_eq!(hints_items(HintsCtx::Normal, notty_config::Lang::Es)[0], ("^S", "Guardar"));
+        assert_eq!(hints_items(HintsCtx::Normal, notty_config::Lang::Es).len(), 5);
     }
 
     #[test]
     fn path_hints_depend_on_purpose() {
-        assert_eq!(hints_items(HintsCtx::PathOpen)[1].1, "Abrir");
-        assert_eq!(hints_items(HintsCtx::PathSave)[1].1, "Crear");
+        assert_eq!(hints_items(HintsCtx::PathOpen, notty_config::Lang::Es)[1].1, "Abrir");
+        assert_eq!(hints_items(HintsCtx::PathSave, notty_config::Lang::Es)[1].1, "Crear");
+    }
+
+    #[test]
+    fn hints_translate_to_english() {
+        assert_eq!(hints_items(HintsCtx::Normal, notty_config::Lang::En)[0], ("^S", "Save"));
     }
 
     #[test]

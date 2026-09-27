@@ -474,17 +474,26 @@ pub fn options_for(key: SettingKey) -> Options {
 }
 
 /// "Última comprobación: hace 3 horas" a partir de dos instantes Unix (segundos).
-pub fn relative_time(now: u64, then: u64) -> String {
+pub fn relative_time(now: u64, then: u64, lang: notty_config::Lang) -> String {
     if then == 0 {
-        return "nunca".to_string();
+        return crate::strings::tr(lang, "nunca").to_string();
     }
+    let en = lang == notty_config::Lang::En;
     let d = now.saturating_sub(then);
-    let plural = |n: u64, one: &str, many: &str| if n == 1 { format!("hace 1 {one}") } else { format!("hace {n} {many}") };
+    let plural = |n: u64, one_es: &str, many_es: &str, one_en: &str, many_en: &str| {
+        if en {
+            if n == 1 { format!("{n} {one_en} ago") } else { format!("{n} {many_en} ago") }
+        } else if n == 1 {
+            format!("hace 1 {one_es}")
+        } else {
+            format!("hace {n} {many_es}")
+        }
+    };
     match d {
-        0..60 => "ahora mismo".to_string(),
-        60..3600 => plural(d / 60, "minuto", "minutos"),
-        3600..86400 => plural(d / 3600, "hora", "horas"),
-        _ => plural(d / 86400, "día", "días"),
+        0..60 => crate::strings::tr(lang, "ahora mismo").to_string(),
+        60..3600 => plural(d / 60, "minuto", "minutos", "minute", "minutes"),
+        3600..86400 => plural(d / 3600, "hora", "horas", "hour", "hours"),
+        _ => plural(d / 86400, "día", "días", "day", "days"),
     }
 }
 
@@ -676,11 +685,12 @@ mod tests {
 
     #[test]
     fn relative_times_in_spanish() {
-        assert_eq!(relative_time(1000, 0), "nunca");
-        assert_eq!(relative_time(1000, 990), "ahora mismo");
-        assert_eq!(relative_time(10_000, 10_000 - 120), "hace 2 minutos");
-        assert_eq!(relative_time(10_000, 10_000 - 3600), "hace 1 hora");
-        assert_eq!(relative_time(1_000_000, 1_000_000 - 3 * 86400), "hace 3 días");
+        assert_eq!(relative_time(1000, 0, Lang::Es), "nunca");
+        assert_eq!(relative_time(1000, 990, Lang::Es), "ahora mismo");
+        assert_eq!(relative_time(10_000, 10_000 - 120, Lang::Es), "hace 2 minutos");
+        assert_eq!(relative_time(10_000, 10_000 - 3600, Lang::Es), "hace 1 hora");
+        assert_eq!(relative_time(1_000_000, 1_000_000 - 3 * 86400, Lang::Es), "hace 3 días");
+        assert_eq!(relative_time(10_000, 10_000 - 120, Lang::En), "2 minutes ago");
     }
 
     #[test]

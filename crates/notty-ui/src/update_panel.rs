@@ -68,10 +68,15 @@ impl UpdateState {
     /// ahora"), se muestra ese error aquí: la spec pide que el chequeo manual
     /// "siempre muestre un mensaje claro en caso de fallo" (nunca en silencio, a
     /// diferencia del automático).
-    pub fn notice_text(&self) -> Option<String> {
+    pub fn notice_text(&self, lang: notty_config::Lang) -> Option<String> {
+        if self.up_to_date {
+            return Some(crate::strings::tr(lang, "ya tienes la última versión").to_string());
+        }
         match (&self.available, &self.error) {
-            (Some(r), _) => Some(format!("Actualización {} disponible", r.version)),
-            (None, Some(err)) => Some(format!("Actualizaciones: {err}")),
+            (Some(r), _) => {
+                Some(if lang == notty_config::Lang::En { format!("Update {} available", r.version) } else { format!("Actualización {} disponible", r.version) })
+            }
+            (None, Some(err)) => Some(format!("{}: {}", crate::strings::tr(lang, "Actualizaciones"), crate::strings::tr(lang, err))),
             (None, None) => None,
         }
     }
@@ -162,14 +167,15 @@ mod tests {
 
     #[test]
     fn no_notice_when_nothing_available() {
-        assert_eq!(UpdateState::default().notice_text(), None);
+        assert_eq!(UpdateState::default().notice_text(notty_config::Lang::Es), None);
     }
 
     #[test]
     fn notice_mentions_the_version() {
         let mut s = UpdateState::default();
         s.set_available(release("1.4.0"));
-        assert_eq!(s.notice_text().as_deref(), Some("Actualización 1.4.0 disponible"));
+        assert_eq!(s.notice_text(notty_config::Lang::Es).as_deref(), Some("Actualización 1.4.0 disponible"));
+        assert_eq!(s.notice_text(notty_config::Lang::En).as_deref(), Some("Update 1.4.0 available"));
     }
 
     #[test]
