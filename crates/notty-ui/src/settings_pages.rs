@@ -1185,13 +1185,14 @@ fn ventana(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     blk_end(ui);
 
     blk(ui, d, 3);
-    let rows: [(&str, &str, Option<SettingKey>, bool); 6] = [
+    let rows: [(&str, &str, Option<SettingKey>, bool); 7] = [
         ("Posición de las pestañas", "", Some(SettingKey::TabsPosition), true),
         ("Iconos en las pestañas", "Un icono de archivo genérico delante del nombre.", Some(SettingKey::TabIcons), false),
         ("Barra de menús", "", Some(SettingKey::MenuBar), true),
         ("Barra de atajos", "Estilo nano. Cambia según lo que estés haciendo.", Some(SettingKey::HintsBar), false),
         ("Barra de estado", "Si la ocultas, reaparece para rutas, búsquedas y avisos.", Some(SettingKey::StatusBar), false),
         ("Línea de comandos fusionada", "Una sola línea abajo para estado y comandos, como en Zen.", Some(SettingKey::MergedCommandLine), false),
+        ("Ajustar texto a la ventana", "Las líneas largas pasan a la siguiente línea en vez de salirse por el borde.", Some(SettingKey::Wrap), false),
     ];
     for (j, (title, desc, key, is_seg)) in rows.iter().enumerate() {
         let Some(key) = *key else { continue };
@@ -1199,6 +1200,17 @@ fn ventana(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
         y = if *is_seg { seg_row(ui, x, y, w, cfg, key, title) } else { toggle_row(ui, x, y, w, cfg, key, title, desc) } + 4.0;
         ui.end_enter();
     }
+    blk_end(ui);
+
+    blk(ui, d, 4);
+    y = link_row(
+        ui, x, y, w,
+        Hit::Link(LinkAction::ResetWindowSize),
+        "Restablecer tamaño de ventana",
+        "Vuelve al tamaño de siempre la próxima vez que abras notty.",
+        false,
+        icon::CHEVRON,
+    ) + 4.0;
     blk_end(ui);
     y - 4.0
 }
@@ -1539,6 +1551,9 @@ fn archivos(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     }
     item(ui, d, rows.len());
     y = seg_row(ui, x, y, w, cfg, SettingKey::OnCloseUnsaved, "Al cerrar con cambios sin guardar") + 4.0;
+    ui.end_enter();
+    item(ui, d, rows.len() + 1);
+    y = seg_row(ui, x, y, w, cfg, SettingKey::SaveDir, "Guardar por defecto en") + 4.0;
     ui.end_enter();
     blk_end(ui);
     y - 4.0

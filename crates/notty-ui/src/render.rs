@@ -18,7 +18,7 @@ use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT_BOLD,
     DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_LINE_SPACING_METHOD_UNIFORM,
     DWRITE_PARAGRAPH_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_NEAR, DWRITE_TEXT_ALIGNMENT_CENTER,
-    DWRITE_TEXT_ALIGNMENT_TRAILING, DWRITE_TEXT_RANGE, DWRITE_TRIMMING, DWRITE_TRIMMING_GRANULARITY_CHARACTER,
+    DWRITE_TEXT_ALIGNMENT_TRAILING, DWRITE_TEXT_METRICS, DWRITE_TEXT_RANGE, DWRITE_TRIMMING, DWRITE_TRIMMING_GRANULARITY_CHARACTER,
     DWRITE_WORD_WRAPPING_NO_WRAP, DWRITE_WORD_WRAPPING_WRAP, DWriteCreateFactory, IDWriteFactory,
     IDWriteFontCollection, IDWriteTextFormat, IDWriteTextLayout,
 };
@@ -1015,30 +1015,76 @@ impl Renderer {
     }
 
     /// Traduce un punto del cliente (en DIPs, origen arriba-izquierda) al índice de
-    /// char del documento más cercano, usando `state.viewport` para saber qué línea es cada fila.
-    pub fn char_index_at(&self, state: &EditorState, body: Rect, gutter_w: f32, x: f32, y: f32) -> usize {
+    /// char del documento más cercano, usando `state.viewport` para saber qué línea es
+    /// cada fila. Con `wrap` cada línea puede ocupar más de una fila visual, así que en
+    /// vez de dividir `y` entre `line_height()` hay que acumular el alto real de cada
+    /// línea desde `first_line` hasta dar con la que contiene el clic (igual que hace
+    /// `paint` al dibujar).
+    pub fn char_index_at(&self, state: &EditorState, body: Rect, gutter_w: f32, x: f32, y: f32, wrap: bool) -> usize {
         let buf = state.doc.buffer();
         let total = buf.len_lines();
-        let range = state.viewport.range(total);
-        let row = ((y - body.top - layout::TEXT_PAD_T) / self.line_height()).floor().max(0.0) as usize;
-        let line = (state.viewport.first_line + row).min(total.saturating_sub(1)).max(range.start);
+        let text_pad = body.left + gutter_w + layout::TEXT_PAD_L;
 
+        if !wrap {
+            let range = state.viewport.range(total);
+            let row = ((y - body.top - layout::TEXT_PAD_T) / self.line_height()).floor().max(0.0) as usize;
+            let line = (state.viewport.first_line + row).min(total.saturating_sub(1)).max(range.start);
+            return self.hit_test_line(&buf, line, total, text_pad, x, 0.0, None);
+        }
+
+        let wrap_width = (body.right - text_pad).max(60.0);
+        let mut row_top = body.top + layout::TEXT_PAD_T;
+        let mut line = state.viewport.first_line.min(total.saturating_sub(1));
+        loop {
+            let start = buf.line_start(line);
+            let end = if line + 1 < total { buf.line_start(line + 1) } else { buf.len_chars() };
+            let text: String = buf.slice(start..end).trim_end_matches(['\r', '\n']).to_string();
+            let row_h = if text.is_empty() {
+                self.line_height()
+            } else {
+                let w = wide(&text);
+                unsafe {
+                    self.dwrite
+                        .CreateTextLayout(&w, &self.fonts.mono_13, wrap_width, 20_000.0)
+                        .ok()
+                        .map(|l| {
+                            let _ = l.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
+                            let mut m: DWRITE_TEXT_METRICS = Default::default();
+                            l.GetMetrics(&mut m).ok().map(|_| m.lineCount.max(1)).unwrap_or(1) as f32 * self.line_height()
+                        })
+                        .unwrap_or(self.line_height())
+                }
+            };
+            if y < row_top + row_h || line + 1 >= total {
+                return self.hit_test_line(&buf, line, total, text_pad, x, y - row_top, Some(wrap_width));
+            }
+            row_top += row_h;
+            line += 1;
+        }
+    }
+
+    /// Índice de char dentro de `line` más cercano a `(x, y_within)` (origen en el
+    /// principio de esa línea); `wrap_width`, si hay, se pasa tal cual a `CreateTextLayout`
+    /// para que el hit-test caiga en la fila visual correcta de una línea que hace wrap.
+    fn hit_test_line(&self, buf: &notty_core::Buffer, line: usize, total: usize, text_pad: f32, x: f32, y_within: f32, wrap_width: Option<f32>) -> usize {
         let start = buf.line_start(line);
         let end = if line + 1 < total { buf.line_start(line + 1) } else { buf.len_chars() };
         let text: String = buf.slice(start..end).trim_end_matches(['\r', '\n']).to_string();
-        let text_pad = body.left + gutter_w + layout::TEXT_PAD_L;
         if text.is_empty() {
             return start;
         }
         let w = wide(&text);
-        let Ok(text_layout) = (unsafe { self.dwrite.CreateTextLayout(&w, &self.fonts.mono_13, f32::MAX, self.line_height()) })
-        else {
+        let max_w = wrap_width.unwrap_or(f32::MAX);
+        let Ok(text_layout) = (unsafe { self.dwrite.CreateTextLayout(&w, &self.fonts.mono_13, max_w, 20_000.0) }) else {
             return start;
         };
+        if wrap_width.is_some() {
+            let _ = unsafe { text_layout.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP) };
+        }
         let mut trailing = windows::core::BOOL(0);
         let mut inside = windows::core::BOOL(0);
         let mut metrics = Default::default();
-        if unsafe { text_layout.HitTestPoint(x - text_pad, 0.0, &mut trailing, &mut inside, &mut metrics) }.is_ok() {
+        if unsafe { text_layout.HitTestPoint(x - text_pad, y_within, &mut trailing, &mut inside, &mut metrics) }.is_ok() {
             let utf16_offset = metrics.textPosition as usize + if trailing.as_bool() { 1 } else { 0 };
             let prefix = String::from_utf16_lossy(&w[..utf16_offset.min(w.len())]);
             start + prefix.chars().count()
@@ -1200,6 +1246,10 @@ impl Renderer {
             // Un pincel por color de `syntax::NAMES`, creado la primera vez que hace falta.
             let mut syn_brushes: Vec<Option<ID2D1SolidColorBrush>> = vec![None; crate::syntax::NAMES.len()];
             let mut y = frame.body.top + layout::TEXT_PAD_T;
+            // Ajustar texto a la ventana (Ajustes → Ventana): DirectWrite reparte la
+            // línea en varias filas visuales dentro del mismo layout en vez de salirse
+            // por el borde; sin esto, ancho `f32::MAX` es "nunca hagas wrap" (de siempre).
+            let wrap_width = if ui.wrap { (frame.body.right - text_pad).max(60.0) } else { f32::MAX };
             for line in range.clone() {
                 let start = buf.line_start(line);
                 let full_end = if line + 1 < total_lines { buf.line_start(line + 1) } else { buf.len_chars() };
@@ -1211,10 +1261,38 @@ impl Renderer {
                 let display = if ligature_table.is_empty() { text.clone() } else { crate::ligature::display_text(&text, &ligature_table) };
                 let w16 = wide(&display);
 
+                // Con wrap, el alto de verdad de la línea no se sabe hasta crear el layout
+                // (depende de cuántas filas visuales le hacen falta): de ahí un `maxHeight`
+                // generoso en vez de `line_height()`, y `row_h` calculado con `GetMetrics`
+                // después. Se redondea a un múltiplo de `line_height()` (en vez del alto que
+                // reporta DirectWrite) para que cada fila visual mida lo mismo que las demás
+                // líneas de la interfaz (numeración, cursor, cualquier otro sitio que ya
+                // asume `line_height()` por fila).
                 let text_layout = if w16.is_empty() {
                     None
                 } else {
-                    self.dwrite.CreateTextLayout(&w16, &self.fonts.mono_13, f32::MAX, self.line_height()).ok()
+                    let l = self.dwrite.CreateTextLayout(&w16, &self.fonts.mono_13, wrap_width, if ui.wrap { 20_000.0 } else { self.line_height() }).ok();
+                    // `mono_13` se crea con `DWRITE_WORD_WRAPPING_NO_WRAP` (de siempre, para
+                    // que un `maxWidth` corto no recorte nada sin querer); con `ui.wrap` hay
+                    // que pedirlo explícito en el layout, el ancho por sí solo no alcanza.
+                    if ui.wrap {
+                        if let Some(l) = &l {
+                            let _ = l.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
+                        }
+                    }
+                    l
+                };
+                let row_h = if ui.wrap {
+                    text_layout
+                        .as_ref()
+                        .and_then(|l| {
+                            let mut m: DWRITE_TEXT_METRICS = Default::default();
+                            l.GetMetrics(&mut m).ok().map(|_| m.lineCount.max(1))
+                        })
+                        .unwrap_or(1) as f32
+                        * self.line_height()
+                } else {
+                    self.line_height()
                 };
 
                 if ui.line_numbers && !is_raw {
@@ -1231,21 +1309,35 @@ impl Renderer {
                 if !sel.is_empty() && sel_range.start < full_end && sel_range.end > start {
                     let clamp_start = sel_range.start.max(start);
                     let clamp_end = sel_range.end.min(text_end);
-                    let x0 = if let (true, Some(l)) = (clamp_end > clamp_start, text_layout.as_ref()) {
-                        hit_test_x(l, &text, clamp_start - start, text_pad)
+                    if ui.wrap {
+                        if let Some(l) = text_layout.as_ref() {
+                            let rects = hit_test_range_rects(l, &text, clamp_start - start, clamp_end - start, text_pad, y);
+                            let n = rects.len();
+                            for (i, (rx, ry, rw, rh)) in rects.into_iter().enumerate() {
+                                let mut x1 = rx + rw;
+                                if sel_range.end > text_end && i + 1 == n {
+                                    x1 = x1.max(rx) + 6.0;
+                                }
+                                self.fill(Rect::new(rx, ry, x1.max(rx + 2.0), ry + rh), pal.accent_soft);
+                            }
+                        }
                     } else {
-                        text_pad
-                    };
-                    let mut x1 = if let (true, Some(l)) = (clamp_end > clamp_start, text_layout.as_ref()) {
-                        hit_test_x(l, &text, clamp_end - start, text_pad)
-                    } else {
-                        text_pad
-                    };
-                    if sel_range.end > text_end {
-                        x1 = x1.max(x0) + 6.0;
+                        let x0 = if let (true, Some(l)) = (clamp_end > clamp_start, text_layout.as_ref()) {
+                            hit_test_x(l, &text, clamp_start - start, text_pad)
+                        } else {
+                            text_pad
+                        };
+                        let mut x1 = if let (true, Some(l)) = (clamp_end > clamp_start, text_layout.as_ref()) {
+                            hit_test_x(l, &text, clamp_end - start, text_pad)
+                        } else {
+                            text_pad
+                        };
+                        if sel_range.end > text_end {
+                            x1 = x1.max(x0) + 6.0;
+                        }
+                        x1 = x1.max(x0 + 2.0);
+                        self.fill(Rect::new(x0, y, x1, y + self.line_height()), pal.accent_soft);
                     }
-                    x1 = x1.max(x0 + 2.0);
-                    self.fill(Rect::new(x0, y, x1, y + self.line_height()), pal.accent_soft);
                 }
 
                 for (mi, m) in search_matches.iter().enumerate() {
@@ -1257,12 +1349,19 @@ impl Renderer {
                     if clamp_end <= clamp_start {
                         continue;
                     }
-                    let x0 =
-                        text_layout.as_ref().map(|l| hit_test_x(l, &text, clamp_start - start, text_pad)).unwrap_or(text_pad);
-                    let x1 =
-                        text_layout.as_ref().map(|l| hit_test_x(l, &text, clamp_end - start, text_pad)).unwrap_or(text_pad);
                     let c = if Some(mi) == search_current { pal.mark_cur } else { pal.mark };
-                    self.fill_round(Rect::new(x0, y, x1.max(x0 + 2.0), y + self.line_height()), 2.0, c);
+                    if ui.wrap {
+                        if let Some(l) = text_layout.as_ref() {
+                            let rects = hit_test_range_rects(l, &text, clamp_start - start, clamp_end - start, text_pad, y);
+                            for (rx, ry, rw, rh) in rects {
+                                self.fill_round(Rect::new(rx, ry, (rx + rw).max(rx + 2.0), ry + rh), 2.0, c);
+                            }
+                        }
+                    } else {
+                        let x0 = text_layout.as_ref().map(|l| hit_test_x(l, &text, clamp_start - start, text_pad)).unwrap_or(text_pad);
+                        let x1 = text_layout.as_ref().map(|l| hit_test_x(l, &text, clamp_end - start, text_pad)).unwrap_or(text_pad);
+                        self.fill_round(Rect::new(x0, y, x1.max(x0 + 2.0), y + self.line_height()), 2.0, c);
+                    }
                 }
 
                 if let Some(l) = &text_layout {
@@ -1285,7 +1384,9 @@ impl Renderer {
                 }
 
                 if head >= start && head <= text_end {
-                    let x = if let Some(l) = text_layout.as_ref() { hit_test_x(l, &text, head - start, text_pad) } else { text_pad };
+                    let (x, y_off) =
+                        if let Some(l) = text_layout.as_ref() { hit_test_xy(l, &text, head - start, text_pad) } else { (text_pad, 0.0) };
+                    let cy = y + y_off;
                     // Normal/Visual dibujan un cursor de bloque (como una terminal vim de
                     // verdad) en vez de la misma barrita de 1px que Insert: así se nota de
                     // un vistazo en qué modo estás sin tener que leer "-- NORMAL --" en la
@@ -1296,19 +1397,26 @@ impl Renderer {
                         .as_ref()
                         .is_some_and(|v| matches!(v.mode, crate::VimMode::Normal | crate::VimMode::Visual));
                     if block {
-                        let x1 = if head < text_end {
-                            text_layout.as_ref().map(|l| hit_test_x(l, &text, head + 1 - start, text_pad)).unwrap_or(x + 8.0)
+                        let (x1, y1_off) = if head < text_end {
+                            text_layout
+                                .as_ref()
+                                .map(|l| hit_test_xy(l, &text, head + 1 - start, text_pad))
+                                .unwrap_or((x + 8.0, y_off))
                         } else {
-                            x + 8.0
+                            (x + 8.0, y_off)
                         };
-                        self.fill(Rect::new(x, y, x1.max(x + 2.0), y + self.line_height()), pal.accent_soft);
-                        self.stroke_rect(Rect::new(x, y, x1.max(x + 2.0), y + self.line_height()), 1.0, pal.accent);
+                        // El carácter siguiente cae en otra fila visual (justo en el borde
+                        // del wrap): se estira hasta el final de la fila en vez de dibujar
+                        // un rectángulo que cruza dos filas.
+                        let x1 = if y1_off != y_off { frame.body.right } else { x1 };
+                        self.fill(Rect::new(x, cy, x1.max(x + 2.0), cy + self.line_height()), pal.accent_soft);
+                        self.stroke_rect(Rect::new(x, cy, x1.max(x + 2.0), cy + self.line_height()), 1.0, pal.accent);
                     } else {
-                        self.fill(Rect::new(x, y, x + 1.0, y + self.line_height()), pal.text);
+                        self.fill(Rect::new(x, cy, x + 1.0, cy + self.line_height()), pal.text);
                     }
                 }
 
-                y += self.line_height();
+                y += row_h;
                 if y > frame.body.bottom {
                     break;
                 }
@@ -2861,16 +2969,51 @@ unsafe fn hit_test_x(
     local_char_offset: usize,
     pad: f32,
 ) -> f32 {
+    unsafe { hit_test_xy(text_layout, text, local_char_offset, pad).0 }
+}
+
+/// Como `hit_test_x`, pero también da el desplazamiento vertical dentro de la línea
+/// (0 si no hace wrap): con `ui.wrap`, un carácter puede caer en una fila visual
+/// distinta de la primera.
+unsafe fn hit_test_xy(
+    text_layout: &windows::Win32::Graphics::DirectWrite::IDWriteTextLayout,
+    text: &str,
+    local_char_offset: usize,
+    pad: f32,
+) -> (f32, f32) {
     unsafe {
         let utf16_offset = char_offset_to_utf16(text, local_char_offset);
         let mut x = 0.0f32;
         let mut y = 0.0f32;
         let mut metrics = Default::default();
         if text_layout.HitTestTextPosition(utf16_offset, false, &mut x, &mut y, &mut metrics).is_ok() {
-            pad + x
+            (pad + x, y)
         } else {
-            pad
+            (pad, 0.0)
         }
+    }
+}
+
+/// Rectángulos (uno por fila visual) que ocupa `[local_start, local_end)` de `text`
+/// dentro de `text_layout`, ya en coordenadas absolutas (`pad`/`row_top` sumados).
+/// Sin wrap siempre devuelve como mucho uno; con wrap, una selección o coincidencia de
+/// búsqueda a caballo entre dos filas visuales de la misma línea de buffer da varios.
+unsafe fn hit_test_range_rects(
+    text_layout: &windows::Win32::Graphics::DirectWrite::IDWriteTextLayout,
+    text: &str,
+    local_start: usize,
+    local_end: usize,
+    pad: f32,
+    row_top: f32,
+) -> Vec<(f32, f32, f32, f32)> {
+    unsafe {
+        let start16 = char_offset_to_utf16(text, local_start);
+        let end16 = char_offset_to_utf16(text, local_end);
+        let len16 = end16.saturating_sub(start16);
+        let mut count = 0u32;
+        let mut buf = [windows::Win32::Graphics::DirectWrite::DWRITE_HIT_TEST_METRICS::default(); 8];
+        let _ = text_layout.HitTestTextRange(start16, len16, pad, row_top, Some(&mut buf), &mut count);
+        buf[..(count as usize).min(buf.len())].iter().map(|m| (m.left, m.top, m.width, m.height)).collect()
     }
 }
 

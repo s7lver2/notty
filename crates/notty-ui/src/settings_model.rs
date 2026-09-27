@@ -136,6 +136,8 @@ pub enum SettingKey {
     ReopenPrevious,
     TabIcons,
     Lang,
+    Wrap,
+    SaveDir,
 }
 
 /// El valor elegido; `apply` decide qué campo de `Config` toca según `SettingKey`.
@@ -153,6 +155,20 @@ pub enum SettingValue {
     OnCloseUnsaved(OnCloseUnsaved),
     AccentColor(AccentColor),
     Lang(Lang),
+    SaveDir(SaveDirChoice),
+}
+
+/// Carpeta de partida para "Guardar como" cuando el documento no tiene ruta todavía
+/// (Ajustes → Archivos → "Guardar por defecto en"). Se guarda como ruta resuelta
+/// (`FilesConfig::default_save_dir`), no como esta elección: si el usuario mueve o
+/// renombra Escritorio/Documentos/Descargas, `selected_index` simplemente deja de
+/// marcar ninguna opción, en vez de guardar una ruta que ya no significa lo mismo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SaveDirChoice {
+    UserFolder,
+    Desktop,
+    Documents,
+    Downloads,
 }
 
 /// Opciones de un selector: `(etiqueta, valor)`.
@@ -228,6 +244,25 @@ pub const HOTKEY_OPTS: Options = &[
     ("Acceso directo", SettingValue::HotkeyMechanism(HotkeyMechanism::Lnk)),
 ];
 
+pub const SAVE_DIR_OPTS: Options = &[
+    ("Carpeta de usuario", SettingValue::SaveDir(SaveDirChoice::UserFolder)),
+    ("Escritorio", SettingValue::SaveDir(SaveDirChoice::Desktop)),
+    ("Documentos", SettingValue::SaveDir(SaveDirChoice::Documents)),
+    ("Descargas", SettingValue::SaveDir(SaveDirChoice::Downloads)),
+];
+
+/// Ruta de verdad de una elección de `SAVE_DIR_OPTS` (`None` para `UserFolder`, que
+/// no fija ninguna y deja el comportamiento de siempre).
+fn save_dir_path(choice: SaveDirChoice) -> Option<std::path::PathBuf> {
+    use crate::native_dialog::{KnownFolder, known_folder_path};
+    match choice {
+        SaveDirChoice::UserFolder => None,
+        SaveDirChoice::Desktop => known_folder_path(KnownFolder::Desktop),
+        SaveDirChoice::Documents => known_folder_path(KnownFolder::Documents),
+        SaveDirChoice::Downloads => known_folder_path(KnownFolder::Downloads),
+    }
+}
+
 /// Atajos reasignables de Teclado, en el orden en que se listan.
 pub const BINDINGS: &[Command] = Command::ALL;
 
@@ -254,6 +289,10 @@ pub enum LinkAction {
     OpenChangelog,
     /// Acerca de → Carpeta de configuración.
     OpenConfigFolder,
+    /// Ventana → "Restablecer tamaño de ventana": vuelve a `DEFAULT_WIN_W/H`, sin
+    /// maximizar, para la próxima vez que se abra notty (no mueve la ventana actual:
+    /// Ajustes es su propia ventana, no puede redimensionar la principal desde aquí).
+    ResetWindowSize,
 }
 
 /// Tamaño de letra base del editor (`layout::FONT_MONO`), para traducir el
@@ -397,6 +436,14 @@ pub fn apply(cfg: &mut Config, key: SettingKey, value: SettingValue) {
             cfg.ui.lang = l;
             return;
         }
+        (SettingKey::Wrap, SettingValue::Bool(b)) => {
+            cfg.ui.wrap = b;
+            return;
+        }
+        (SettingKey::SaveDir, SettingValue::SaveDir(choice)) => {
+            cfg.files.default_save_dir = save_dir_path(choice).map(|p| p.display().to_string());
+            return;
+        }
         _ => {}
     }
     match (key, value) {
@@ -432,6 +479,7 @@ pub fn current_bool(cfg: &Config, key: SettingKey) -> bool {
         SettingKey::TabIcons => cfg.ui.tab_icons,
         SettingKey::StartWithWindows => cfg.hotkey.start_with_windows,
         SettingKey::UpdatesCheck => cfg.updates.check,
+        SettingKey::Wrap => cfg.ui.wrap,
         _ => false,
     }
 }
@@ -451,6 +499,18 @@ pub fn selected_index(cfg: &Config, key: SettingKey, options: Options) -> Option
         SettingKey::FontFamily => SettingValue::FontFamily(cfg.ui.font_family),
         SettingKey::AccentColor => SettingValue::AccentColor(cfg.ui.accent),
         SettingKey::Lang => SettingValue::Lang(cfg.ui.lang),
+        SettingKey::SaveDir => {
+            let current = cfg.files.default_save_dir.as_deref();
+            let choice = [SaveDirChoice::UserFolder, SaveDirChoice::Desktop, SaveDirChoice::Documents, SaveDirChoice::Downloads]
+                .into_iter()
+                .find(|&c| match (c, current) {
+                    (SaveDirChoice::UserFolder, None) => true,
+                    (SaveDirChoice::UserFolder, Some(_)) => false,
+                    (c, Some(cur)) => save_dir_path(c).is_some_and(|p| p.display().to_string() == cur),
+                    (_, None) => false,
+                })?;
+            SettingValue::SaveDir(choice)
+        }
         _ => return None,
     };
     options.iter().position(|(_, v)| *v == current)
@@ -469,6 +529,7 @@ pub fn options_for(key: SettingKey) -> Options {
         SettingKey::HotkeyMechanism => HOTKEY_OPTS,
         SettingKey::AccentColor => ACCENT_OPTS,
         SettingKey::Lang => LANG_OPTS,
+        SettingKey::SaveDir => SAVE_DIR_OPTS,
         _ => &[],
     }
 }
