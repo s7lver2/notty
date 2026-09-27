@@ -1462,6 +1462,28 @@ fn refresh_recovery(w: &WindowState) {
     *guard = snapshot;
 }
 
+/// Guarda qué documentos con ruta quedan abiertos al cerrar la ventana (Ajustes →
+/// Archivos → "Reabrir archivos anteriores"), y cuál de ellos tenía el foco. Con el
+/// ajuste apagado borra la sesión anterior en vez de dejar una desactualizada.
+fn save_session(w: &WindowState) {
+    let file = notty_io::session_path();
+    if !w.cfg.borrow().ui.reopen_previous {
+        notty_io::save_session(&[], 0, &file);
+        return;
+    }
+    let mut paths = Vec::new();
+    let mut active = 0;
+    for (i, st) in w.ws.iter().enumerate() {
+        if let Some(p) = &st.path {
+            if i == w.ws.active_index() {
+                active = paths.len();
+            }
+            paths.push(p.clone());
+        }
+    }
+    notty_io::save_session(&paths, active, &file);
+}
+
 /// Instala el `panic hook` de recuperación: si el proceso entra en pánico, vuelca a
 /// `notty_io::recovery_dir()` el texto de cada documento sucio del último snapshot
 /// leído (ver `refresh_recovery`). Se instala una sola vez, al arrancar `run`.
@@ -1633,6 +1655,20 @@ fn run_inner(
             *ws.active_mut() = maybe_vim(EditorState::new_temp(*mode, ext), &cfg);
         } else if let Some(p) = path {
             *ws.active_mut() = maybe_vim(state_for_path(std::path::Path::new(p)), &cfg);
+        } else if cfg.ui.reopen_previous {
+            // Sin ningún archivo en la línea de comandos: reabre los que quedaron
+            // abiertos la última vez (Ajustes → Archivos), si alguno de ellos todavía
+            // existe. La primera línea de la sesión es la que estaba activa.
+            let previous: Vec<_> =
+                notty_io::load_session(&notty_io::session_path()).into_iter().filter(|p| p.is_file()).collect();
+            for (i, p) in previous.iter().enumerate() {
+                let state = maybe_vim(state_for_path(p), &cfg);
+                if i == 0 {
+                    *ws.active_mut() = state;
+                } else {
+                    ws.open(state);
+                }
+            }
         }
 
         // Recuperación (caída, relanzar tras actualizar o cerrar en modo "Recuperar"):
@@ -2900,6 +2936,9 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 LRESULT(0)
             }
             WM_DESTROY => {
+                if let Some(w) = ptr.as_ref() {
+                    save_session(w);
+                }
                 let _ = KillTimer(Some(hwnd), ID_AUTOSAVE_TIMER);
                 let _ = KillTimer(Some(hwnd), ID_IPC_TIMER);
                 let _ = KillTimer(Some(hwnd), ID_ANIM_TIMER);

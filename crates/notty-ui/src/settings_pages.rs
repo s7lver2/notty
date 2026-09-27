@@ -1171,8 +1171,9 @@ fn ventana(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     blk_end(ui);
 
     blk(ui, d, 3);
-    let rows: [(&str, &str, Option<SettingKey>, bool); 5] = [
+    let rows: [(&str, &str, Option<SettingKey>, bool); 6] = [
         ("Posición de las pestañas", "", Some(SettingKey::TabsPosition), true),
+        ("Iconos en las pestañas", "Un icono de archivo genérico delante del nombre.", Some(SettingKey::TabIcons), false),
         ("Barra de menús", "", Some(SettingKey::MenuBar), true),
         ("Barra de atajos", "Estilo nano. Cambia según lo que estés haciendo.", Some(SettingKey::HintsBar), false),
         ("Barra de estado", "Si la ocultas, reaparece para rutas, búsquedas y avisos.", Some(SettingKey::StatusBar), false),
@@ -1509,6 +1510,11 @@ fn archivos(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
             SettingKey::OpenInExistingWindow,
             "Abrir archivos en la ventana ya abierta",
             "Si lo apagas, cada archivo que abras desde el Explorador sale en una ventana nueva.",
+        ),
+        (
+            SettingKey::ReopenPrevious,
+            "Reabrir archivos anteriores",
+            "Al abrir notty sin darle ningún archivo, vuelve a abrir los que quedaron abiertos la última vez.",
         ),
     ];
     for (j, (key, title, desc)) in rows.iter().enumerate() {

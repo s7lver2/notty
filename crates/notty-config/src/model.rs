@@ -185,6 +185,8 @@ pub struct UiConfig {
     /// Al abrir notty sin pasarle ningún archivo, reabre los que quedaron abiertos
     /// la última vez (ver `notty_config::session`).
     pub reopen_previous: bool,
+    /// Icono de archivo genérico delante del nombre de cada pestaña.
+    pub tab_icons: bool,
 }
 
 impl Default for UiConfig {
@@ -209,6 +211,7 @@ impl Default for UiConfig {
             accent: AccentColor::default(),
             lang: Lang::default(),
             reopen_previous: false,
+            tab_icons: false,
         };
         let preset = ui.preset;
         crate::apply_preset(&mut ui, preset);
@@ -397,6 +400,15 @@ mod tests {
         assert!(text.contains("lang = \"en\""));
         let back: Config = toml::from_str(&text).unwrap();
         assert_eq!(back.ui.lang, Lang::En);
+    }
+
+    #[test]
+    fn tab_icons_defaults_to_false_and_round_trips() {
+        assert!(!UiConfig::default().tab_icons);
+        let cfg = Config { ui: UiConfig { tab_icons: true, ..UiConfig::default() }, ..Config::default() };
+        let text = toml::to_string(&cfg).unwrap();
+        let back: Config = toml::from_str(&text).unwrap();
+        assert!(back.ui.tab_icons);
     }
 
     #[test]

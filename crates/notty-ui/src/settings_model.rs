@@ -133,6 +133,7 @@ pub enum SettingKey {
     OpenInExistingWindow,
     AccentColor,
     ReopenPrevious,
+    TabIcons,
 }
 
 /// El valor elegido; `apply` decide qué campo de `Config` toca según `SettingKey`.
@@ -379,6 +380,10 @@ pub fn apply(cfg: &mut Config, key: SettingKey, value: SettingValue) {
             cfg.ui.reopen_previous = b;
             return;
         }
+        (SettingKey::TabIcons, SettingValue::Bool(b)) => {
+            cfg.ui.tab_icons = b;
+            return;
+        }
         _ => {}
     }
     match (key, value) {
@@ -411,6 +416,7 @@ pub fn current_bool(cfg: &Config, key: SettingKey) -> bool {
         SettingKey::Ligatures => cfg.ui.ligatures,
         SettingKey::SyntaxHighlight => cfg.ui.syntax_highlight,
         SettingKey::ReopenPrevious => cfg.ui.reopen_previous,
+        SettingKey::TabIcons => cfg.ui.tab_icons,
         SettingKey::StartWithWindows => cfg.hotkey.start_with_windows,
         SettingKey::UpdatesCheck => cfg.updates.check,
         _ => false,

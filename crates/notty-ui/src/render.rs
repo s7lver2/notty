@@ -1126,7 +1126,7 @@ impl Renderer {
                 self.push_clip(frame.tabs_below);
                 self.fill(frame.tabs_below, pal.chrome);
                 self.set_fade(k);
-                self.draw_tabs_row(ws, view, pal, layout::TABS_BELOW_PAD_X, w - layout::TABS_BELOW_PAD_X, frame.tabs_below.bottom);
+                self.draw_tabs_row(ws, view, pal, layout::TABS_BELOW_PAD_X, w - layout::TABS_BELOW_PAD_X, frame.tabs_below.bottom, ui.tab_icons);
                 self.set_fade(1.0);
                 self.pop_clip();
             }
@@ -1432,7 +1432,7 @@ impl Renderer {
                 // Hasta el engranaje de Ajustes (no hasta los botones de ventana: se
                 // montaba encima), dejando siempre un hueco para arrastrar la ventana.
                 let max_right = (frame.settings_btn.left - layout::TITLE_DRAG_MIN).max(layout::APPICON_W);
-                self.draw_tabs_row(ws, view, pal, layout::APPICON_W, max_right, frame.titlebar.bottom);
+                self.draw_tabs_row(ws, view, pal, layout::APPICON_W, max_right, frame.titlebar.bottom, ui.tab_icons);
             } else {
                 let name = crate::doc_name(ws.active().path.as_deref());
                 let title = crate::window_title(&name, ws.active().doc.is_dirty(), ui.preset == notty_config::Preset::Zen);
@@ -1672,7 +1672,7 @@ impl Renderer {
 
     /// Fila de pestañas compartida entre la barra de título y `.tabs.below`.
     #[allow(unused_unsafe)]
-    unsafe fn draw_tabs_row(&mut self, ws: &Workspace, view: &ViewState, pal: &theme::Palette, x0: f32, max_right: f32, bottom: f32) {
+    unsafe fn draw_tabs_row(&mut self, ws: &Workspace, view: &ViewState, pal: &theme::Palette, x0: f32, max_right: f32, bottom: f32, tab_icons: bool) {
         unsafe {
             // Fila = documentos reales + pestañas recién cerradas que aún encogen
             // (`ghosts`), cada una en la posición que ocupaba.
@@ -1741,7 +1741,8 @@ impl Renderer {
             };
             let focus = order.iter().position(|s| matches!(s, Slot::Doc(d) if is_active(*d))).unwrap_or(0);
             let dot_w = self.measure("●", &self.fonts.ui_9);
-            let row = layout::tabs_fit(x0, bottom, max_right, &slots, focus, dot_w);
+            let icon_w = if tab_icons { layout::TAB_ICON } else { 0.0 };
+            let row = layout::tabs_fit(x0, bottom, max_right, &slots, focus, dot_w, icon_w);
             let base_fade = self.fade();
             let first_vis = row.tabs.iter().position(Option::is_some).unwrap_or(0);
             let last_vis = row.tabs.iter().rposition(Option::is_some).unwrap_or(0);
@@ -1792,6 +1793,11 @@ impl Renderer {
                     self.fill(Rect::new(t.rect.left, t.rect.bottom - layout::TAB_RADIUS, t.rect.right, t.rect.bottom), pal.hover);
                 }
                 let name_color = if active { pal.text } else { pal.text_2 };
+                if let Some(icon_cx) = t.icon_cx {
+                    let icon_cy = (t.rect.top + t.rect.bottom) / 2.0;
+                    let icon_r = Rect::new(icon_cx - layout::TAB_ICON / 2.0, icon_cy - layout::TAB_ICON / 2.0, icon_cx + layout::TAB_ICON / 2.0, icon_cy + layout::TAB_ICON / 2.0);
+                    self.draw_suggestion_icon(false, icon_r, name_color.faded(0.85));
+                }
                 self.text(&names[si], &self.fonts.ui_12, Rect::new(t.name_x, t.rect.top, t.name_x + t.name_w, t.rect.bottom), name_color);
                 if let Some(dot_x) = t.dot_x {
                     self.text(
