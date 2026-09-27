@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.3.0
+
+- Modo Paneles como kitty: pestañas que se dividen en hasta 4 paneles, con anchos ajustables.
+- Modo Acomodar (Ctrl+Shift+R) para cambiar los anchos de los paneles con el teclado.
+- Atajos para moverte: pestañas (Ctrl+PgUp/PgDn, Ctrl+1…9), paneles (Alt+1…9), mover pestaña o panel (Ctrl+Shift+PgUp/PgDn, Ctrl+Alt+←/→).
+- Rediseño completo de Ajustes: barra lateral de iconos que se expande al pasar el cursor, subpáginas con vistas previas en vivo (Fuentes, Ligaduras, Sintaxis), animaciones y sin el borde raro.
+- Sección de Actualizaciones mejorada; el aviso de versión nueva ya no sale desalineado.
+- Subpágina Sintaxis: activa o desactiva cada lenguaje por separado. 11 lenguajes nuevos (Go, Java, C#, HTML, CSS, Bash, Lua, Ruby, PHP, XML, SQL).
+- Logo nuevo y Acerca de rediseñado.
+- Aviso de "Ruta copiada" al copiar la ruta de una pestaña.
+- Fix: cerrar con cambios sin guardar es configurable (preguntar o recuperar al abrir).
+- Fix: el conflicto de autoguardado se resuelve escribiendo SI o NO.
+- Fix: si Direct2D pierde el dispositivo, la ventana se recupera en vez de quedarse en negro.
+- Fix: abrir con notty ya abierto resuelve rutas relativas, crea archivos nuevos y no duplica ventanas; nueva opción para abrir siempre en una ventana nueva.
+- Fix: el cursor ya no se queda entre \r y \n; los emoji y demás caracteres fuera del BMP ya se pueden escribir; los archivos ANSI se abren como texto.
+- Fix: Guardar como pregunta antes de sobrescribir; los errores al guardar se avisan; un config.toml roto ya no se sobrescribe sin dejar copia.
+- Fix: relanzar tras actualizar guarda lo no guardado y cierra también desde Ajustes.
+
 ## v0.2.0
 
 - El instalador se autoactualiza a la versión más reciente al abrirse.
