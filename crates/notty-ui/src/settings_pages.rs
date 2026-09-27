@@ -1351,6 +1351,16 @@ fn teclado(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     blk_end(ui);
 
     blk(ui, d, 4);
+    y = group(ui, x, y - 4.0, w, "Para moverte · fijos") + 6.0;
+    let moves = [
+        ("Pestaña siguiente / anterior", "Ctrl+PgDn / Ctrl+PgUp"),
+        ("Ir a la pestaña 1…9 (9 = la última)", "Ctrl+1…9"),
+        ("Ir al panel 1…9 (modo Paneles)", "Alt+1…9"),
+        ("En Acomodar: ancho · panel · igualar · salir", "←→ · Tab · = · Esc"),
+    ];
+    for (j, (title, keys)) in moves.iter().enumerate() {
+        y = static_bind(ui, x, y, w, 210 + j as u16, title, keys) + 4.0;
+    }
     y = group(ui, x, y - 4.0, w, "Atajos globales · funcionan aunque notty no tenga el foco") + 6.0;
     blk_end(ui);
     blk(ui, d, 5);

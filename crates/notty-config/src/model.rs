@@ -32,7 +32,7 @@ pub enum Files {
     #[default]
     Tabs,
     Buffers,
-    /// Paneles lado a lado estilo kitty (hasta 3), además de las pestañas.
+    /// Como kitty: pestañas, y cada una dividida en paneles lado a lado (hasta 4).
     Splits,
 }
 

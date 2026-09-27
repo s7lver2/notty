@@ -32,6 +32,11 @@ pub enum Command {
     ClosePane,
     FocusPaneLeft,
     FocusPaneRight,
+    SwapPaneLeft,
+    SwapPaneRight,
+    ResizePanes,
+    MoveTabLeft,
+    MoveTabRight,
 }
 
 impl Command {
@@ -51,6 +56,11 @@ impl Command {
         Command::ClosePane,
         Command::FocusPaneLeft,
         Command::FocusPaneRight,
+        Command::SwapPaneLeft,
+        Command::SwapPaneRight,
+        Command::ResizePanes,
+        Command::MoveTabLeft,
+        Command::MoveTabRight,
     ];
 
     /// Clave en `[keys]` de config.toml.
@@ -71,6 +81,11 @@ impl Command {
             Command::ClosePane => "close_pane",
             Command::FocusPaneLeft => "focus_pane_left",
             Command::FocusPaneRight => "focus_pane_right",
+            Command::SwapPaneLeft => "swap_pane_left",
+            Command::SwapPaneRight => "swap_pane_right",
+            Command::ResizePanes => "resize_panes",
+            Command::MoveTabLeft => "move_tab_left",
+            Command::MoveTabRight => "move_tab_right",
         }
     }
 
@@ -95,6 +110,11 @@ impl Command {
             Command::ClosePane => "Cerrar panel",
             Command::FocusPaneLeft => "Panel de la izquierda",
             Command::FocusPaneRight => "Panel de la derecha",
+            Command::SwapPaneLeft => "Mover el panel a la izquierda",
+            Command::SwapPaneRight => "Mover el panel a la derecha",
+            Command::ResizePanes => "Acomodar paneles (ajustar anchos)",
+            Command::MoveTabLeft => "Mover la pestaña a la izquierda",
+            Command::MoveTabRight => "Mover la pestaña a la derecha",
         }
     }
 
@@ -115,6 +135,11 @@ impl Command {
             Command::ClosePane => "Ctrl+Shift+W",
             Command::FocusPaneLeft => "Ctrl+Shift+Left",
             Command::FocusPaneRight => "Ctrl+Shift+Right",
+            Command::SwapPaneLeft => "Ctrl+Alt+Left",
+            Command::SwapPaneRight => "Ctrl+Alt+Right",
+            Command::ResizePanes => "Ctrl+Shift+R",
+            Command::MoveTabLeft => "Ctrl+Shift+PageUp",
+            Command::MoveTabRight => "Ctrl+Shift+PageDown",
         }
     }
 
@@ -134,13 +159,27 @@ impl Command {
             | Command::SplitPane
             | Command::ClosePane
             | Command::FocusPaneLeft
-            | Command::FocusPaneRight => None,
+            | Command::FocusPaneRight
+            | Command::SwapPaneLeft
+            | Command::SwapPaneRight
+            | Command::ResizePanes
+            | Command::MoveTabLeft
+            | Command::MoveTabRight => None,
         }
     }
 
     /// Solo actúan con `Files::Splits`; en otro modo la tecla sigue su camino normal.
     pub fn is_pane(self) -> bool {
-        matches!(self, Command::SplitPane | Command::ClosePane | Command::FocusPaneLeft | Command::FocusPaneRight)
+        matches!(
+            self,
+            Command::SplitPane
+                | Command::ClosePane
+                | Command::FocusPaneLeft
+                | Command::FocusPaneRight
+                | Command::SwapPaneLeft
+                | Command::SwapPaneRight
+                | Command::ResizePanes
+        )
     }
 }
 

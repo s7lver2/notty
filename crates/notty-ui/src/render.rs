@@ -125,6 +125,21 @@ struct MenuRow<'a> {
     check: Option<bool>,
 }
 
+/// Qué paneles se ven y cómo (`Files::Splits`, ver `splits.rs`). Con menos de dos
+/// paneles, el cuerpo entero es del documento activo.
+#[derive(Debug, Clone, Default)]
+pub struct PaneView {
+    pub docs: Vec<usize>,
+    pub weights: Vec<f32>,
+    pub focus: usize,
+    /// Modo acomodar (Ctrl+Shift+R): se resalta el panel con foco y se enseñan las teclas.
+    pub resize_mode: bool,
+    /// Pestañas del modo Paneles: el documento que representa a cada una (el de su
+    /// panel con foco) y todos los suyos. `None` fuera de ese modo: una pestaña por
+    /// documento.
+    pub tabs: Option<Vec<(usize, Vec<usize>)>>,
+}
+
 /// Contexto que no vive en `Workspace`/`UiConfig` pero que `paint` necesita para
 /// saber cómo dibujar: tema, estado del ratón, si la ventana está maximizada/activa
 /// y si hay un menú de la barra desplegado.
@@ -300,7 +315,7 @@ pub struct Renderer {
     font_scale: f32,
     /// Documento de cada panel y cuál tiene el foco (`Files::Splits`). Con menos de 2
     /// paneles se dibuja solo el documento activo, como siempre.
-    panes: (Vec<usize>, usize),
+    panes: PaneView,
 }
 
 /// Lo que hay que pintar en el panel de notas de versión cuando está abierto
@@ -427,7 +442,7 @@ impl Renderer {
                 mono_family,
                 ui_family,
                 font_scale: 1.0,
-                panes: (Vec::new(), 0),
+                panes: PaneView::default(),
             })
         }
     }
@@ -1120,10 +1135,13 @@ impl Renderer {
             }
 
             // Un documento por panel (`Files::Splits`); sin paneles, el activo en todo el cuerpo.
-            let (pane_docs, pane_focus) =
-                if self.panes.0.len() > 1 { self.panes.clone() } else { (vec![ws.active_index()], 0) };
+            let (pane_docs, pane_focus, weights) = if self.panes.docs.len() > 1 {
+                (self.panes.docs.clone(), self.panes.focus, self.panes.weights.clone())
+            } else {
+                (vec![ws.active_index()], 0, vec![1.0])
+            };
             let split = pane_docs.len() > 1;
-            let pane_rects = crate::splits::pane_rects(frame.body, pane_docs.len());
+            let pane_rects = crate::splits::pane_rects(frame.body, &weights);
             for (pi, (&doc_i, &pane)) in pane_docs.iter().zip(&pane_rects).enumerate() {
             let focused = pi == pane_focus;
             let state = ws.iter().nth(doc_i).unwrap_or(state);
@@ -1285,8 +1303,14 @@ impl Renderer {
                 }
                 if focused {
                     self.fill(Rect::new(pane.left, pane.top, pane.right, pane.top + 2.0), pal.accent);
+                    if self.panes.resize_mode {
+                        self.stroke_round_rect(Rect::new(pane.left + 1.0, pane.top + 1.0, pane.right - 1.0, pane.bottom - 1.0), 3.0, 2.0, pal.accent);
+                    }
                 }
             }
+            }
+            if split && self.panes.resize_mode {
+                self.draw_resize_hint(frame.body, pal);
             }
 
             if !frame.hints.is_empty() {
@@ -1633,6 +1657,22 @@ impl Renderer {
         }
     }
 
+    /// Cartel del modo acomodar, arriba en el centro del cuerpo.
+    fn draw_resize_hint(&self, body: Rect, pal: &theme::Palette) {
+        let label = "Acomodar paneles";
+        let keys = "←/→ ancho · Shift más rápido · Tab panel · = igualar · Esc salir";
+        let lw = self.measure(label, &self.fonts.ui_12_5_semibold);
+        let kw = self.measure(keys, &self.fonts.ui_12);
+        let w = (lw + 14.0 + kw + 28.0).min(body.width() - 16.0);
+        let x = body.left + (body.width() - w) / 2.0;
+        let r = Rect::new(x, body.top + 12.0, x + w, body.top + 44.0);
+        self.draw_popup_shadow(r, 8.0, 1.0, pal.shadow);
+        self.fill_round(r, 8.0, pal.chrome_hi);
+        self.stroke_round_rect(r, 8.0, 1.0, pal.accent.faded(0.6));
+        self.text(label, &self.fonts.ui_12_5_semibold, Rect::new(r.left + 14.0, r.top, r.right, r.bottom), pal.accent);
+        self.text(keys, &self.fonts.ui_12, Rect::new(r.left + 14.0 + lw + 14.0, r.top, r.right - 10.0, r.bottom), pal.text_2);
+    }
+
     /// Fila de pestañas compartida entre la barra de título y `.tabs.below`.
     #[allow(unused_unsafe)]
     unsafe fn draw_tabs_row(&mut self, ws: &Workspace, view: &ViewState, pal: &theme::Palette, x0: f32, max_right: f32, bottom: f32) {
@@ -1645,25 +1685,39 @@ impl Renderer {
             }
             let anim = self.tab_anim.clone();
             let doc_count = ws.len();
+            // Modo Paneles: una pestaña por grupo, representada por su documento con
+            // foco (sin fantasmas de cierre: sus índices son de documentos, no de grupos).
+            let groups = self.panes.tabs.clone();
             let mut order: Vec<Slot> = Vec::with_capacity(doc_count + anim.ghosts.len());
-            let mut gi = 0;
-            for d in 0..doc_count {
-                while gi < anim.ghosts.len() && anim.ghosts[gi].at <= d {
+            if let Some(groups) = &groups {
+                order.extend(groups.iter().map(|g| Slot::Doc(g.0)));
+            } else {
+                let mut gi = 0;
+                for d in 0..doc_count {
+                    while gi < anim.ghosts.len() && anim.ghosts[gi].at <= d {
+                        order.push(Slot::Ghost(gi));
+                        gi += 1;
+                    }
+                    order.push(Slot::Doc(d));
+                }
+                while gi < anim.ghosts.len() {
                     order.push(Slot::Ghost(gi));
                     gi += 1;
                 }
-                order.push(Slot::Doc(d));
             }
-            while gi < anim.ghosts.len() {
-                order.push(Slot::Ghost(gi));
-                gi += 1;
-            }
+            let group_of = |d: usize| groups.as_ref().and_then(|g| g.iter().find(|g| g.0 == d)).map(|g| g.1.as_slice());
 
             let docs: Vec<&EditorState> = ws.iter().collect();
             let names: Vec<String> = order
                 .iter()
                 .map(|s| match s {
-                    Slot::Doc(d) => crate::doc_name(docs[*d].path.as_deref()),
+                    Slot::Doc(d) => {
+                        let name = crate::doc_name(docs[*d].path.as_deref());
+                        match group_of(*d).map(<[usize]>::len) {
+                            Some(n) if n > 1 => format!("{name} · {n}"),
+                            _ => name,
+                        }
+                    }
                     Slot::Ghost(g) => anim.ghosts[*g].name.clone(),
                 })
                 .collect();
@@ -1672,13 +1726,23 @@ impl Renderer {
                 .zip(&names)
                 .map(|(s, n)| {
                     let (dirty, scale) = match s {
-                        Slot::Doc(d) => (docs[*d].doc.is_dirty(), anim.open_scale(*d)),
+                        Slot::Doc(d) => {
+                            let dirty = match group_of(*d) {
+                                Some(g) => g.iter().any(|&i| docs.get(i).is_some_and(|s| s.doc.is_dirty())),
+                                None => docs[*d].doc.is_dirty(),
+                            };
+                            (dirty, anim.open_scale(*d))
+                        }
                         Slot::Ghost(g) => (anim.ghosts[*g].dirty, anim.ghosts[*g].scale),
                     };
                     layout::TabSlot { name_w: self.measure(n, &self.fonts.ui_12), dirty, scale }
                 })
                 .collect();
-            let focus = order.iter().position(|s| matches!(s, Slot::Doc(d) if *d == ws.active_index())).unwrap_or(0);
+            let is_active = |d: usize| match group_of(d) {
+                Some(g) => g.contains(&ws.active_index()),
+                None => d == ws.active_index(),
+            };
+            let focus = order.iter().position(|s| matches!(s, Slot::Doc(d) if is_active(*d))).unwrap_or(0);
             let dot_w = self.measure("●", &self.fonts.ui_9);
             let row = layout::tabs_fit(x0, bottom, max_right, &slots, focus, dot_w);
             let base_fade = self.fade();
@@ -1717,7 +1781,7 @@ impl Renderer {
                         continue;
                     }
                 };
-                let active = i == ws.active_index();
+                let active = is_active(i);
                 let hovered_tab = view.hover == Hit::Tab(i) || view.hover == Hit::TabClose(i);
                 if active {
                     // La pestaña activa funde su fondo desde transparente en vez de
@@ -1909,8 +1973,8 @@ impl Renderer {
         self.tab_anim = frame;
     }
 
-    pub fn set_panes(&mut self, panes: Vec<usize>, focus: usize) {
-        self.panes = (panes, focus);
+    pub fn set_panes(&mut self, panes: PaneView) {
+        self.panes = panes;
     }
 
     pub fn set_about(&mut self, about: Option<AboutContent>) {

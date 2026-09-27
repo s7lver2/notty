@@ -173,7 +173,7 @@ pub const FILES_OPTS: Options = &[
 pub const FILES_DESC: [&str; 3] = [
     "Una pestaña por archivo, visibles arriba.",
     "Estilo vim: sin pestañas, cambias con Ctrl+Tab o :b.",
-    "Hasta 3 documentos lado a lado; Ctrl+Shift+Enter divide.",
+    "Pestañas que se dividen en hasta 4 paneles, como kitty. Ctrl+Shift+Enter divide, Ctrl+Shift+R acomoda.",
 ];
 
 pub const TABS_POSITION_OPTS: Options = &[

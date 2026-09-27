@@ -92,6 +92,14 @@ impl Workspace {
         self.after_switch(before);
     }
 
+    /// Mueve el documento activo un puesto a la izquierda (`-1`) o derecha (`+1`).
+    pub fn move_active(&mut self, dir: isize) -> bool {
+        let Some(to) = self.active.checked_add_signed(dir).filter(|&i| i < self.docs.len()) else { return false };
+        self.docs.swap(self.active, to);
+        self.active = to;
+        true
+    }
+
     pub fn next(&mut self) {
         let before = self.active;
         self.active = (self.active + 1) % self.docs.len();

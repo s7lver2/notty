@@ -147,9 +147,12 @@ struct WindowState {
     pending_surrogate: Option<u16>,
     /// Ya se resolvió qué hacer con lo no guardado: el próximo `WM_CLOSE` cierra de verdad.
     close_confirmed: bool,
-    /// Paneles de `Files::Splits`. Se mantiene al día también en los otros modos (al
-    /// cerrar documentos) para que volver a Paneles no apunte a índices que ya no existen.
-    splits: crate::splits::Splits,
+    /// Pestañas y paneles de `Files::Splits`. Se mantiene al día también en los otros
+    /// modos (al cerrar documentos) para que volver a Paneles no apunte a índices que
+    /// ya no existen.
+    layouts: crate::splits::Layouts,
+    /// Modo acomodar (Ctrl+Shift+R): las flechas cambian el ancho de los paneles.
+    resize_mode: bool,
 }
 
 impl WindowState {
@@ -201,7 +204,7 @@ impl WindowState {
         let total = self.ws.active().doc.buffer().len_lines();
         let (body, gutter_w) =
             self.renderer.body_and_gutter(&ui, self.ws.len(), self.menu_bar_visible(), total, self.ws.active().raw.is_some());
-        let body = self.pane_rects(body).get(self.splits.focus()).copied().unwrap_or(body);
+        let body = self.pane_rects(body).get(self.layouts.focus()).copied().unwrap_or(body);
         (body, gutter_w)
     }
 
@@ -211,8 +214,13 @@ impl WindowState {
 
     /// Rect de cada panel dentro de `body` (uno solo, `body`, fuera del modo Paneles).
     fn pane_rects(&self, body: layout::Rect) -> Vec<layout::Rect> {
-        let n = if self.splits_on() { self.splits.panes().len() } else { 1 };
-        crate::splits::pane_rects(body, n)
+        if self.splits_on() { crate::splits::pane_rects(body, self.layouts.weights()) } else { vec![body] }
+    }
+
+    /// Pone `layouts` al día con la lista de documentos (ver `Layouts::reconcile`).
+    fn sync_layout(&mut self) {
+        let (n, active) = (self.ws.len(), self.ws.active_index());
+        self.layouts.reconcile(n, active);
     }
 
     /// Índice del panel bajo `(x, y)`, solo si hay más de uno.
@@ -267,6 +275,7 @@ fn start_tab_switch_anim(w: &mut WindowState, hwnd: HWND) {
 fn open_tab(w: &mut WindowState, hwnd: HWND, state: EditorState) {
     w.ws.open(state);
     w.tab_anims.on_open(w.ws.active_index(), std::time::Instant::now(), w.animations_enabled);
+    w.sync_layout();
     ensure_anim_timer(w, hwnd);
 }
 
@@ -276,12 +285,28 @@ fn close_tab(w: &mut WindowState, hwnd: HWND, idx: usize) {
     let Some(st) = w.ws.iter().nth(idx) else { return };
     let name = crate::doc_name(st.path.as_deref());
     let dirty = st.doc.is_dirty();
-    w.splits.sync(w.ws.active_index());
+    w.sync_layout();
+    // Modo Paneles: al cerrar el panel con foco, el foco se queda en su pestaña (el
+    // panel de la izquierda, o el de la derecha si era el primero).
+    let neighbour = (w.splits_on() && idx == w.ws.active_index())
+        .then(|| {
+            let docs = w.layouts.tab_docs_of(idx);
+            let pos = docs.iter().position(|&d| d == idx)?;
+            if pos > 0 { docs.get(pos - 1).copied() } else { docs.get(1).copied() }
+        })
+        .flatten();
     if w.ws.close(idx) {
-        w.splits.on_doc_closed(idx, w.ws.len());
-        w.splits.sync(w.ws.active_index());
-        w.tab_anims.on_close(idx, name, dirty, std::time::Instant::now(), w.animations_enabled);
+        w.layouts.on_doc_closed(idx);
+        if let Some(n) = neighbour {
+            w.ws.activate(if n > idx { n - 1 } else { n });
+        }
+        w.sync_layout();
+        if !w.splits_on() {
+            w.tab_anims.on_close(idx, name, dirty, std::time::Instant::now(), w.animations_enabled);
+        }
         ensure_anim_timer(w, hwnd);
+    } else {
+        w.sync_layout();
     }
 }
 
@@ -381,23 +406,102 @@ fn save_as_then_close(w: &mut WindowState, hwnd: HWND, req: crate::CloseRequest)
 /// Parte el panel con foco: el nuevo muestra el primer documento que no se ve en
 /// ningún panel, o uno vacío nuevo si ya se ven todos.
 fn split_pane(w: &mut WindowState, hwnd: HWND) {
-    w.splits.sync(w.ws.active_index());
-    match w.splits.split(w.ws.len()) {
-        Some(Some(doc)) => w.ws.activate(doc),
-        Some(None) => {
-            let cfg = w.cfg.borrow().clone();
-            open_tab(w, hwnd, maybe_vim(EditorState::new_empty(), &cfg));
-        }
-        None => {}
+    w.sync_layout();
+    if w.layouts.split() {
+        // Sin `open_tab`: no es una pestaña nueva que tenga que entrar creciendo.
+        let cfg = w.cfg.borrow().clone();
+        w.ws.open(maybe_vim(EditorState::new_empty(), &cfg));
+        w.sync_layout();
+    } else {
+        show_notice(w, hwnd, format!("Como mucho {} paneles por pestaña", crate::splits::MAX_PANES));
     }
-    w.splits.sync(w.ws.active_index());
 }
 
-/// Da el foco al panel `i` (clic dentro de él): su documento pasa a ser el activo.
+/// Da el foco al panel `i` (clic dentro de él, Alt+número): su documento pasa a ser
+/// el activo.
 fn focus_pane(w: &mut WindowState, i: usize) {
-    w.splits.sync(w.ws.active_index());
-    if let Some(doc) = w.splits.focus_pane(i) {
+    w.sync_layout();
+    if let Some(doc) = w.layouts.focus_pane(i) {
         w.ws.activate(doc);
+    }
+}
+
+/// Pestaña siguiente/anterior: de documentos, o de grupos de paneles en modo Paneles.
+fn step_tab(w: &mut WindowState, hwnd: HWND, dir: isize) {
+    if w.splits_on() {
+        w.sync_layout();
+        let doc = w.layouts.step_tab(dir);
+        w.ws.activate(doc);
+    } else if dir > 0 {
+        w.ws.next();
+    } else {
+        w.ws.prev();
+    }
+    start_tab_switch_anim(w, hwnd);
+}
+
+/// Ctrl+1…9: pestaña `n` (1 = la primera, 9 = la última, como en los navegadores).
+fn goto_tab(w: &mut WindowState, hwnd: HWND, n: usize) {
+    if w.splits_on() {
+        w.sync_layout();
+        let i = if n == 9 { w.layouts.tab_count() - 1 } else { n - 1 };
+        if let Some(doc) = w.layouts.goto_tab(i) {
+            w.ws.activate(doc);
+        }
+    } else {
+        let i = if n == 9 { w.ws.len() - 1 } else { n - 1 };
+        if i < w.ws.len() {
+            w.ws.activate(i);
+        }
+    }
+    start_tab_switch_anim(w, hwnd);
+}
+
+/// Documentos de la pestaña que contiene a `doc`: todos los de su grupo en modo
+/// Paneles, o solo él.
+fn tab_docs(w: &mut WindowState, doc: usize) -> Vec<usize> {
+    if w.splits_on() {
+        w.sync_layout();
+        w.layouts.tab_docs_of(doc)
+    } else {
+        vec![doc]
+    }
+}
+
+/// "Cerrar otras" / "Cerrar a la derecha" de la pestaña de `doc`, en documentos.
+fn tab_neighbours(w: &mut WindowState, doc: usize, right_only: bool) -> Vec<usize> {
+    if !w.splits_on() {
+        return if right_only { (doc + 1..w.ws.len()).collect() } else { (0..w.ws.len()).filter(|&j| j != doc).collect() };
+    }
+    w.sync_layout();
+    let groups = w.layouts.tab_groups();
+    let Some(at) = groups.iter().position(|g| g.1.contains(&doc)) else { return Vec::new() };
+    groups
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| if right_only { *i > at } else { *i != at })
+        .flat_map(|(_, g)| g.1.clone())
+        .collect()
+}
+
+/// Modo acomodar: flechas = ancho del panel con foco, Tab = otro panel, `=` = todos
+/// iguales, Enter/Esc = salir. El resto de teclas no hace nada mientras dure.
+fn handle_resize_key(w: &mut WindowState, vk: u32, shift: bool) {
+    let step = if shift { 0.10 } else { 0.03 };
+    match vk {
+        0x27 => {
+            w.layouts.resize(step);
+        }
+        0x25 => {
+            w.layouts.resize(-step);
+        }
+        0x09 => {
+            let doc = w.layouts.cycle_focus(if shift { -1 } else { 1 });
+            w.ws.activate(doc);
+        }
+        0xBB | 0x30 | 0x6B => w.layouts.equalize(),
+        0x0D | 0x1B => w.resize_mode = false,
+        _ => {}
     }
 }
 
@@ -527,15 +631,18 @@ fn run_ctx_cmd(w: &mut WindowState, hwnd: HWND, cmd: crate::context_menu::CtxCmd
             let cfg = w.cfg.borrow().clone();
             open_tab(w, hwnd, maybe_vim(crate::EditorState::new_empty(), &cfg));
         }
-        CtxCmd::CloseTab(i) => request_close(w, hwnd, &[i], false),
+        CtxCmd::CloseTab(i) => {
+            let docs = tab_docs(w, i);
+            request_close(w, hwnd, &docs, false);
+        }
         CtxCmd::CloseOthers(i) => {
             if i < w.ws.len() {
-                let others: Vec<usize> = (0..w.ws.len()).filter(|&j| j != i).collect();
+                let others = tab_neighbours(w, i, false);
                 request_close(w, hwnd, &others, false);
             }
         }
         CtxCmd::CloseRight(i) => {
-            let right: Vec<usize> = (i + 1..w.ws.len()).collect();
+            let right = tab_neighbours(w, i, true);
             request_close(w, hwnd, &right, false);
         }
         CtxCmd::CopyPath(i) => {
@@ -1594,7 +1701,8 @@ fn run_inner(
             swallow_char: false,
             pending_surrogate: None,
             close_confirmed: false,
-            splits: crate::splits::Splits::default(),
+            layouts: crate::splits::Layouts::default(),
+            resize_mode: false,
         });
         let ptr = Box::into_raw(window_state);
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, ptr as isize);
@@ -1777,15 +1885,26 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     let visible = layout::visible_lines(body, w.renderer.line_height());
                     w.ws.active_mut().viewport.visible_lines = visible;
                     if w.splits_on() {
-                        w.splits.sync(w.ws.active_index());
-                        for &doc in w.splits.panes() {
+                        w.sync_layout();
+                        let panes = w.layouts.panes().to_vec();
+                        for &doc in &panes {
                             if let Some(st) = w.ws.get_mut(doc) {
                                 st.viewport.visible_lines = visible;
                             }
                         }
-                        w.renderer.set_panes(w.splits.panes().to_vec(), w.splits.focus());
+                        if panes.len() < 2 {
+                            w.resize_mode = false;
+                        }
+                        w.renderer.set_panes(crate::PaneView {
+                            docs: panes,
+                            weights: w.layouts.weights().to_vec(),
+                            focus: w.layouts.focus(),
+                            resize_mode: w.resize_mode,
+                            tabs: Some(w.layouts.tab_groups()),
+                        });
                     } else {
-                        w.renderer.set_panes(Vec::new(), 0);
+                        w.resize_mode = false;
+                        w.renderer.set_panes(crate::PaneView::default());
                     }
                     let dark =crate::is_dark(w.cfg.borrow().ui.theme, system_uses_dark_mode());
                     if let Some(prev) = w.last_dark {
@@ -2035,6 +2154,15 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         let _ = InvalidateRect(Some(hwnd), None, false);
                     }
 
+                    if w.resize_mode {
+                        let shift = (GetKeyState(VK_SHIFT.0 as i32) as u16 & 0x8000) != 0;
+                        handle_resize_key(w, vk, shift);
+                        w.swallow_char = true;
+                        update_title(hwnd, w.ws.active());
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                        return LRESULT(0);
+                    }
+
                     let alt_down = (GetKeyState(VK_MENU.0 as i32) as u16 & 0x8000) != 0;
                     let mods = Modifiers {
                         ctrl: (GetKeyState(VK_CONTROL.0 as i32) as u16 & 0x8000) != 0,
@@ -2100,30 +2228,43 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                                     ),
                                 );
                             }
-                            notty_input::Command::NextTab => {
-                                w.ws.next();
-                                start_tab_switch_anim(w, hwnd);
-                            }
-                            notty_input::Command::PrevTab => {
-                                w.ws.prev();
-                                start_tab_switch_anim(w, hwnd);
-                            }
+                            notty_input::Command::NextTab => step_tab(w, hwnd, 1),
+                            notty_input::Command::PrevTab => step_tab(w, hwnd, -1),
                             notty_input::Command::CloseTab => {
-                                let i = w.ws.active_index();
-                                request_close(w, hwnd, &[i], false);
+                                let docs = tab_docs(w, w.ws.active_index());
+                                request_close(w, hwnd, &docs, false);
+                            }
+                            notty_input::Command::MoveTabLeft | notty_input::Command::MoveTabRight => {
+                                let dir = if cmd == notty_input::Command::MoveTabLeft { -1 } else { 1 };
+                                if w.splits_on() {
+                                    w.sync_layout();
+                                    w.layouts.move_tab(dir);
+                                } else {
+                                    w.ws.move_active(dir);
+                                }
+                            }
+                            notty_input::Command::SwapPaneLeft | notty_input::Command::SwapPaneRight => {
+                                w.sync_layout();
+                                w.layouts.swap_pane(if cmd == notty_input::Command::SwapPaneLeft { -1 } else { 1 });
+                            }
+                            notty_input::Command::ResizePanes => {
+                                w.sync_layout();
+                                if w.layouts.panes().len() > 1 {
+                                    w.resize_mode = true;
+                                } else {
+                                    show_notice(w, hwnd, "Para acomodar hacen falta dos paneles (Ctrl+Shift+Enter divide)".to_string());
+                                }
                             }
                             notty_input::Command::OpenSettings => open_settings(w, hwnd),
                             notty_input::Command::SplitPane => split_pane(w, hwnd),
                             notty_input::Command::ClosePane => {
-                                w.splits.sync(w.ws.active_index());
-                                if let Some(doc) = w.splits.close_focused() {
-                                    w.ws.activate(doc);
-                                }
+                                let i = w.ws.active_index();
+                                request_close(w, hwnd, &[i], false);
                             }
                             notty_input::Command::FocusPaneLeft | notty_input::Command::FocusPaneRight => {
-                                w.splits.sync(w.ws.active_index());
+                                w.sync_layout();
                                 let dir = if cmd == notty_input::Command::FocusPaneLeft { -1 } else { 1 };
-                                if let Some(doc) = w.splits.move_focus(dir) {
+                                if let Some(doc) = w.layouts.move_focus(dir) {
                                     w.ws.activate(doc);
                                 }
                             }
@@ -2131,6 +2272,29 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         update_title(hwnd, w.ws.active());
                         let _ = InvalidateRect(Some(hwnd), None, false);
                         return LRESULT(0);
+                    }
+                    // Para moverse, fijos (no se reasignan): Ctrl+PgDn/PgUp y Ctrl+1…9.
+                    if mods.ctrl && !mods.shift && !alt_down {
+                        let handled = match vk {
+                            0x22 => {
+                                step_tab(w, hwnd, 1);
+                                true
+                            }
+                            0x21 => {
+                                step_tab(w, hwnd, -1);
+                                true
+                            }
+                            0x31..=0x39 => {
+                                goto_tab(w, hwnd, (vk - 0x30) as usize);
+                                true
+                            }
+                            _ => false,
+                        };
+                        if handled {
+                            update_title(hwnd, w.ws.active());
+                            let _ = InvalidateRect(Some(hwnd), None, false);
+                            return LRESULT(0);
+                        }
                     }
                     // Vim/raw ya se resolvieron arriba con su atajo en vigor: el fijo de
                     // `action_for_vk` (Ctrl+Alt+V / Ctrl+Shift+H) no debe seguir
@@ -2298,7 +2462,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     // Clic en otro panel: primero se le da el foco, y el clic sigue hacia
                     // el documento de ese panel.
                     if matches!(hit, Hit::Body | Hit::ScrollThumb | Hit::ScrollTrack) {
-                        if let Some(i) = w.pane_at(x, y).filter(|&i| i != w.splits.focus()) {
+                        if let Some(i) = w.pane_at(x, y).filter(|&i| i != w.layouts.focus()) {
                             focus_pane(w, i);
                             update_title(hwnd, w.ws.active());
                             // Las barras de scroll registradas son de antes del cambio de
@@ -2396,7 +2560,8 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                         crate::Hit::TabClose(i) => {
-                            request_close(w, hwnd, &[i], false);
+                            let docs = tab_docs(w, i);
+                            request_close(w, hwnd, &docs, false);
                             update_title(hwnd, w.ws.active());
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
@@ -2543,7 +2708,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     // Como en cualquier editor: clic derecho fuera de la selección mueve
                     // el cursor ahí; dentro de ella, la conserva (para copiar/buscar).
                     if hit == Hit::Body {
-                        if let Some(i) = w.pane_at(x, y).filter(|&i| i != w.splits.focus()) {
+                        if let Some(i) = w.pane_at(x, y).filter(|&i| i != w.layouts.focus()) {
                             focus_pane(w, i);
                             update_title(hwnd, w.ws.active());
                         }
@@ -2620,10 +2785,10 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         };
                         let _ = windows::Win32::Graphics::Gdi::ScreenToClient(hwnd, &mut pt);
                         let scale = w.renderer.scale();
-                        w.splits.sync(w.ws.active_index());
+                        w.sync_layout();
                         let doc = w
                             .pane_at(pt.x as f32 / scale, pt.y as f32 / scale)
-                            .and_then(|i| w.splits.panes().get(i).copied())
+                            .and_then(|i| w.layouts.panes().get(i).copied())
                             .unwrap_or(w.ws.active_index());
                         if let Some(st) = w.ws.get_mut(doc) {
                             st.scroll_by(-notches * 3);
@@ -2638,6 +2803,13 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     let vk = wparam.0 as u32;
                     if vk == VK_MENU.0 as u32 && w.cfg.borrow().ui.menubar == notty_config::MenuBar::Alt {
                         w.menu_visible = !w.menu_visible;
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                        return LRESULT(0);
+                    }
+                    // Alt+1…9: panel N de la pestaña (modo Paneles).
+                    if (0x31..=0x39).contains(&vk) && w.splits_on() && (GetKeyState(VK_CONTROL.0 as i32) as u16 & 0x8000) == 0 {
+                        focus_pane(w, (vk - 0x31) as usize);
+                        update_title(hwnd, w.ws.active());
                         let _ = InvalidateRect(Some(hwnd), None, false);
                         return LRESULT(0);
                     }
