@@ -93,18 +93,19 @@ pub fn short_label(sel: &str) -> String {
     }
 }
 
-pub fn tab_menu(idx: usize, tab_count: usize, has_path: bool) -> Vec<CtxItem> {
+pub fn tab_menu(idx: usize, tab_count: usize, has_path: bool, lang: notty_config::Lang) -> Vec<CtxItem> {
+    let t = |s| crate::strings::tr(lang, s);
     vec![
-        CtxItem::entry("Nueva pestaña", "^N", CtxCmd::NewTab, true),
+        CtxItem::entry(t("Nueva pestaña"), "^N", CtxCmd::NewTab, true),
         CtxItem::Sep,
-        CtxItem::entry("Cerrar", "^W", CtxCmd::CloseTab(idx), true),
-        CtxItem::entry("Cerrar las demás", "", CtxCmd::CloseOthers(idx), tab_count > 1),
-        CtxItem::entry("Cerrar las de la derecha", "", CtxCmd::CloseRight(idx), idx + 1 < tab_count),
+        CtxItem::entry(t("Cerrar"), "^W", CtxCmd::CloseTab(idx), true),
+        CtxItem::entry(t("Cerrar las demás"), "", CtxCmd::CloseOthers(idx), tab_count > 1),
+        CtxItem::entry(t("Cerrar las de la derecha"), "", CtxCmd::CloseRight(idx), idx + 1 < tab_count),
         CtxItem::Sep,
-        CtxItem::entry("Copiar ruta", "", CtxCmd::CopyPath(idx), has_path),
-        CtxItem::entry("Abrir carpeta contenedora", "", CtxCmd::OpenFolder(idx), has_path),
+        CtxItem::entry(t("Copiar ruta"), "", CtxCmd::CopyPath(idx), has_path),
+        CtxItem::entry(t("Abrir carpeta contenedora"), "", CtxCmd::OpenFolder(idx), has_path),
         CtxItem::Sep,
-        CtxItem::entry("Guardar como…", "", CtxCmd::SaveAs(idx), true),
+        CtxItem::entry(t("Guardar como…"), "", CtxCmd::SaveAs(idx), true),
     ]
 }
 
@@ -118,31 +119,36 @@ pub struct BodyCtx {
     pub search_open: bool,
 }
 
-pub fn body_menu(ctx: &BodyCtx) -> Vec<CtxItem> {
+pub fn body_menu(ctx: &BodyCtx, lang: notty_config::Lang) -> Vec<CtxItem> {
+    let t = |s| crate::strings::tr(lang, s);
     let has_sel = !ctx.selection.is_empty();
     // Una selección de varias líneas no cabe en el campo de una línea del prompt.
     let searchable = has_sel && !ctx.selection.contains(['\n', '\r']);
     let (find_label, replace_label) = if searchable {
         let s = short_label(&ctx.selection);
-        (format!("Buscar «{s}»"), format!("Reemplazar «{s}»"))
+        if lang == notty_config::Lang::En {
+            (format!("Find \"{s}\""), format!("Replace \"{s}\""))
+        } else {
+            (format!("Buscar «{s}»"), format!("Reemplazar «{s}»"))
+        }
     } else {
-        ("Buscar la selección".to_string(), "Reemplazar la selección".to_string())
+        (t("Buscar la selección").to_string(), t("Reemplazar la selección").to_string())
     };
     vec![
-        CtxItem::entry("Deshacer", "^Z", CtxCmd::Undo, true),
-        CtxItem::entry("Rehacer", "^Y", CtxCmd::Redo, true),
+        CtxItem::entry(t("Deshacer"), "^Z", CtxCmd::Undo, true),
+        CtxItem::entry(t("Rehacer"), "^Y", CtxCmd::Redo, true),
         CtxItem::Sep,
-        CtxItem::entry("Cortar", "^X", CtxCmd::Cut, has_sel),
-        CtxItem::entry("Copiar", "^C", CtxCmd::Copy, has_sel),
-        CtxItem::entry("Pegar", "^V", CtxCmd::Paste, ctx.clipboard_has_text),
-        CtxItem::entry("Eliminar", "Supr", CtxCmd::Delete, has_sel),
+        CtxItem::entry(t("Cortar"), "^X", CtxCmd::Cut, has_sel),
+        CtxItem::entry(t("Copiar"), "^C", CtxCmd::Copy, has_sel),
+        CtxItem::entry(t("Pegar"), "^V", CtxCmd::Paste, ctx.clipboard_has_text),
+        CtxItem::entry(t("Eliminar"), if lang == notty_config::Lang::En { "Del" } else { "Supr" }, CtxCmd::Delete, has_sel),
         CtxItem::Sep,
-        CtxItem::entry("Seleccionar todo", "^A", CtxCmd::SelectAll, true),
+        CtxItem::entry(t("Seleccionar todo"), "^A", CtxCmd::SelectAll, true),
         CtxItem::Sep,
         CtxItem::entry(find_label, "^F", CtxCmd::FindSelection, searchable),
         CtxItem::entry(replace_label, "^H", CtxCmd::ReplaceSelection, searchable),
-        CtxItem::entry("Buscar siguiente", "F3", CtxCmd::FindNext, ctx.search_open || searchable),
-        CtxItem::entry("Buscar anterior", "⇧F3", CtxCmd::FindPrev, ctx.search_open || searchable),
+        CtxItem::entry(t("Buscar siguiente"), "F3", CtxCmd::FindNext, ctx.search_open || searchable),
+        CtxItem::entry(t("Buscar anterior"), "⇧F3", CtxCmd::FindPrev, ctx.search_open || searchable),
     ]
 }
 
@@ -160,24 +166,24 @@ mod tests {
 
     #[test]
     fn tab_menu_disables_path_actions_without_a_path() {
-        let m = tab_menu(0, 1, false);
+        let m = tab_menu(0, 1, false, notty_config::Lang::Es);
         assert!(!find(&m, CtxCmd::CopyPath(0)).is_enabled());
         assert!(!find(&m, CtxCmd::OpenFolder(0)).is_enabled());
         assert!(!find(&m, CtxCmd::CloseOthers(0)).is_enabled());
         assert!(!find(&m, CtxCmd::CloseRight(0)).is_enabled());
-        let m = tab_menu(0, 3, true);
+        let m = tab_menu(0, 3, true, notty_config::Lang::Es);
         assert!(find(&m, CtxCmd::CopyPath(0)).is_enabled());
         assert!(find(&m, CtxCmd::CloseRight(0)).is_enabled());
-        assert!(!find(&tab_menu(2, 3, true), CtxCmd::CloseRight(2)).is_enabled());
+        assert!(!find(&tab_menu(2, 3, true, notty_config::Lang::Es), CtxCmd::CloseRight(2)).is_enabled());
     }
 
     #[test]
     fn body_menu_needs_a_selection_to_cut_copy_and_search() {
-        let m = body_menu(&BodyCtx::default());
+        let m = body_menu(&BodyCtx::default(), notty_config::Lang::Es);
         for cmd in [CtxCmd::Cut, CtxCmd::Copy, CtxCmd::Delete, CtxCmd::FindSelection, CtxCmd::FindNext, CtxCmd::Paste] {
             assert!(!find(&m, cmd).is_enabled(), "{cmd:?}");
         }
-        let m = body_menu(&BodyCtx { selection: "hola".into(), clipboard_has_text: true, search_open: false });
+        let m = body_menu(&BodyCtx { selection: "hola".into(), clipboard_has_text: true, search_open: false }, notty_config::Lang::Es);
         for cmd in [CtxCmd::Cut, CtxCmd::Copy, CtxCmd::Delete, CtxCmd::FindSelection, CtxCmd::ReplaceSelection, CtxCmd::Paste] {
             assert!(find(&m, cmd).is_enabled(), "{cmd:?}");
         }
@@ -186,7 +192,7 @@ mod tests {
 
     #[test]
     fn multiline_selection_can_be_copied_but_not_searched() {
-        let m = body_menu(&BodyCtx { selection: "a\r\nb".into(), ..Default::default() });
+        let m = body_menu(&BodyCtx { selection: "a\r\nb".into(), ..Default::default() }, notty_config::Lang::Es);
         assert!(find(&m, CtxCmd::Copy).is_enabled());
         assert!(!find(&m, CtxCmd::FindSelection).is_enabled());
     }
@@ -200,7 +206,7 @@ mod tests {
 
     #[test]
     fn step_selection_skips_disabled_and_wraps() {
-        let m = body_menu(&BodyCtx::default());
+        let m = body_menu(&BodyCtx::default(), notty_config::Lang::Es);
         let e = enabled(&m);
         assert_eq!(step_selection(&e, None, 1), Some(0));
         assert_eq!(step_selection(&e, Some(1), 1), Some(8)); // salta separadores y desactivados
@@ -210,7 +216,7 @@ mod tests {
 
     #[test]
     fn cmd_ignores_separators_and_disabled_items() {
-        let menu = ContextMenu { items: body_menu(&BodyCtx::default()), x: 0.0, y: 0.0 };
+        let menu = ContextMenu { items: body_menu(&BodyCtx::default(), notty_config::Lang::Es), x: 0.0, y: 0.0 };
         assert_eq!(menu.cmd(0), Some(CtxCmd::Undo));
         assert_eq!(menu.cmd(2), None);
         assert_eq!(menu.cmd(3), None);

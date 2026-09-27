@@ -36,6 +36,10 @@ pub const TAB_PAD_L: f32 = 12.0; // .tab{padding:0 6px 0 12px}
 pub const TAB_PAD_R: f32 = 6.0;
 pub const TAB_INNER_GAP: f32 = 6.0; // .tab{gap:6px}
 pub const TAB_CLOSE: f32 = 18.0; // .tab .x{width:18px;height:18px}
+/// Ancho + hueco del icono de archivo opcional delante del nombre (Ajustes →
+/// Ventana → "Iconos en las pestañas"). Reutiliza el mismo glifo que las
+/// sugerencias de la línea de ruta (`Renderer::draw_suggestion_icon`).
+pub const TAB_ICON: f32 = 14.0;
 pub const TAB_MAX_W: f32 = 190.0; // .tab{max-width:190px}
 pub const TAB_RADIUS: f32 = 6.0; // border-radius:6px 6px 0 0
 pub const PLUS_W: f32 = 28.0; // .tabs .plus{width:28px;height:24px;margin-left:2px;margin-top:2px}
@@ -238,6 +242,8 @@ pub struct TabGeom {
     /// Dónde empieza el nombre y cuánto ancho tiene disponible (se recorta con «…»).
     pub name_x: f32,
     pub name_w: f32,
+    /// Centro del icono de archivo, si `tabs_fit` se llamó con `icon_w > 0.0`.
+    pub icon_cx: Option<f32>,
     /// Posición del punto ● de «sin guardar», si lo hay.
     pub dot_x: Option<f32>,
     pub close: Rect,
@@ -262,9 +268,10 @@ pub struct TabsLayout {
     pub scroll_right: Option<Rect>,
 }
 
-fn tab_fixed(dirty: bool, dot_w: f32) -> f32 {
+fn tab_fixed(dirty: bool, dot_w: f32, icon_w: f32) -> f32 {
     let dot_extra = if dirty { TAB_INNER_GAP + dot_w } else { 0.0 };
-    TAB_PAD_L + dot_extra + TAB_INNER_GAP + TAB_CLOSE + TAB_PAD_R
+    let icon_extra = if icon_w > 0.0 { icon_w + TAB_INNER_GAP } else { 0.0 };
+    TAB_PAD_L + icon_extra + dot_extra + TAB_INNER_GAP + TAB_CLOSE + TAB_PAD_R
 }
 
 /// Coloca las pestañas de izquierda a derecha empezando en `x0`, con su borde
@@ -272,9 +279,9 @@ fn tab_fixed(dirty: bool, dot_w: f32) -> f32 {
 /// Si no caben a su ancho natural se encogen todas por igual (hasta `TAB_MIN_W`); si
 /// ni así caben, se muestra el tramo que contiene `focus` (la pestaña activa) con
 /// botones ‹ › a los lados.
-pub fn tabs_fit(x0: f32, bottom: f32, max_right: f32, slots: &[TabSlot], focus: usize, dot_w: f32) -> TabsLayout {
+pub fn tabs_fit(x0: f32, bottom: f32, max_right: f32, slots: &[TabSlot], focus: usize, dot_w: f32, icon_w: f32) -> TabsLayout {
     let top = bottom - TAB_H;
-    let natural: Vec<f32> = slots.iter().map(|s| (tab_fixed(s.dirty, dot_w) + s.name_w).min(TAB_MAX_W)).collect();
+    let natural: Vec<f32> = slots.iter().map(|s| (tab_fixed(s.dirty, dot_w, icon_w) + s.name_w).min(TAB_MAX_W)).collect();
     let scale = |i: usize| slots[i].scale.clamp(0.0, 1.0);
     let plus_space = PLUS_ML + PLUS_W;
     let avail = (max_right - x0 - plus_space).max(0.0);
@@ -308,16 +315,17 @@ pub fn tabs_fit(x0: f32, bottom: f32, max_right: f32, slots: &[TabSlot], focus: 
     for (i, slot) in slots.iter().enumerate().take(last).skip(first) {
         let s = scale(i);
         let content_w = natural[i].min(cap);
-        let fixed = tab_fixed(slot.dirty, dot_w);
+        let fixed = tab_fixed(slot.dirty, dot_w, icon_w);
         let rect = Rect::new(x, top, x + content_w * s, bottom);
         let content_right = rect.left + content_w;
         let close_left = content_right - TAB_PAD_R - TAB_CLOSE;
         let close_top = top + (TAB_H - TAB_CLOSE) / 2.0;
         let close = Rect::new(close_left, close_top, close_left + TAB_CLOSE, close_top + TAB_CLOSE);
-        let name_x = rect.left + TAB_PAD_L;
+        let icon_cx = if icon_w > 0.0 { Some(rect.left + TAB_PAD_L + icon_w / 2.0) } else { None };
+        let name_x = rect.left + TAB_PAD_L + if icon_w > 0.0 { icon_w + TAB_INNER_GAP } else { 0.0 };
         let name_w = (content_w - fixed).max(0.0);
         let dot_x = if slot.dirty { Some(name_x + name_w + TAB_INNER_GAP) } else { None };
-        out[i] = Some(TabGeom { rect, name_x, name_w, dot_x, close });
+        out[i] = Some(TabGeom { rect, name_x, name_w, icon_cx, dot_x, close });
         last_gap = TAB_GAP * s;
         x = rect.right + last_gap;
     }
@@ -430,7 +438,7 @@ mod tests {
 
     #[test]
     fn tab_width_is_padding_plus_name_plus_close() {
-        let l = tabs_fit(36.0, 34.0, 700.0, &slots(&[50.0], false), 0, 6.0);
+        let l = tabs_fit(36.0, 34.0, 700.0, &slots(&[50.0], false), 0, 6.0, 0.0);
         let t = geoms(&l);
         assert_eq!(t[0].rect, Rect::new(36.0, 6.0, 36.0 + 12.0 + 50.0 + 6.0 + 18.0 + 6.0, 34.0));
         assert_eq!(t[0].name_x, 48.0);
@@ -441,22 +449,31 @@ mod tests {
     }
 
     #[test]
+    fn icon_reserves_room_before_the_name() {
+        let l = tabs_fit(36.0, 34.0, 700.0, &slots(&[50.0], false), 0, 6.0, 14.0);
+        let t = geoms(&l);
+        assert_eq!(t[0].icon_cx, Some(36.0 + 12.0 + 14.0 / 2.0));
+        assert_eq!(t[0].name_x, 36.0 + 12.0 + 14.0 + 6.0);
+        assert_eq!(t[0].rect.width(), 12.0 + 14.0 + 6.0 + 50.0 + 6.0 + 18.0 + 6.0);
+    }
+
+    #[test]
     fn dirty_tab_reserves_room_for_the_dot() {
-        let t = geoms(&tabs_fit(36.0, 34.0, 700.0, &slots(&[50.0], true), 0, 6.0));
+        let t = geoms(&tabs_fit(36.0, 34.0, 700.0, &slots(&[50.0], true), 0, 6.0, 0.0));
         assert_eq!(t[0].rect.width(), 12.0 + 50.0 + 6.0 + 6.0 + 6.0 + 18.0 + 6.0);
         assert_eq!(t[0].dot_x, Some(48.0 + 50.0 + 6.0));
     }
 
     #[test]
     fn long_names_are_capped_at_190() {
-        let t = geoms(&tabs_fit(36.0, 34.0, 700.0, &slots(&[400.0], false), 0, 6.0));
+        let t = geoms(&tabs_fit(36.0, 34.0, 700.0, &slots(&[400.0], false), 0, 6.0, 0.0));
         assert_eq!(t[0].rect.width(), 190.0);
         assert_eq!(t[0].name_w, 190.0 - (12.0 + 6.0 + 18.0 + 6.0));
     }
 
     #[test]
     fn plus_follows_the_last_tab() {
-        let l = tabs_fit(36.0, 34.0, 700.0, &slots(&[50.0, 50.0], false), 0, 6.0);
+        let l = tabs_fit(36.0, 34.0, 700.0, &slots(&[50.0, 50.0], false), 0, 6.0, 0.0);
         let t = geoms(&l);
         assert_eq!(t[1].rect.left, t[0].rect.right + 2.0);
         assert_eq!(l.plus.left, t[1].rect.right + 2.0);
@@ -465,7 +482,7 @@ mod tests {
 
     #[test]
     fn crowded_tabs_shrink_instead_of_disappearing() {
-        let l = tabs_fit(36.0, 34.0, 500.0, &slots(&[150.0; 4], false), 0, 6.0);
+        let l = tabs_fit(36.0, 34.0, 500.0, &slots(&[150.0; 4], false), 0, 6.0, 0.0);
         let t = geoms(&l);
         assert_eq!(t.len(), 4);
         assert!(t[0].rect.width() < TAB_MAX_W && t[0].rect.width() >= TAB_MIN_W);
@@ -477,16 +494,16 @@ mod tests {
     fn overflowing_tabs_keep_the_focused_one_visible_and_stay_in_bounds() {
         let many = slots(&[150.0; 20], false);
         for focus in [0, 7, 19] {
-            let l = tabs_fit(36.0, 34.0, 400.0, &many, focus, 6.0);
+            let l = tabs_fit(36.0, 34.0, 400.0, &many, focus, 6.0, 0.0);
             assert!(l.tabs[focus].is_some(), "la pestaña {focus} debe verse");
             for g in geoms(&l) {
                 assert!(g.rect.right <= 400.0 && g.rect.width() >= TAB_MIN_W - 0.01);
             }
             assert!(l.plus.right <= 400.0 + 0.01);
         }
-        let l = tabs_fit(36.0, 34.0, 400.0, &many, 19, 6.0);
+        let l = tabs_fit(36.0, 34.0, 400.0, &many, 19, 6.0, 0.0);
         assert!(l.scroll_left.is_some() && l.scroll_right.is_none());
-        let l = tabs_fit(36.0, 34.0, 400.0, &many, 0, 6.0);
+        let l = tabs_fit(36.0, 34.0, 400.0, &many, 0, 6.0, 0.0);
         assert!(l.scroll_left.is_none() && l.scroll_right.is_some());
     }
 
@@ -494,7 +511,7 @@ mod tests {
     fn zero_scale_tab_takes_no_room() {
         let mut s = slots(&[50.0, 50.0], false);
         s[0].scale = 0.0;
-        let l = tabs_fit(36.0, 34.0, 700.0, &s, 1, 6.0);
+        let l = tabs_fit(36.0, 34.0, 700.0, &s, 1, 6.0, 0.0);
         let t = geoms(&l);
         assert_eq!(t[0].rect.width(), 0.0);
         assert_eq!(t[1].rect.left, 36.0);

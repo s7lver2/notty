@@ -202,6 +202,7 @@ fn anim_done(now: Instant, start: Instant, dur: Duration) -> bool {
 /// animación de tema si tocaba); `on_start_tour` cuando el paso Listo pide arrancar el
 /// recorrido.
 pub fn show(owner: HWND, cfg: Rc<RefCell<Config>>, on_change: Box<dyn Fn()>, on_start_tour: Box<dyn Fn()>) -> Result<()> {
+    let lang = crate::lang::resolve(cfg.borrow().ui.lang);
     unsafe {
         let instance = GetModuleHandleW(None)?;
         let class_name = w!("NottyWelcomeClass");
@@ -228,7 +229,7 @@ pub fn show(owner: HWND, cfg: Rc<RefCell<Config>>, on_change: Box<dyn Fn()>, on_
         let center = ((owner_rect.left + owner_rect.right) / 2, (owner_rect.top + owner_rect.bottom) / 2);
         let (x, y, w_px, h_px) = adaptive::initial_rect(WIN_W, WIN_H, dpi, adaptive::work_area(monitor), center);
 
-        let title = to_wide("Bienvenido a notty");
+        let title = to_wide(crate::strings::tr(lang, "Bienvenido a notty"));
         // Barra de título nativa (que `WM_NCCALCSIZE` quita) en vez de `WS_POPUP`: así
         // Windows le da su animación de apertura. `owner` como dueño: flota encima y se
         // cierra con él, pero sigue activo (no modal, ver la nota del módulo).
@@ -263,12 +264,14 @@ pub fn show(owner: HWND, cfg: Rc<RefCell<Config>>, on_change: Box<dyn Fn()>, on_
         let renderer = Renderer::new(hwnd, dpi)?;
         let animations_enabled = crate::window::system_animations_enabled();
         let now = Instant::now();
+        renderer.set_lang(lang);
+        let step_labels: Vec<&'static str> = STEP_LABELS.iter().map(|s| crate::strings::tr(lang, s)).collect();
         let state = Box::new(State {
             cfg,
             on_change,
             on_start_tour,
             renderer,
-            rail: StepRail::new(STEP_LABELS.to_vec()),
+            rail: StepRail::new(step_labels),
             hover: Hit::None,
             hits: Vec::new(),
             animations_enabled,
@@ -659,6 +662,7 @@ fn choices_for(step: usize) -> &'static [ChoiceOpt] {
 
 fn paint(st: &mut State) {
     st.hits.clear();
+    st.renderer.set_lang(crate::lang::resolve(st.cfg.borrow().ui.lang));
     let dark = is_dark(st.cfg.borrow().ui.theme, crate::window::system_uses_dark_mode());
     let now = Instant::now();
     let anim = st.animations_enabled;
@@ -684,7 +688,7 @@ fn paint(st: &mut State) {
 
     // Barra de título: "Bienvenido a notty" + ✕.
     let titlebar = Rect::new(0.0, 0.0, w, TITLEBAR_H);
-    text_fit(r, "Bienvenido a notty", &r.fonts().ui_11_5, Rect::new(12.0, 0.0, w - CLOSE_W - 6.0, TITLEBAR_H), pal.text_2);
+    text_fit(r, r.tr("Bienvenido a notty"), &r.fonts().ui_11_5, Rect::new(12.0, 0.0, w - CLOSE_W - 6.0, TITLEBAR_H), pal.text_2);
     let close_r = Rect::new(w - CLOSE_W, 0.0, w, TITLEBAR_H);
     if st.hover == Hit::Close {
         r.fill(close_r, pal.close_hover);
@@ -777,18 +781,19 @@ fn paint(st: &mut State) {
     let foot_bg = pal.chrome.mix(Rgba(0x1b as f32 / 255.0, 0x1c as f32 / 255.0, 0x1e as f32 / 255.0, 1.0), dark_k);
     r.fill(footer, foot_bg);
     r.stroke_line(footer.left, footer.top + 0.5, footer.right, footer.top + 0.5, 1.0, pal.line);
-    let skip_w = r.measure("Saltar", &r.fonts().ui_12);
+    let saltar = r.tr("Saltar");
+    let skip_w = r.measure(saltar, &r.fonts().ui_12);
     let skip_r = Rect::new(16.0, footer.top, 16.0 + skip_w, footer.bottom);
-    r.text("Saltar", &r.fonts().ui_12, skip_r, if st.hover == Hit::Skip { pal.text } else { pal.text_3 });
+    r.text(saltar, &r.fonts().ui_12, skip_r, if st.hover == Hit::Skip { pal.text } else { pal.text_3 });
     st.hits.push((skip_r, Hit::Skip));
 
-    let next_label = if st.rail.current == 0 {
+    let next_label = r.tr(if st.rail.current == 0 {
         "Empezar"
     } else if st.rail.current == STEP_LABELS.len() - 1 {
         "Terminar"
     } else {
         "Siguiente"
-    };
+    });
     let cy = footer.top + footer.height() / 2.0;
     let bold = &r.fonts().ui_12_semibold;
     let next_w = 1.0 + 16.0 + r.measure(next_label, bold) + 16.0 + 1.0;
@@ -800,11 +805,12 @@ fn paint(st: &mut State) {
     st.hits.push((next_r, Hit::Next));
 
     if st.rail.current > 0 {
-        let back_w = 1.0 + 14.0 + r.measure("Atrás", &r.fonts().ui_12) + 14.0 + 1.0;
+        let atras = r.tr("Atrás");
+        let back_w = 1.0 + 14.0 + r.measure(atras, &r.fonts().ui_12) + 14.0 + 1.0;
         let back_r = Rect::new(next_r.left - 6.0 - back_w, cy - 15.0, next_r.left - 6.0, cy + 15.0);
         r.fill_round(back_r, 4.0, if st.hover == Hit::Back { pal.hover } else { pal.surface_2 });
         r.stroke_round_rect(back_r, 4.0, 1.0, pal.line);
-        r.text_center("Atrás", &r.fonts().ui_12, back_r, pal.text);
+        r.text_center(atras, &r.fonts().ui_12, back_r, pal.text);
         st.hits.push((back_r, Hit::Back));
     }
 
@@ -837,6 +843,8 @@ fn draw_step_content(
         4 => ("Actualizaciones", "notty no se conecta a nada sin tu permiso. Si lo activas, solo consulta una vez al día si hay versión nueva en GitHub: sin datos, sin identificadores."),
         _ => ("Todo listo", "¿Te enseño en 20 segundos dónde está cada cosa?"),
     };
+    let title = r.tr(title);
+    let sub = r.tr(sub);
     // `.pane{padding:10px 18px 0 6px}`, `h4{font-size:18px;margin:0 0 3px}`,
     // `.sub{line-height:1.45}` sobre el `font-size:12.5px` de la ventana. El título
     // puede llevar emoji (p.ej. "Hola 👋"): `text_color_font` para que salga a color
@@ -982,12 +990,14 @@ fn draw_choices(
         // Ancho fijo con el texto completo (evita que la caja `.demo` cambie de tamaño
         // mientras se teclea la versión animada). Si no deja sitio a la etiqueta, se
         // omite en vez de pisarla.
+        let label = r.tr(opt.label);
+        let sub = r.tr(opt.sub);
         let demo_w = if opt.demo.is_empty() { 0.0 } else { r.measure(opt.demo, &r.fonts().mono_11) + 10.0 };
-        let show_demo = demo_w > 0.0 && rr.right - 12.0 - demo_w - 8.0 >= text_left + r.measure(opt.label, &r.fonts().ui_13);
+        let show_demo = demo_w > 0.0 && rr.right - 12.0 - demo_w - 8.0 >= text_left + r.measure(label, &r.fonts().ui_13);
         let label_right = if show_demo { rr.right - 12.0 - demo_w - 8.0 } else { rr.right - 12.0 };
-        text_fit(r, opt.label, &r.fonts().ui_13, Rect::new(text_left, label_top, label_right, label_bottom), pal.text.faded(fade));
+        text_fit(r, label, &r.fonts().ui_13, Rect::new(text_left, label_top, label_right, label_bottom), pal.text.faded(fade));
         if has_sub {
-            text_fit(r, opt.sub, &r.fonts().ui_11_5, Rect::new(text_left, label_top + 17.0, rr.right - 12.0, label_top + 33.0), pal.text_3.faded(fade));
+            text_fit(r, sub, &r.fonts().ui_11_5, Rect::new(text_left, label_top + 17.0, rr.right - 12.0, label_top + 33.0), pal.text_3.faded(fade));
         }
         if show_demo {
             let dw = demo_w;
@@ -1043,6 +1053,8 @@ fn draw_style_cards(
 
     let mut out = Vec::with_capacity(LABELS.len());
     for (i, &(label, sub)) in LABELS.iter().enumerate() {
+        let label = r.tr(label);
+        let sub = r.tr(sub);
         let preset = STYLE_PRESETS[i];
         let target = if selected == Some(i) { 1.0 } else { 0.0 };
         let k = card_from[i] + (target - card_from[i]) * k_in;
@@ -1128,7 +1140,7 @@ fn draw_style_scene(r: &Renderer, pal: &theme::Palette, rr: Rect, preset: Preset
             r.text("notas.txt", &r.fonts().ui_9, Rect::new(rr.left + 7.0, rr.top, rr.right - 40.0, rr.top + tb_h), pal.text_2);
             let mb = Rect::new(rr.left, rr.top + tb_h, rr.right, rr.top + tb_h + 15.0);
             r.fill(mb, pal.chrome_hi);
-            r.text("Archivo  Editar  Ver", &r.fonts().ui_9, Rect::new(mb.left + 7.0, mb.top, mb.right, mb.bottom), pal.text_2);
+            r.text(r.tr("Archivo  Editar  Ver"), &r.fonts().ui_9, Rect::new(mb.left + 7.0, mb.top, mb.right, mb.bottom), pal.text_2);
             r.stroke_line(mb.left, mb.bottom - 0.5, mb.right, mb.bottom - 0.5, 1.0, pal.line);
             mb.bottom
         }
@@ -1169,12 +1181,12 @@ fn draw_tour_go(r: &Renderer, pal: &theme::Palette, pane: Rect, top: f32, hover:
     r.stroke_round_rect(rr, 6.0, 1.0, pal.accent.faded(fade));
     text_fit(
         r,
-        "Enséñame dónde está todo →",
+        r.tr("Enséñame dónde está todo →"),
         &r.fonts().ui_13,
         Rect::new(rr.left + 12.0, rr.top, rr.right - 12.0, rr.bottom),
         pal.accent.faded(fade),
     );
-    let note = "Puedes repetirlo desde Ajustes → Ayuda.";
+    let note = r.tr("Puedes repetirlo desde Ajustes → Ayuda.");
     let note_w = pane.right - 18.0 - (pane.left + 6.0);
     let note_h = r.measure_wrapped(note, &r.fonts().ui_11_5, note_w, None).max(18.0);
     let note_r = Rect::new(pane.left + 6.0, rr.bottom + 10.0, pane.right - 18.0, rr.bottom + 10.0 + note_h);

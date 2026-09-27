@@ -171,6 +171,8 @@ pub struct ViewState {
     pub chrome_fade: Option<f32>,
     /// Cambio de tema en curso: de qué tema se viene (`true` = oscuro) y progreso.
     pub theme_from: Option<(bool, f32)>,
+    /// Cambio de color de acento en curso: de cuál se viene y progreso.
+    pub accent_from: Option<(notty_config::AccentColor, f32)>,
     /// Elemento resaltado con el teclado (flechas) en el desplegable o menú
     /// contextual abierto.
     pub menu_sel: Option<usize>,
@@ -276,6 +278,10 @@ pub struct Renderer {
     /// `settings_window` para el fundido de apertura de la ventana (Task 5 del plan de
     /// animaciones): más simple que tocar cada llamada de dibujo una a una.
     fade: std::cell::Cell<f32>,
+    /// Idioma efectivo del fotograma actual (`lang::resolve`, nunca `Auto`), puesto al
+    /// principio de `paint`/`settings_window::paint`: evita tener que hacer viajar
+    /// `lang` como parámetro por cada función de dibujo, igual que `fade`.
+    lang: std::cell::Cell<notty_config::Lang>,
     /// Si `paint` debe dejar el frame abierto para que una capa (el tour) se dibuje
     /// encima antes del `EndDraw`: dos `EndDraw` por frame presentan el editor sin la
     /// capa entre medias y se ve parpadear.
@@ -428,6 +434,7 @@ impl Renderer {
                 hits: Vec::new(),
                 pending_dropdown: None,
                 fade: std::cell::Cell::new(1.0),
+                lang: std::cell::Cell::new(notty_config::Lang::Es),
                 hold_frame: std::cell::Cell::new(false),
                 update_notice: None,
                 update_panel: None,
@@ -662,6 +669,19 @@ impl Renderer {
 
     pub fn fade(&self) -> f32 {
         self.fade.get()
+    }
+
+    pub fn set_lang(&self, lang: notty_config::Lang) {
+        self.lang.set(lang);
+    }
+
+    pub fn lang(&self) -> notty_config::Lang {
+        self.lang.get()
+    }
+
+    /// Traduce `es` al idioma puesto por `set_lang` (ver `strings::tr`).
+    pub fn tr<'s>(&self, es: &'s str) -> &'s str {
+        crate::strings::tr(self.lang.get(), es)
     }
 
     // --- Helpers de dibujo con la brocha única --------------------------------------
@@ -1070,14 +1090,16 @@ impl Renderer {
         self.recover_device();
         self.hits.clear();
         self.pending_dropdown = None;
-        let pal_mixed;
-        let pal = match view.theme_from {
-            Some((from_dark, t)) => {
-                pal_mixed = theme::palette(from_dark).mix(theme::palette(view.dark), t);
-                &pal_mixed
-            }
-            None => theme::palette(view.dark),
-        };
+        let lang = crate::lang::resolve(ui.lang);
+        self.set_lang(lang);
+        // Tema y acento pueden estar cambiando a la vez (poco probable, pero no hay
+        // por qué prohibirlo): cada transición se funde por separado, en cadena, para
+        // que las dos acaben siempre en `(view.dark, ui.accent)` sin más lío.
+        let (from_dark, t_theme) = view.theme_from.map_or((view.dark, 1.0), |(d, t)| (d, t));
+        let (from_accent, t_accent) = view.accent_from.map_or((ui.accent, 1.0), |(a, t)| (a, t));
+        let pal_after_theme = theme::palette(from_dark, from_accent).mix(&theme::palette(view.dark, from_accent), t_theme);
+        let pal_owned = pal_after_theme.mix(&theme::palette(view.dark, ui.accent), t_accent);
+        let pal = &pal_owned;
         let state = ws.active();
         let is_raw = state.raw.is_some();
 
@@ -1120,7 +1142,7 @@ impl Renderer {
                 full.menubar = Rect::new(0.0, frame.menubar.bottom - layout::MENUBAR_H, w, frame.menubar.bottom);
                 self.push_clip(frame.menubar);
                 self.set_fade(k);
-                self.draw_menubar(view, pal, full);
+                self.draw_menubar(view, pal, full, lang);
                 self.set_fade(1.0);
                 self.pop_clip();
             }
@@ -1129,7 +1151,7 @@ impl Renderer {
                 self.push_clip(frame.tabs_below);
                 self.fill(frame.tabs_below, pal.chrome);
                 self.set_fade(k);
-                self.draw_tabs_row(ws, view, pal, layout::TABS_BELOW_PAD_X, w - layout::TABS_BELOW_PAD_X, frame.tabs_below.bottom);
+                self.draw_tabs_row(ws, view, pal, layout::TABS_BELOW_PAD_X, w - layout::TABS_BELOW_PAD_X, frame.tabs_below.bottom, ui.tab_icons);
                 self.set_fade(1.0);
                 self.pop_clip();
             }
@@ -1324,7 +1346,7 @@ impl Renderer {
                 self.pop_clip();
             }
 
-            self.draw_status(ws, state, pal, frame, bands.merged_status, view, ui.suggestion_icons);
+            self.draw_status(ws, state, pal, frame, bands.merged_status, view, ui.suggestion_icons, lang);
 
             if let (Some((x, top)), Some(i)) = (self.pending_dropdown.take(), view.open_menu) {
                 let checks = crate::menu::MenuChecks {
@@ -1333,11 +1355,11 @@ impl Renderer {
                     vim: state.vim.is_some(),
                     raw: is_raw,
                 };
-                self.draw_dropdown(crate::menu::MENUS[i].items, x, top, checks, view, pal);
+                self.draw_dropdown(crate::menu::MENUS[i].items, x, top, checks, view, pal, lang);
             }
 
             if let Some(p) = self.path_copied {
-                self.draw_toast(pal, frame.status.top, p, "Ruta copiada al portapapeles", true);
+                self.draw_toast(pal, frame.status.top, p, self.tr("Ruta copiada al portapapeles"), true);
             }
             if let Some((p, label)) = &self.notice {
                 self.draw_toast(pal, frame.status.top, *p, label, false);
@@ -1435,9 +1457,9 @@ impl Renderer {
                 // Hasta el engranaje de Ajustes (no hasta los botones de ventana: se
                 // montaba encima), dejando siempre un hueco para arrastrar la ventana.
                 let max_right = (frame.settings_btn.left - layout::TITLE_DRAG_MIN).max(layout::APPICON_W);
-                self.draw_tabs_row(ws, view, pal, layout::APPICON_W, max_right, frame.titlebar.bottom);
+                self.draw_tabs_row(ws, view, pal, layout::APPICON_W, max_right, frame.titlebar.bottom, ui.tab_icons);
             } else {
-                let name = crate::doc_name(ws.active().path.as_deref());
+                let name = crate::doc_name_lang(ws.active().path.as_deref(), self.lang());
                 let title = crate::window_title(&name, ws.active().doc.is_dirty(), ui.preset == notty_config::Preset::Zen);
                 self.text(
                     &title,
@@ -1503,14 +1525,15 @@ impl Renderer {
 
     /// Barra de menús (`.menubar`): "Archivo Editar Buscar Ver Ayuda".
     #[allow(unused_unsafe)]
-    unsafe fn draw_menubar(&mut self, view: &ViewState, pal: &theme::Palette, frame: layout::Frame) {
+    unsafe fn draw_menubar(&mut self, view: &ViewState, pal: &theme::Palette, frame: layout::Frame, lang: notty_config::Lang) {
         unsafe {
             self.fill(frame.menubar, pal.chrome);
             let mut x = layout::MENUBAR_PAD_X;
             let top = frame.menubar.top + (layout::MENUBAR_H - 22.0) / 2.0;
             let mut open_x = None;
             for (i, def) in crate::menu::MENUS.iter().enumerate() {
-                let w = self.measure(def.name, &self.fonts.ui_12_5) + layout::MENU_BTN_PAD_X * 2.0;
+                let name = crate::strings::tr(lang, def.name);
+                let w = self.measure(name, &self.fonts.ui_12_5) + layout::MENU_BTN_PAD_X * 2.0;
                 if x + w > frame.menubar.right - layout::MENUBAR_PAD_X {
                     break;
                 }
@@ -1524,7 +1547,7 @@ impl Renderer {
                 // izquierdo y todo el relleno se amontona a la derecha, en vez de quedar
                 // repartido a los dos lados como el resto de botones de la app.
                 let label_r = Rect::new(r.left + layout::MENU_BTN_PAD_X, r.top, r.right - layout::MENU_BTN_PAD_X, r.bottom);
-                self.text(def.name, &self.fonts.ui_12_5, label_r, pal.text);
+                self.text(name, &self.fonts.ui_12_5, label_r, pal.text);
                 self.hits.push((r, Hit::Menu(i)));
                 if view.open_menu == Some(i) {
                     open_x = Some(x);
@@ -1546,6 +1569,7 @@ impl Renderer {
         checks: crate::menu::MenuChecks,
         view: &ViewState,
         pal: &theme::Palette,
+        lang: notty_config::Lang,
     ) {
         use crate::menu::MenuItem;
         let keys = self.menu_keys.clone();
@@ -1553,6 +1577,7 @@ impl Renderer {
             .iter()
             .map(|it| match it {
                 MenuItem::Entry { label, shortcut, cmd } => {
+                    let label = crate::strings::tr(lang, label);
                     let shortcut = keys.iter().find(|(c, _)| c == cmd).map(|(_, s)| s.as_str()).unwrap_or(shortcut);
                     MenuRow { label, shortcut, enabled: true, sep: false, check: checks.state_of(*cmd) }
                 }
@@ -1659,8 +1684,8 @@ impl Renderer {
 
     /// Cartel del modo acomodar, arriba en el centro del cuerpo.
     fn draw_resize_hint(&self, body: Rect, pal: &theme::Palette) {
-        let label = "Acomodar paneles";
-        let keys = "←/→ ancho · Shift más rápido · Tab panel · = igualar · Esc salir";
+        let label = self.tr("Acomodar paneles");
+        let keys = self.tr("←/→ ancho · Shift más rápido · Tab panel · = igualar · Esc salir");
         let lw = self.measure(label, &self.fonts.ui_12_5_semibold);
         let kw = self.measure(keys, &self.fonts.ui_12);
         let w = (lw + 14.0 + kw + 28.0).min(body.width() - 16.0);
@@ -1675,7 +1700,7 @@ impl Renderer {
 
     /// Fila de pestañas compartida entre la barra de título y `.tabs.below`.
     #[allow(unused_unsafe)]
-    unsafe fn draw_tabs_row(&mut self, ws: &Workspace, view: &ViewState, pal: &theme::Palette, x0: f32, max_right: f32, bottom: f32) {
+    unsafe fn draw_tabs_row(&mut self, ws: &Workspace, view: &ViewState, pal: &theme::Palette, x0: f32, max_right: f32, bottom: f32, tab_icons: bool) {
         unsafe {
             // Fila = documentos reales + pestañas recién cerradas que aún encogen
             // (`ghosts`), cada una en la posición que ocupaba.
@@ -1712,7 +1737,7 @@ impl Renderer {
                 .iter()
                 .map(|s| match s {
                     Slot::Doc(d) => {
-                        let name = crate::doc_name(docs[*d].path.as_deref());
+                        let name = crate::doc_name_lang(docs[*d].path.as_deref(), self.lang());
                         match group_of(*d).map(<[usize]>::len) {
                             Some(n) if n > 1 => format!("{name} · {n}"),
                             _ => name,
@@ -1744,7 +1769,8 @@ impl Renderer {
             };
             let focus = order.iter().position(|s| matches!(s, Slot::Doc(d) if is_active(*d))).unwrap_or(0);
             let dot_w = self.measure("●", &self.fonts.ui_9);
-            let row = layout::tabs_fit(x0, bottom, max_right, &slots, focus, dot_w);
+            let icon_w = if tab_icons { layout::TAB_ICON } else { 0.0 };
+            let row = layout::tabs_fit(x0, bottom, max_right, &slots, focus, dot_w, icon_w);
             let base_fade = self.fade();
             let first_vis = row.tabs.iter().position(Option::is_some).unwrap_or(0);
             let last_vis = row.tabs.iter().rposition(Option::is_some).unwrap_or(0);
@@ -1795,6 +1821,11 @@ impl Renderer {
                     self.fill(Rect::new(t.rect.left, t.rect.bottom - layout::TAB_RADIUS, t.rect.right, t.rect.bottom), pal.hover);
                 }
                 let name_color = if active { pal.text } else { pal.text_2 };
+                if let Some(icon_cx) = t.icon_cx {
+                    let icon_cy = (t.rect.top + t.rect.bottom) / 2.0;
+                    let icon_r = Rect::new(icon_cx - layout::TAB_ICON / 2.0, icon_cy - layout::TAB_ICON / 2.0, icon_cx + layout::TAB_ICON / 2.0, icon_cy + layout::TAB_ICON / 2.0);
+                    self.draw_suggestion_icon(false, icon_r, name_color.faded(0.85));
+                }
                 self.text(&names[si], &self.fonts.ui_12, Rect::new(t.name_x, t.rect.top, t.name_x + t.name_w, t.rect.bottom), name_color);
                 if let Some(dot_x) = t.dot_x {
                     self.text(
@@ -1880,7 +1911,7 @@ impl Renderer {
             };
 
             let mut x = layout::HINTS_PAD_X;
-            let items = crate::hints_items(ctx);
+            let items = crate::hints_items(ctx, self.lang());
             let space_w = self.measure(" ", &self.fonts.mono_11);
             for (key, action) in items {
                 let key_w = self.measure(key, &self.fonts.mono_11_bold);
@@ -1902,7 +1933,7 @@ impl Renderer {
     /// Barra de estado (`.status`) o, si hay un prompt activo, lo dibuja en su lugar
     /// (nunca coexisten: mientras hay prompt, la franja inferior es suya por completo).
     #[allow(unused_unsafe)]
-    unsafe fn draw_status(&mut self, ws: &Workspace, state: &EditorState, pal: &theme::Palette, frame: layout::Frame, merged: bool, view: &ViewState, suggestion_icons: bool) {
+    unsafe fn draw_status(&mut self, ws: &Workspace, state: &EditorState, pal: &theme::Palette, frame: layout::Frame, merged: bool, view: &ViewState, suggestion_icons: bool, lang: notty_config::Lang) {
         unsafe {
             let r = frame.status;
             if merged {
@@ -1924,7 +1955,7 @@ impl Renderer {
             };
 
             if prompt_open {
-                self.draw_prompt(&ws.prompt, state, pal, content_r, merged, view, suggestion_icons);
+                self.draw_prompt(&ws.prompt, state, pal, content_r, merged, view, suggestion_icons, lang);
             } else {
                 self.draw_status_normal(state, pal, content_r, merged, view);
             }
@@ -2183,11 +2214,11 @@ impl Renderer {
         let mut y = r.top + pad;
         self.text("notty", &self.fonts.ui_18_semibold, Rect::new(r.left + pad, y, r.right - pad, y + 26.0), pal.text);
         y += 28.0;
-        let version = format!("Versión {}", about.version);
+        let version = format!("{} {}", self.tr("Versión"), about.version);
         self.text(&version, &self.fonts.ui_12, Rect::new(r.left + pad, y, r.right - pad, y + 18.0), pal.text_2);
         y += 20.0;
         self.text(
-            "Editor de texto nativo para Windows",
+            self.tr("Editor de texto nativo para Windows"),
             &self.fonts.ui_11_5,
             Rect::new(r.left + pad, y, r.right - pad, y + 18.0),
             pal.text_3,
@@ -2234,7 +2265,7 @@ impl Renderer {
                     self.draw_lock(pal, x, r);
                     x += 12.0 + 6.0;
                 }
-                let word = if raw.writable_fs() && raw.is_editing() { "escritura" } else { "solo lectura" };
+                let word = self.tr(if raw.writable_fs() && raw.is_editing() { "escritura" } else { "solo lectura" });
                 let ww = self.measure(word, label_font);
                 self.text(word, label_font, Rect::new(x, r.top, x + ww, r.bottom), pal.text_3);
                 x += ww + layout::STATUS_L_GAP;
@@ -2244,7 +2275,7 @@ impl Renderer {
             } else if state.path.is_none() {
                 // Documento sin ruta todavía: un enlace discreto que explica qué pasa
                 // al pulsarlo (antes ponía "CLICKME", que no decía nada).
-                let label = "Guardar como…";
+                let label = self.tr("Guardar como…");
                 let w = self.measure(label, label_font) + 8.0;
                 let click_r = Rect::new(x, r.top + 3.0, x + w, r.bottom - 3.0);
                 let hovered = view.hover == Hit::Clickme;
@@ -2261,7 +2292,7 @@ impl Renderer {
             } else if !merged {
                 // El nombre del archivo, no el "Texto" genérico de la maqueta: en la
                 // barra de estado real de notty tiene más sentido decir qué archivo es.
-                let name = crate::doc_name(state.path.as_deref());
+                let name = crate::doc_name_lang(state.path.as_deref(), self.lang());
                 let w = self.measure(&name, label_font).min(r.width() * 0.4);
                 // Recién copiada la ruta, el nombre se ilumina y se apaga despacio.
                 let hit = self.path_copied.map(|p| if p < 0.5 { 1.0 } else { (1.0 - (p - 0.5) / 0.35).clamp(0.0, 1.0) }).unwrap_or(0.0);
@@ -2356,10 +2387,10 @@ impl Renderer {
     /// Prompt activo (ruta, buscar/reemplazar, línea de comandos vim), ocupando la
     /// franja de estado entera.
     #[allow(unused_unsafe)]
-    unsafe fn draw_prompt(&mut self, prompt: &crate::Prompt, state: &EditorState, pal: &theme::Palette, r: Rect, merged: bool, view: &ViewState, suggestion_icons: bool) {
+    unsafe fn draw_prompt(&mut self, prompt: &crate::Prompt, state: &EditorState, pal: &theme::Palette, r: Rect, merged: bool, view: &ViewState, suggestion_icons: bool, lang: notty_config::Lang) {
         unsafe {
             match prompt {
-                crate::Prompt::Path(p) => self.draw_path_prompt(p, pal, r, view, suggestion_icons),
+                crate::Prompt::Path(p) => self.draw_path_prompt(p, pal, r, view, suggestion_icons, lang),
                 crate::Prompt::Find(s) => self.draw_search_bar(s, &state.doc, pal, r, false),
                 crate::Prompt::Replace(s) => self.draw_search_bar(s, &state.doc, pal, r, true),
                 crate::Prompt::VimCmdline(line) => {
@@ -2370,8 +2401,8 @@ impl Renderer {
                     let fx = x + w + 4.0;
                     self.text(line, &self.fonts.mono_12_5, Rect::new(fx, r.top, r.right - layout::STATUS_PAD_X, r.bottom), pal.text);
                 }
-                crate::Prompt::CloseUnsaved(req) => self.draw_close_prompt(req, pal, r, view),
-                crate::Prompt::Conflict(c) => self.draw_conflict_prompt(c, pal, r),
+                crate::Prompt::CloseUnsaved(req) => self.draw_close_prompt(req, pal, r, view, lang),
+                crate::Prompt::Conflict(c) => self.draw_conflict_prompt(c, pal, r, lang),
                 crate::Prompt::None => {}
             }
         }
@@ -2379,7 +2410,7 @@ impl Renderer {
 
     /// "El archivo cambió en disco": franja en rojo suave con un campo donde escribir
     /// SI o NO (ver `ConflictState`).
-    fn draw_conflict_prompt(&mut self, c: &crate::ConflictState, pal: &theme::Palette, r: Rect) {
+    fn draw_conflict_prompt(&mut self, c: &crate::ConflictState, pal: &theme::Palette, r: Rect, lang: notty_config::Lang) {
         self.fill(r, pal.danger.faded(0.12));
         let field_w = 70.0;
         let fr = Rect::new(r.right - layout::STATUS_PAD_X - field_w, r.top + 3.0, r.right - layout::STATUS_PAD_X, r.bottom - 3.0);
@@ -2391,7 +2422,9 @@ impl Renderer {
         let caret_x = (tx + tw).min(fr.right - 4.0);
         self.fill(Rect::new(caret_x, r.top + 6.0, caret_x + 1.0, r.bottom - 6.0), pal.text);
         let msg = if c.invalid {
-            "Escribe SI o NO y pulsa Enter · Esc cancela".to_string()
+            crate::strings::tr(lang, "Escribe SI o NO y pulsa Enter · Esc cancela").to_string()
+        } else if lang == notty_config::Lang::En {
+            format!("'{}' changed on disk · YES + Enter saves yours over it · NO + Enter loads the one on disk · Esc cancels", c.name)
         } else {
             format!("«{}» cambió en disco · SI + Enter guarda el tuyo encima · NO + Enter carga el del disco · Esc cancela", c.name)
         };
@@ -2403,9 +2436,9 @@ impl Renderer {
     }
 
     /// "«nombre» tiene cambios sin guardar" con tres botones, como "Ya existe".
-    fn draw_close_prompt(&mut self, req: &crate::CloseRequest, pal: &theme::Palette, r: Rect, view: &ViewState) {
+    fn draw_close_prompt(&mut self, req: &crate::CloseRequest, pal: &theme::Palette, r: Rect, view: &ViewState, lang: notty_config::Lang) {
         let mut xr = r.right - layout::STATUS_PAD_X;
-        let choices = [("C", "Cancelar", 2u8), ("N", "No guardar", 1u8), ("G", "Guardar", 0u8)];
+        let choices = [("C", crate::strings::tr(lang, "Cancelar"), 2u8), ("N", crate::strings::tr(lang, "No guardar"), 1u8), ("G", crate::strings::tr(lang, "Guardar"), 0u8)];
         for (key, label, idx) in choices {
             let kw = self.measure(key, &self.fonts.mono_11_bold);
             let lw = self.measure(label, &self.fonts.ui_11_5);
@@ -2424,7 +2457,9 @@ impl Renderer {
             xr -= 6.0;
         }
         let more = req.ask.len().saturating_sub(1);
-        let msg = if more > 0 {
+        let msg = if lang == notty_config::Lang::En {
+            if more > 0 { format!("'{}' has unsaved changes (and {more} more)", req.name) } else { format!("'{}' has unsaved changes", req.name) }
+        } else if more > 0 {
             format!("«{}» tiene cambios sin guardar (y {more} más)", req.name)
         } else {
             format!("«{}» tiene cambios sin guardar", req.name)
@@ -2436,14 +2471,14 @@ impl Renderer {
     }
 
     #[allow(unused_unsafe)]
-    unsafe fn draw_path_prompt(&mut self, p: &crate::PathPromptState, pal: &theme::Palette, r: Rect, view: &ViewState, suggestion_icons: bool) {
+    unsafe fn draw_path_prompt(&mut self, p: &crate::PathPromptState, pal: &theme::Palette, r: Rect, view: &ViewState, suggestion_icons: bool, lang: notty_config::Lang) {
         unsafe {
             let x = r.left + layout::STATUS_PAD_X;
             let value_color = if p.is_invalid() { pal.danger } else { pal.text };
 
             let placeholder = match p.purpose {
-                crate::Purpose::Open => "ruta del archivo",
-                crate::Purpose::Save => "ruta donde guardar",
+                crate::Purpose::Open => crate::strings::tr(lang, "ruta del archivo"),
+                crate::Purpose::Save => crate::strings::tr(lang, "ruta donde guardar"),
             };
 
             // Primero lo de la derecha (pregunta, error o palabra de estado): el valor se
@@ -2452,7 +2487,7 @@ impl Renderer {
             if p.ask_overwrite {
                 // "Ya existe": tres botones pequeños con su tecla, en el color de aviso
                 // (no el rojo de error: no ha fallado nada, solo se pregunta).
-                let choices = [("C", "Cancelar", 2u8), ("A", "Abrir", 1u8), ("S", "Sobrescribir", 0u8)];
+                let choices = [("C", crate::strings::tr(lang, "Cancelar"), 2u8), ("A", crate::strings::tr(lang, "Abrir"), 1u8), ("S", crate::strings::tr(lang, "Sobrescribir"), 0u8)];
                 for (key, label, idx) in choices {
                     let kw = self.measure(key, &self.fonts.mono_11_bold);
                     let lw = self.measure(label, &self.fonts.ui_11_5);
@@ -2470,7 +2505,7 @@ impl Renderer {
                     self.hits.push((chip, Hit::Overwrite(idx)));
                     xr -= 6.0;
                 }
-                let q = "Ya existe:";
+                let q = crate::strings::tr(lang, "Ya existe:");
                 let qw = self.measure(q, &self.fonts.ui_11_5);
                 xr -= qw + 4.0;
                 self.text(q, &self.fonts.ui_11_5, Rect::new(xr, r.top, xr + qw, r.bottom), pal.warn);
@@ -2488,13 +2523,13 @@ impl Renderer {
                 self.text(err, &self.fonts.ui_11_5, Rect::new(xr, r.top, xr + w, r.bottom), pal.danger);
             } else {
                 if total_sugs > 0 {
-                    let tab_label = "Tab ↹";
+                    let tab_label = crate::strings::tr(lang, "Tab ↹");
                     let w = self.measure(tab_label, &self.fonts.ui_11_5);
                     xr -= w;
                     self.text(tab_label, &self.fonts.ui_11_5, Rect::new(xr, r.top, xr + w, r.bottom), pal.text_3);
                     xr -= 10.0;
                 }
-                let word = p.hint_word();
+                let word = crate::strings::tr(lang, p.hint_word());
                 if !word.is_empty() {
                     let wc = if p.is_invalid() { pal.danger } else { pal.text_3 };
                     let w = self.measure(word, &self.fonts.ui_11_5);
@@ -2615,7 +2650,11 @@ impl Renderer {
                 // "3-7 de 42": qué tramo de la lista completa se está viendo, para que
                 // quede claro que hay más candidatos y que el scroll los revela.
                 let counter_top = box_r.top + layout::POPUP_PAD + row_h * sugs.len() as f32;
-                let label = format!("{}-{} de {}", scroll + 1, scroll + sugs.len(), total);
+                let label = if self.lang() == notty_config::Lang::En {
+                    format!("{}-{} of {}", scroll + 1, scroll + sugs.len(), total)
+                } else {
+                    format!("{}-{} de {}", scroll + 1, scroll + sugs.len(), total)
+                };
                 self.text(
                     &label,
                     &self.fonts.ui_11_5,
@@ -2680,7 +2719,7 @@ impl Renderer {
 
             // Izquierda: etiqueta(s) + campo(s), en el espacio libre hasta `right_cluster_start`.
             let mut x = r.left + layout::STATUS_PAD_X;
-            let verb = "buscar";
+            let verb = self.tr("buscar");
             let vw = self.measure(verb, &self.fonts.ui_11_5);
             self.text(verb, &self.fonts.ui_11_5, Rect::new(x, r.top, x + vw, r.bottom), pal.text_3);
             x += vw + 8.0;
@@ -2692,7 +2731,7 @@ impl Renderer {
                 self.hits.push((field1, Hit::SearchField(0)));
                 x = field1.right + 10.0;
 
-                let por = "por";
+                let por = self.tr("por");
                 let pw = self.measure(por, &self.fonts.ui_11_5);
                 self.text(por, &self.fonts.ui_11_5, Rect::new(x, r.top, x + pw, r.bottom), pal.text_3);
                 x += pw + 8.0;

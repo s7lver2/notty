@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.4.0
+
+- Sistema de idiomas: Auto (sigue el de Windows), Español o Inglés, elegible desde Ajustes → Ayuda. Traducción casi completa de la app: editor, Ajustes, menús, tour, ventana de bienvenida, panel de actualizaciones y el instalador entero (asistente, opciones, progreso de MSI, errores, pantalla de auto-actualización).
+- Color de acento personalizable desde Ajustes (8 opciones), con animación al cambiarlo igual que al cambiar de tema.
+- Nueva opción para reabrir los archivos que quedaron abiertos al arrancar notty.
+- Nueva opción para mostrar iconos en las pestañas.
+- Fix: autocompletar con Tab en Abrir/Guardar como funcionaba solo tras escribir la primera letra; ahora sugiere desde una carpeta vacía y parte de la carpeta de usuario en vez de C:\.
+
 ## v0.3.0
 
 - Modo Paneles como kitty: pestañas que se dividen en hasta 4 paneles, con anchos ajustables.

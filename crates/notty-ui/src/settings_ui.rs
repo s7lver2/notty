@@ -151,6 +151,8 @@ pub(crate) struct Ui<'a> {
     pub now: Instant,
     /// Las zonas de clic se recortan a esto (el panel visible, sin la barra lateral).
     pub clip: Rect,
+    /// Idioma efectivo (`notty_ui::lang::resolve`, nunca `Auto`): ver `Ui::tr`.
+    pub lang: notty_config::Lang,
     xf: Vec<Matrix3x2>,
     fades: Vec<f32>,
 }
@@ -167,13 +169,21 @@ impl<'a> Ui<'a> {
         pressed: Hit,
         now: Instant,
         base: Matrix3x2,
+        lang: notty_config::Lang,
     ) -> Self {
         let fade = r.fade();
-        Ui { r, pal, tw, hits, fmts, hover, pressed, now, clip: Rect::new(-1e6, -1e6, 1e6, 1e6), xf: vec![base], fades: vec![fade] }
+        Ui { r, pal, tw, hits, fmts, hover, pressed, now, clip: Rect::new(-1e6, -1e6, 1e6, 1e6), lang, xf: vec![base], fades: vec![fade] }
     }
 
     pub fn anim(&self) -> bool {
         !self.tw.disabled
+    }
+
+    /// Traduce `es` al idioma efectivo de esta ventana de Ajustes (ver `strings::tr`).
+    /// Los textos comunes (`header`, `group`, `label`, `title_desc`, `toggle_row`,
+    /// `seg_row`...) ya pasan por aquí solos: no hace falta envolver cada llamada.
+    pub fn tr<'s>(&self, es: &'s str) -> &'s str {
+        crate::strings::tr(self.lang, es)
     }
 
     // --- Pilas de transformación y fundido ---------------------------------------
@@ -453,6 +463,7 @@ impl<'a> Ui<'a> {
 
     /// `.more`: enlace de acento con subrayado que crece desde la izquierda.
     pub fn more(&mut self, x: f32, cy: f32, label: &str, hit: Hit) -> Rect {
+        let label = self.tr(label);
         let w = self.measure(label, 12.0, false);
         let r = Rect::new(x, cy - 9.0, x + w, cy + 9.0);
         let t = self.hover_t(hit, 250);

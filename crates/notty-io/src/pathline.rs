@@ -90,6 +90,16 @@ fn glob_match(pattern: &[char], text: &[char]) -> bool {
     }
 }
 
+fn is_hidden_or_system(entry: &std::fs::DirEntry) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
+    const FILE_ATTRIBUTE_SYSTEM: u32 = 0x4;
+    entry
+        .metadata()
+        .map(|m| m.file_attributes() & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM) != 0)
+        .unwrap_or(false)
+}
+
 pub fn suggestions(typed: &str, max: usize) -> Vec<Entry> {
     ranked_suggestions(typed, max, &crate::usage::Usage::default())
 }
@@ -110,6 +120,11 @@ pub fn ranked_suggestions(typed: &str, max: usize, usage: &crate::usage::Usage) 
     let pattern: Vec<char> = last_lower.chars().collect();
     let mut entries: Vec<Entry> = read
         .flatten()
+        // Oculta lo que el propio Explorador de Windows esconde (`$Recycle.Bin`,
+        // `pagefile.sys`, `desktop.ini`...): sin este filtro, empezar a completar
+        // desde una carpeta vacía de texto tecleado enseña sobre todo basura del
+        // sistema en vez de las carpetas que el usuario realmente quiere.
+        .filter(|e| !is_hidden_or_system(e))
         .filter_map(|e| {
             let name = e.file_name().to_string_lossy().into_owned();
             let name_lower = name.to_lowercase();
@@ -266,6 +281,22 @@ mod tests {
         let typed = dir.path().join("pro?").to_string_lossy().to_string();
         let s = suggestions(&typed, 10);
         assert!(s.is_empty());
+    }
+
+    #[test]
+    fn hidden_and_system_entries_are_excluded() {
+        let dir = setup();
+        std::fs::write(dir.path().join("oculto.txt"), "x").unwrap();
+        let status = std::process::Command::new("attrib")
+            .args(["+h", "+s", &dir.path().join("oculto.txt").to_string_lossy()])
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let typed = dir.path().join("oculto").to_string_lossy().to_string();
+        assert!(suggestions(&typed, 5).is_empty());
+        // El resto de la carpeta sigue apareciendo con normalidad.
+        let typed = dir.path().join("pro").to_string_lossy().to_string();
+        assert_eq!(suggestions(&typed, 5).len(), 2);
     }
 
     #[test]

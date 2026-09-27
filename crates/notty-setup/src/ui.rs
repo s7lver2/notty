@@ -418,12 +418,13 @@ impl State {
             InstallPhase::Error(code, _) => code,
             _ => 0,
         };
-        let mut s = format!("notty-setup {VERSION}\nCódigo de MSI: {code} · {}\n", human_error(code));
+        let r = &self.renderer;
+        let mut s = format!("notty-setup {VERSION}\n{}: {code} · {}\n", r.tr("Código de MSI"), r.tr(human_error(code)));
         if !self.last_error.is_empty() {
             s.push_str(&self.last_error);
             s.push('\n');
         }
-        s.push_str(&format!("Registro: {}", msi_driver::log_path().display()));
+        s.push_str(&format!("{}: {}", r.tr("Registro"), msi_driver::log_path().display()));
         s
     }
 
@@ -737,7 +738,7 @@ fn draw_rail(r: &Renderer, rail: Rect, st: &State, now: Instant, pal: &SetupPale
         } else {
             (&r.fonts().ui_13, pal.text_3)
         };
-        text_fit(r, label, font, Rect::new(rail.left + 37.0, cy - 17.0, rail.right - 6.0, cy + 17.0), c);
+        text_fit(r, r.tr(label), font, Rect::new(rail.left + 37.0, cy - 17.0, rail.right - 6.0, cy + 17.0), c);
     }
 }
 
@@ -772,27 +773,28 @@ fn draw_welcome(r: &Renderer, pal: &SetupPalette, area: Rect, fade: f32, st: &St
     let mut y = area.top + 16.0;
     text_fit(r, &format!("notty {VERSION}"), &r.fonts().ui_20_semibold, Rect::new(x, y, right, y + 27.0), pal.text);
     y += 27.0 + 6.0;
-    let sub = "Un bloc de notas ligero para Windows. Se instalará para todos los usuarios de este equipo.";
+    let sub = r.tr("Un bloc de notas ligero para Windows. Se instalará para todos los usuarios de este equipo.");
     let sub_h = r.measure_wrapped(sub, &r.fonts().ui_13, right - x, Some(19.5));
     r.text_wrapped(sub, &r.fonts().ui_13, Rect::new(x, y, right, y + sub_h), pal.text_2, Some(19.5));
     y += sub_h + 18.0 + 4.0;
-    spaced_text(r, "CARPETA", Rect::new(x + 2.0, y, right, y + 15.0), pal.text_3);
+    spaced_text(r, r.tr("CARPETA"), Rect::new(x + 2.0, y, right, y + 15.0), pal.text_3);
     y += 15.0 + 8.0;
 
     let field = Rect::new(x, y, right, y + 32.0);
     r.fill_round(field, 4.0, pal.field_bg);
     r.stroke_round_rect(Rect::new(field.left + 0.5, field.top + 0.5, field.right - 0.5, field.bottom - 0.5), 4.0, 1.0, pal.win_border);
     r.fill(Rect::new(field.left + 3.0, field.bottom - 1.0, field.right - 3.0, field.bottom), pal.accent);
-    let change_w = r.measure("Cambiar…", &r.fonts().ui_12);
+    let change_label = r.tr("Cambiar…");
+    let change_w = r.measure(change_label, &r.fonts().ui_12);
     let change = Rect::new(field.right - 10.0 - change_w, field.top, field.right - 10.0, field.bottom);
     r.text(&st.install_folder.display().to_string(), &r.fonts().mono_12, Rect::new(field.left + 10.0, field.top, change.left - 8.0, field.bottom), pal.scene_text);
-    r.text("Cambiar…", &r.fonts().ui_12, change, pal.accent);
+    r.text(change_label, &r.fonts().ui_12, change, pal.accent);
     if st.hover == Hit::ChangeFolder {
         r.stroke_line(change.left, field.bottom - 8.0, change.right, field.bottom - 8.0, 1.0, pal.accent);
     }
     hits.push((Rect::new(change.left - 6.0, field.top, field.right, field.bottom), Hit::ChangeFolder));
     y += 32.0 + 10.0;
-    text_fit(r, "2,3 MB · Windows 10 1809 o posterior", &r.fonts().ui_11_5, Rect::new(x, y, right, y + 16.0), pal.text_3);
+    text_fit(r, r.tr("2,3 MB · Windows 10 1809 o posterior"), &r.fonts().ui_11_5, Rect::new(x, y, right, y + 16.0), pal.text_3);
     let note = match st.self_update {
         SelfUpdate::Checking => Some("Comprobando la última versión…"),
         SelfUpdate::Failed => Some("No se pudo comprobar si hay una versión más nueva."),
@@ -800,7 +802,7 @@ fn draw_welcome(r: &Renderer, pal: &SetupPalette, area: Rect, fade: f32, st: &St
     };
     if let Some(note) = note {
         y += 16.0 + 4.0;
-        text_fit(r, note, &r.fonts().ui_11_5, Rect::new(x, y, right, y + 16.0), pal.text_3);
+        text_fit(r, r.tr(note), &r.fonts().ui_11_5, Rect::new(x, y, right, y + 16.0), pal.text_3);
     }
     r.set_fade(1.0);
 }
@@ -906,9 +908,9 @@ fn draw_options(
     r.set_fade(fade);
     r.push_clip(col);
     let mut y = col.top + 16.0 - scroll;
-    text_fit(r, "Opciones", &r.fonts().ui_20_semibold, Rect::new(left, y, right, y + 27.0), pal.text);
+    text_fit(r, r.tr("Opciones"), &r.fonts().ui_20_semibold, Rect::new(left, y, right, y + 27.0), pal.text);
     y += 27.0 + 4.0;
-    let intro = "Todo se puede cambiar después desde Ajustes.";
+    let intro = r.tr("Todo se puede cambiar después desde Ajustes.");
     let intro_h = r.measure_wrapped(intro, &r.fonts().ui_13, right - left, None).max(18.0);
     r.text_wrapped(intro, &r.fonts().ui_13, Rect::new(left, y, right, y + intro_h), pal.text_2, None);
     y += intro_h + 14.0;
@@ -928,7 +930,7 @@ fn draw_options(
         let text_w = toggle_left - 12.0 - text_x;
 
         // Alto completo del cuerpo y cuánto se ve ahora (`grid-template-rows` 260ms).
-        let item_hs: Vec<(f32, f32)> = group.rows.iter().map(|&ri| item_height(r, rows[ri].title, rows[ri].desc, text_w)).collect();
+        let item_hs: Vec<(f32, f32)> = group.rows.iter().map(|&ri| item_height(r, r.tr(rows[ri].title), r.tr(rows[ri].desc), text_w)).collect();
         let full_h: f32 = item_hs.iter().map(|h| h.0).sum::<f32>() + if group.folder { 1.0 + 9.0 + 16.0 + 9.0 } else { 0.0 };
         let open_t = match gs.since {
             Some(t0) => {
@@ -947,10 +949,10 @@ fn draw_options(
         let count_right = right - 1.0 - 14.0 - 22.0 - 12.0;
         let text_right = count_right - 40.0;
         if group.desc.is_empty() {
-            text_fit(r, group.title, &r.fonts().ui_13, Rect::new(text_x, header.top, text_right, header.bottom), pal.text);
+            text_fit(r, r.tr(group.title), &r.fonts().ui_13, Rect::new(text_x, header.top, text_right, header.bottom), pal.text);
         } else {
-            text_fit(r, group.title, &r.fonts().ui_13, Rect::new(text_x, header.top + 11.0, text_right, header.top + 28.5), pal.text);
-            text_fit(r, group.desc, &r.fonts().ui_11_5, Rect::new(text_x, header.top + 29.5, text_right, header.top + 45.0), pal.text_3);
+            text_fit(r, r.tr(group.title), &r.fonts().ui_13, Rect::new(text_x, header.top + 11.0, text_right, header.top + 28.5), pal.text);
+            text_fit(r, r.tr(group.desc), &r.fonts().ui_11_5, Rect::new(text_x, header.top + 29.5, text_right, header.top + 45.0), pal.text_3);
         }
         if !group.rows.is_empty() {
             let on = group.rows.iter().filter(|&&ri| (rows[ri].get)(&st.toggles)).count();
@@ -966,7 +968,11 @@ fn draw_options(
                 }
                 _ => (on, 1.0),
             };
-            let summary = format!("{label} de {}", group.rows.len());
+            let summary = if r.lang() == notty_config::Lang::En {
+                format!("{label} of {}", group.rows.len())
+            } else {
+                format!("{label} de {}", group.rows.len())
+            };
             r.text_right(&summary, &r.fonts().ui_11_5, Rect::new(count_right - 60.0, header.top, count_right, header.bottom), pal.text_2.faded(alpha));
         }
         // `.chev`: "v" cerrado, "^" abierto, gira en 220ms.
@@ -1005,10 +1011,10 @@ fn draw_options(
                 r.fill(Rect::new(item.left, item.top, item.right, item.top + 1.0), pal.group_border);
                 r.set_fade(fade * a);
                 let ty = item.top + 1.0 + 9.0 + dy;
-                r.text_wrapped(rows[ri].title, &r.fonts().ui_13, Rect::new(text_x, ty, text_x + text_w, ty + title_h), pal.text, None);
+                r.text_wrapped(r.tr(rows[ri].title), &r.fonts().ui_13, Rect::new(text_x, ty, text_x + text_w, ty + title_h), pal.text, None);
                 if !rows[ri].desc.is_empty() {
                     let dy0 = ty + title_h + 1.0;
-                    r.text_wrapped(rows[ri].desc, &r.fonts().ui_11_5, Rect::new(text_x, dy0, text_x + text_w, item.bottom), pal.text_3, None);
+                    r.text_wrapped(r.tr(rows[ri].desc), &r.fonts().ui_11_5, Rect::new(text_x, dy0, text_x + text_w, item.bottom), pal.text_3, None);
                 }
                 let tg_top = item.top + 1.0 + (item_h - 1.0 - 20.0) / 2.0 + dy;
                 let k = toggle_k(st, ri, now);
@@ -1026,11 +1032,12 @@ fn draw_options(
                 }
                 r.fill(Rect::new(item.left, item.top, item.right, item.top + 1.0), pal.group_border);
                 r.set_fade(fade * a);
-                let change_w = r.measure("Cambiar…", &r.fonts().ui_12);
+                let change_label = r.tr("Cambiar…");
+                let change_w = r.measure(change_label, &r.fonts().ui_12);
                 let change = Rect::new(item.right - 14.0 - change_w, item.top + 1.0, item.right - 14.0, item.bottom);
                 let path = st.install_folder.display().to_string();
                 r.text(&path, &r.fonts().mono_12, Rect::new(text_x, item.top + 1.0, change.left - 12.0, item.bottom), pal.text);
-                r.text("Cambiar…", &r.fonts().ui_12, change, pal.accent);
+                r.text(change_label, &r.fonts().ui_12, change, pal.accent);
                 if st.hover == Hit::ChangeFolder {
                     let uy = item.top + 1.0 + (item_h - 1.0) / 2.0 + 8.0;
                     r.stroke_line(change.left, uy, change.right, uy, 1.0, pal.accent);
@@ -1070,8 +1077,8 @@ fn draw_options(
     // `.prev{padding:16px;gap:10px}`: etiqueta, lienzo y `.pcap{min-height:54px;line-height:1.5}`.
     r.fill(preview, pal.preview_bg);
     r.fill(Rect::new(preview.left, preview.top, preview.left + 1.0, preview.bottom), pal.foot_border);
-    spaced_text(r, "VISTA PREVIA", Rect::new(preview.left + 16.0, preview.top + 16.0, preview.right - 16.0, preview.top + 31.0), pal.text_3);
-    let caption = scene_caption(st.scene);
+    spaced_text(r, r.tr("VISTA PREVIA"), Rect::new(preview.left + 16.0, preview.top + 16.0, preview.right - 16.0, preview.top + 31.0), pal.text_3);
+    let caption = r.tr(scene_caption(st.scene));
     let cap_w = preview.width() - 32.0;
     let cap_h = r.measure_wrapped(caption, &r.fonts().ui_12, cap_w, Some(18.0)).max(54.0);
     let cap = Rect::new(preview.left + 16.0, preview.bottom - 16.0 - cap_h, preview.right - 16.0, preview.bottom - 16.0);
@@ -1219,14 +1226,14 @@ fn draw_scene(r: &Renderer, pal: &SetupPalette, canvas: Rect, scene: Scene, elap
     match scene {
         Scene::Notepad => {
             term_line(r, x, y, right, &[("C:\\> ", t, false), (typed("notepad notas", elapsed), t, false)]);
-            term_line(r, x, y + lh, right, &[("→", pal.accent, false), (" se abre ", t, false), ("notty", pal.text, true)]);
+            term_line(r, x, y + lh, right, &[("→", pal.accent, false), (r.tr(" se abre "), t, false), ("notty", pal.text, true)]);
             term_line(r, x, y + lh * 3.0, right, &[("C:\\> notepad_legacy", t, false)]);
-            let end = term_line(r, x, y + lh * 4.0, right, &[("→", pal.accent, false), (" Bloc de notas original", t, false)]);
+            let end = term_line(r, x, y + lh * 4.0, right, &[("→", pal.accent, false), (r.tr(" Bloc de notas original"), t, false)]);
             term_cursor(r, pal, end, y + lh * 4.0, elapsed);
         }
         Scene::Path => {
             term_line(r, x, y, right, &[("PS> ", t, false), (typed("notty .\\app.log", elapsed), t, false)]);
-            let end = term_line(r, x, y + lh, right, &[("→", pal.accent, false), (" abierto en una pestaña nueva", t, false)]);
+            let end = term_line(r, x, y + lh, right, &[("→", pal.accent, false), (r.tr(" abierto en una pestaña nueva"), t, false)]);
             term_cursor(r, pal, end, y + lh, elapsed);
         }
         Scene::Ctx => {
@@ -1245,6 +1252,7 @@ fn draw_scene(r: &Renderer, pal: &SetupPalette, canvas: Rect, scene: Scene, elap
             r.fill_round(menu, 6.0, pal.ctx_bg);
             r.stroke_round_rect(Rect::new(menu.left + 0.5, menu.top + 0.5, menu.right - 0.5, menu.bottom - 0.5), 6.0, 1.0, pal.btn2_border);
             for (i, label) in ["Abrir", "Abrir con notty", "Copiar ruta", "Propiedades"].into_iter().enumerate() {
+                let label = r.tr(label);
                 let item = Rect::new(menu.left + 5.0, menu.top + 5.0 + row_h * i as f32, menu.right - 5.0, menu.top + 5.0 + row_h * (i + 1) as f32);
                 let hl = i == 1;
                 if hl {
@@ -1270,7 +1278,7 @@ fn draw_scene(r: &Renderer, pal: &SetupPalette, canvas: Rect, scene: Scene, elap
             let top = y + 30.0;
             let panel = Rect::new(x, top, right, top + 10.0 + 14.0 + 6.0 + row_h * 2.0 + 10.0);
             r.fill_round(panel, 6.0, pal.start_box);
-            r.text("Anclado", &r.fonts().ui_10_5, Rect::new(panel.left + 10.0, top + 10.0, panel.right - 10.0, top + 24.0), pal.text_3);
+            r.text(r.tr("Anclado"), &r.fonts().ui_10_5, Rect::new(panel.left + 10.0, top + 10.0, panel.right - 10.0, top + 24.0), pal.text_3);
             let ry = top + 10.0 + 14.0 + 6.0;
             let (a, dy) = pop(elapsed, 0.4);
             let base = r.fade();
@@ -1298,9 +1306,9 @@ fn draw_installing(r: &Renderer, pal: &SetupPalette, area: Rect, fade: f32, st: 
     let mut y = area.top + 34.0;
     match &st.install {
         InstallPhase::Running { progress, progress_anim, action_text, action_anim } => {
-            text_fit(r, "Instalando…", &r.fonts().ui_20_semibold, Rect::new(x, y, right, y + 28.0), pal.text.faded(fade));
+            text_fit(r, r.tr("Instalando…"), &r.fonts().ui_20_semibold, Rect::new(x, y, right, y + 28.0), pal.text.faded(fade));
             y += 30.0;
-            text_fit(r, "No tardará más de unos segundos.", &r.fonts().ui_13, Rect::new(x, y, right, y + 18.0), pal.text_2.faded(fade));
+            text_fit(r, r.tr("No tardará más de unos segundos."), &r.fonts().ui_13, Rect::new(x, y, right, y + 18.0), pal.text_2.faded(fade));
             y += 40.0;
             let bar = Rect::new(x, y, right, y + 3.0);
             r.fill_round(bar, 1.5, pal.track.faded(fade));
@@ -1314,17 +1322,17 @@ fn draw_installing(r: &Renderer, pal: &SetupPalette, area: Rect, fade: f32, st: 
             }
             y += 20.0;
             let text_fade = fade * action_anim.map(|a| a.value(now, 0.3, 1.0)).unwrap_or(1.0);
-            r.text(action_text, &r.fonts().ui_12, Rect::new(x, y, right - 88.0, y + 18.0), pal.text_3.faded(text_fade));
+            r.text(r.tr(action_text), &r.fonts().ui_12, Rect::new(x, y, right - 88.0, y + 18.0), pal.text_3.faded(text_fade));
             r.text_right(&format!("{} %", pct.round() as i32), &r.fonts().ui_12, Rect::new(right - 80.0, y, right, y + 18.0), pal.text_3.faded(fade));
         }
         InstallPhase::UacCancelled | InstallPhase::Done => {}
         InstallPhase::Busy => {
             let _ = hits;
             r.set_fade(fade);
-            text_fit(r, "Otra instalación en curso", &r.fonts().ui_20_semibold, Rect::new(x, y, right, y + 27.0), pal.text);
+            text_fit(r, r.tr("Otra instalación en curso"), &r.fonts().ui_20_semibold, Rect::new(x, y, right, y + 27.0), pal.text);
             y += 27.0 + 6.0;
             r.text_wrapped(
-                "Espera a que termine la otra instalación y pulsa Reintentar.",
+                r.tr("Espera a que termine la otra instalación y pulsa Reintentar."),
                 &r.fonts().ui_13,
                 Rect::new(x, y, right, y + 60.0),
                 pal.text_2,
@@ -1334,19 +1342,19 @@ fn draw_installing(r: &Renderer, pal: &SetupPalette, area: Rect, fade: f32, st: 
         }
         InstallPhase::Error(code, _) => {
             r.set_fade(fade);
-            text_fit(r, "No se pudo instalar notty", &r.fonts().ui_20_semibold, Rect::new(x, y, right, y + 27.0), pal.text);
+            text_fit(r, r.tr("No se pudo instalar notty"), &r.fonts().ui_20_semibold, Rect::new(x, y, right, y + 27.0), pal.text);
             y += 27.0 + 6.0;
-            let human = human_error(*code);
+            let human = r.tr(human_error(*code));
             let human_h = r.measure_wrapped(human, &r.fonts().ui_13, right - x, Some(19.5));
             r.text_wrapped(human, &r.fonts().ui_13, Rect::new(x, y, right, y + human_h), pal.text_2, Some(19.5));
             y += human_h + 14.0;
             // Caja de detalles con el estilo de `.notes` (lo mismo que copia "Copiar detalles").
-            let mut details = format!("Código {code}");
+            let mut details = format!("{} {code}", r.tr("Código"));
             if !st.last_error.is_empty() {
                 details.push_str(" · ");
                 details.push_str(st.last_error.trim());
             }
-            details.push_str(&format!("\nRegistro: {}", msi_driver::log_path().display()));
+            details.push_str(&format!("\n{}: {}", r.tr("Registro"), msi_driver::log_path().display()));
             let line_h = 12.0 * 1.65;
             let inner_w = right - x - 24.0;
             // Con la ventana baja la caja encoge (su texto se recorta dentro), pero
@@ -1378,9 +1386,9 @@ fn draw_done(r: &Renderer, pal: &SetupPalette, area: Rect, fade: f32, st: &State
     y += 44.0 + 18.0;
 
     let right = content_right(area, x);
-    text_fit(r, "notty está listo", &r.fonts().ui_20_semibold, Rect::new(x, y, right, y + 28.0), pal.text.faded(fade));
+    text_fit(r, r.tr("notty está listo"), &r.fonts().ui_20_semibold, Rect::new(x, y, right, y + 28.0), pal.text.faded(fade));
     y += 32.0;
-    let hint = "Falta un paso: elegir notty como app predeterminada para .txt en Ajustes de Windows.";
+    let hint = r.tr("Falta un paso: elegir notty como app predeterminada para .txt en Ajustes de Windows.");
     let hint_h = r.measure_wrapped(hint, &r.fonts().ui_13, right - x, Some(19.5));
     r.text_wrapped(hint, &r.fonts().ui_13, Rect::new(x, y, right, y + hint_h), pal.text_2.faded(fade), Some(19.5));
 }
@@ -1442,23 +1450,23 @@ fn draw_footer(r: &Renderer, pal: &SetupPalette, foot: Rect, st: &State, hits: &
     match st.step {
         Step::Welcome => {
             draw_dots(r, foot, pal, 0);
-            let next = primary_button(r, right, cy, "Siguiente", false, hover == Hit::Next);
+            let next = primary_button(r, right, cy, r.tr("Siguiente"), false, hover == Hit::Next);
             hits.push((next, Hit::Next));
         }
         Step::Options => {
             r.text("2,3 MB", &r.fonts().ui_12, Rect::new(foot.left + 18.0, foot.top, foot.left + 200.0, foot.bottom), pal.text_3);
-            let next = primary_button(r, right, cy, "Instalar", true, hover == Hit::Next);
-            let back = secondary_button(r, next.left - 6.0, cy, "Atrás", hover == Hit::Back);
+            let next = primary_button(r, right, cy, r.tr("Instalar"), true, hover == Hit::Next);
+            let back = secondary_button(r, next.left - 6.0, cy, r.tr("Atrás"), hover == Hit::Back);
             hits.push((back, Hit::Back));
             hits.push((next, Hit::Next));
         }
         Step::Installing => match &st.install {
             InstallPhase::Error(_, _) => {
-                let back = primary_button(r, right, cy, "Volver a Opciones", false, hover == Hit::Back);
+                let back = primary_button(r, right, cy, r.tr("Volver a Opciones"), false, hover == Hit::Back);
                 let copied = st.copied_at.is_some_and(|t| t.elapsed() < Duration::from_millis(1600));
-                let label = if copied { "Copiado ✓" } else { "Copiar detalles" };
+                let label = r.tr(if copied { "Copiado ✓" } else { "Copiar detalles" });
                 let copy = secondary_button(r, back.left - 6.0, cy, label, hover == Hit::CopyDetails);
-                let log = footer_link(r, pal, foot, "Abrir el registro", hover == Hit::OpenLog, copy.left - 12.0);
+                let log = footer_link(r, pal, foot, r.tr("Abrir el registro"), hover == Hit::OpenLog, copy.left - 12.0);
                 if log.width() > 0.0 {
                     hits.push((log, Hit::OpenLog));
                 }
@@ -1466,21 +1474,21 @@ fn draw_footer(r: &Renderer, pal: &SetupPalette, foot: Rect, st: &State, hits: &
                 hits.push((back, Hit::Back));
             }
             InstallPhase::Busy => {
-                let retry = primary_button(r, right, cy, "Reintentar", true, hover == Hit::Retry);
-                let back = secondary_button(r, retry.left - 6.0, cy, "Atrás", hover == Hit::Back);
+                let retry = primary_button(r, right, cy, r.tr("Reintentar"), true, hover == Hit::Retry);
+                let back = secondary_button(r, retry.left - 6.0, cy, r.tr("Atrás"), hover == Hit::Back);
                 hits.push((back, Hit::Back));
                 hits.push((retry, Hit::Retry));
             }
             _ => {
                 draw_dots(r, foot, pal, 2);
                 r.set_fade(0.45);
-                secondary_button(r, right, cy, "Cancelar", false);
+                secondary_button(r, right, cy, r.tr("Cancelar"), false);
                 r.set_fade(1.0);
             }
         },
         Step::Done => {
-            let btn = primary_button(r, right, cy, "Abrir notty", false, hover == Hit::OpenNotty);
-            let link = footer_link(r, pal, foot, "Abrir Aplicaciones predeterminadas", hover == Hit::OpenDefaultApps, btn.left - 12.0);
+            let btn = primary_button(r, right, cy, r.tr("Abrir notty"), false, hover == Hit::OpenNotty);
+            let link = footer_link(r, pal, foot, r.tr("Abrir Aplicaciones predeterminadas"), hover == Hit::OpenDefaultApps, btn.left - 12.0);
             if link.width() > 0.0 {
                 hits.push((link, Hit::OpenDefaultApps));
             }

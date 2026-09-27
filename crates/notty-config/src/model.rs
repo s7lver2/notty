@@ -26,6 +26,34 @@ pub enum Theme {
     Dark,
 }
 
+/// Color de acento de toda la interfaz (resaltados, botones activos, el logo de la
+/// barra de título...). `Azul` es el color de siempre; el resto son variaciones de
+/// tono que `notty_ui::theme::palette` aplica sobre la paleta clara/oscura.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AccentColor {
+    #[default]
+    Azul,
+    Verde,
+    Turquesa,
+    Morado,
+    Rosa,
+    Rojo,
+    Naranja,
+    Amarillo,
+}
+
+/// Idioma de toda la interfaz. `Auto` sigue el idioma de Windows (`notty_ui::lang::
+/// detect_system_lang`) la primera vez que arranca notty; los otros dos lo fuerzan.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Lang {
+    #[default]
+    Auto,
+    Es,
+    En,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Files {
@@ -150,6 +178,15 @@ pub struct UiConfig {
     /// Encendido por defecto: en un `.txt` no cambia nada, y en código es lo que
     /// cualquiera espera ver al abrirlo.
     pub syntax_highlight: bool,
+    /// Ajustes → Apariencia → Color de acento.
+    pub accent: AccentColor,
+    /// Ajustes → Idioma. Ver `Lang`.
+    pub lang: Lang,
+    /// Al abrir notty sin pasarle ningún archivo, reabre los que quedaron abiertos
+    /// la última vez (ver `notty_config::session`).
+    pub reopen_previous: bool,
+    /// Icono de archivo genérico delante del nombre de cada pestaña.
+    pub tab_icons: bool,
 }
 
 impl Default for UiConfig {
@@ -171,6 +208,10 @@ impl Default for UiConfig {
             font_family: FontFamily::AUTO,
             ligatures: false,
             syntax_highlight: true,
+            accent: AccentColor::default(),
+            lang: Lang::default(),
+            reopen_previous: false,
+            tab_icons: false,
         };
         let preset = ui.preset;
         crate::apply_preset(&mut ui, preset);
@@ -339,6 +380,44 @@ mod tests {
     fn empty_keys_are_not_written() {
         let text = toml::to_string_pretty(&Config::default()).unwrap();
         assert!(!text.contains("[keys]"));
+    }
+
+    #[test]
+    fn accent_defaults_to_azul_and_round_trips() {
+        assert_eq!(UiConfig::default().accent, AccentColor::Azul);
+        let cfg = Config { ui: UiConfig { accent: AccentColor::Turquesa, ..UiConfig::default() }, ..Config::default() };
+        let text = toml::to_string(&cfg).unwrap();
+        assert!(text.contains("accent = \"turquesa\""));
+        let back: Config = toml::from_str(&text).unwrap();
+        assert_eq!(back.ui.accent, AccentColor::Turquesa);
+    }
+
+    #[test]
+    fn lang_defaults_to_auto_and_round_trips() {
+        assert_eq!(UiConfig::default().lang, Lang::Auto);
+        let cfg = Config { ui: UiConfig { lang: Lang::En, ..UiConfig::default() }, ..Config::default() };
+        let text = toml::to_string(&cfg).unwrap();
+        assert!(text.contains("lang = \"en\""));
+        let back: Config = toml::from_str(&text).unwrap();
+        assert_eq!(back.ui.lang, Lang::En);
+    }
+
+    #[test]
+    fn tab_icons_defaults_to_false_and_round_trips() {
+        assert!(!UiConfig::default().tab_icons);
+        let cfg = Config { ui: UiConfig { tab_icons: true, ..UiConfig::default() }, ..Config::default() };
+        let text = toml::to_string(&cfg).unwrap();
+        let back: Config = toml::from_str(&text).unwrap();
+        assert!(back.ui.tab_icons);
+    }
+
+    #[test]
+    fn reopen_previous_defaults_to_false_and_round_trips() {
+        assert!(!UiConfig::default().reopen_previous);
+        let cfg = Config { ui: UiConfig { reopen_previous: true, ..UiConfig::default() }, ..Config::default() };
+        let text = toml::to_string(&cfg).unwrap();
+        let back: Config = toml::from_str(&text).unwrap();
+        assert!(back.ui.reopen_previous);
     }
 
     #[test]

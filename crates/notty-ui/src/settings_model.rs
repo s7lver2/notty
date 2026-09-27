@@ -3,7 +3,8 @@
 //! pasa a `Config` cuando se toca algo. No sabe dibujar ni de Win32/Direct2D.
 
 use notty_config::{
-    Config, Files, FontFamily, HotkeyMechanism, MenuBar, OnCloseUnsaved, Preset, TabsPosition, TempMode, Theme,
+    AccentColor, Config, Files, FontFamily, HotkeyMechanism, Lang, MenuBar, OnCloseUnsaved, Preset, TabsPosition, TempMode,
+    Theme,
 };
 use notty_input::Command;
 
@@ -131,6 +132,10 @@ pub enum SettingKey {
     SyntaxHighlight,
     OnCloseUnsaved,
     OpenInExistingWindow,
+    AccentColor,
+    ReopenPrevious,
+    TabIcons,
+    Lang,
 }
 
 /// El valor elegido; `apply` decide qué campo de `Config` toca según `SettingKey`.
@@ -146,6 +151,8 @@ pub enum SettingValue {
     HotkeyMechanism(HotkeyMechanism),
     FontFamily(FontFamily),
     OnCloseUnsaved(OnCloseUnsaved),
+    AccentColor(AccentColor),
+    Lang(Lang),
 }
 
 /// Opciones de un selector: `(etiqueta, valor)`.
@@ -197,6 +204,23 @@ pub const TEMP_MODE_OPTS: Options = &[
 pub const ON_CLOSE_OPTS: Options = &[
     ("Preguntar", SettingValue::OnCloseUnsaved(OnCloseUnsaved::Preguntar)),
     ("Recuperar al abrir", SettingValue::OnCloseUnsaved(OnCloseUnsaved::Recuperar)),
+];
+
+pub const ACCENT_OPTS: Options = &[
+    ("Azul", SettingValue::AccentColor(AccentColor::Azul)),
+    ("Verde", SettingValue::AccentColor(AccentColor::Verde)),
+    ("Turquesa", SettingValue::AccentColor(AccentColor::Turquesa)),
+    ("Morado", SettingValue::AccentColor(AccentColor::Morado)),
+    ("Rosa", SettingValue::AccentColor(AccentColor::Rosa)),
+    ("Rojo", SettingValue::AccentColor(AccentColor::Rojo)),
+    ("Naranja", SettingValue::AccentColor(AccentColor::Naranja)),
+    ("Amarillo", SettingValue::AccentColor(AccentColor::Amarillo)),
+];
+
+pub const LANG_OPTS: Options = &[
+    ("Auto", SettingValue::Lang(Lang::Auto)),
+    ("Español", SettingValue::Lang(Lang::Es)),
+    ("English", SettingValue::Lang(Lang::En)),
 ];
 
 pub const HOTKEY_OPTS: Options = &[
@@ -357,6 +381,22 @@ pub fn apply(cfg: &mut Config, key: SettingKey, value: SettingValue) {
             cfg.ui.native_file_dialog = b;
             return;
         }
+        (SettingKey::AccentColor, SettingValue::AccentColor(c)) => {
+            cfg.ui.accent = c;
+            return;
+        }
+        (SettingKey::ReopenPrevious, SettingValue::Bool(b)) => {
+            cfg.ui.reopen_previous = b;
+            return;
+        }
+        (SettingKey::TabIcons, SettingValue::Bool(b)) => {
+            cfg.ui.tab_icons = b;
+            return;
+        }
+        (SettingKey::Lang, SettingValue::Lang(l)) => {
+            cfg.ui.lang = l;
+            return;
+        }
         _ => {}
     }
     match (key, value) {
@@ -388,6 +428,8 @@ pub fn current_bool(cfg: &Config, key: SettingKey) -> bool {
         SettingKey::NativeFileDialog => cfg.ui.native_file_dialog,
         SettingKey::Ligatures => cfg.ui.ligatures,
         SettingKey::SyntaxHighlight => cfg.ui.syntax_highlight,
+        SettingKey::ReopenPrevious => cfg.ui.reopen_previous,
+        SettingKey::TabIcons => cfg.ui.tab_icons,
         SettingKey::StartWithWindows => cfg.hotkey.start_with_windows,
         SettingKey::UpdatesCheck => cfg.updates.check,
         _ => false,
@@ -407,6 +449,8 @@ pub fn selected_index(cfg: &Config, key: SettingKey, options: Options) -> Option
         SettingKey::OnCloseUnsaved => SettingValue::OnCloseUnsaved(cfg.files.on_close_unsaved),
         SettingKey::HotkeyMechanism => SettingValue::HotkeyMechanism(cfg.hotkey.mechanism),
         SettingKey::FontFamily => SettingValue::FontFamily(cfg.ui.font_family),
+        SettingKey::AccentColor => SettingValue::AccentColor(cfg.ui.accent),
+        SettingKey::Lang => SettingValue::Lang(cfg.ui.lang),
         _ => return None,
     };
     options.iter().position(|(_, v)| *v == current)
@@ -423,22 +467,33 @@ pub fn options_for(key: SettingKey) -> Options {
         SettingKey::TempMode => TEMP_MODE_OPTS,
         SettingKey::OnCloseUnsaved => ON_CLOSE_OPTS,
         SettingKey::HotkeyMechanism => HOTKEY_OPTS,
+        SettingKey::AccentColor => ACCENT_OPTS,
+        SettingKey::Lang => LANG_OPTS,
         _ => &[],
     }
 }
 
 /// "Última comprobación: hace 3 horas" a partir de dos instantes Unix (segundos).
-pub fn relative_time(now: u64, then: u64) -> String {
+pub fn relative_time(now: u64, then: u64, lang: notty_config::Lang) -> String {
     if then == 0 {
-        return "nunca".to_string();
+        return crate::strings::tr(lang, "nunca").to_string();
     }
+    let en = lang == notty_config::Lang::En;
     let d = now.saturating_sub(then);
-    let plural = |n: u64, one: &str, many: &str| if n == 1 { format!("hace 1 {one}") } else { format!("hace {n} {many}") };
+    let plural = |n: u64, one_es: &str, many_es: &str, one_en: &str, many_en: &str| {
+        if en {
+            if n == 1 { format!("{n} {one_en} ago") } else { format!("{n} {many_en} ago") }
+        } else if n == 1 {
+            format!("hace 1 {one_es}")
+        } else {
+            format!("hace {n} {many_es}")
+        }
+    };
     match d {
-        0..60 => "ahora mismo".to_string(),
-        60..3600 => plural(d / 60, "minuto", "minutos"),
-        3600..86400 => plural(d / 3600, "hora", "horas"),
-        _ => plural(d / 86400, "día", "días"),
+        0..60 => crate::strings::tr(lang, "ahora mismo").to_string(),
+        60..3600 => plural(d / 60, "minuto", "minutos", "minute", "minutes"),
+        3600..86400 => plural(d / 3600, "hora", "horas", "hour", "hours"),
+        _ => plural(d / 86400, "día", "días", "day", "days"),
     }
 }
 
@@ -630,11 +685,12 @@ mod tests {
 
     #[test]
     fn relative_times_in_spanish() {
-        assert_eq!(relative_time(1000, 0), "nunca");
-        assert_eq!(relative_time(1000, 990), "ahora mismo");
-        assert_eq!(relative_time(10_000, 10_000 - 120), "hace 2 minutos");
-        assert_eq!(relative_time(10_000, 10_000 - 3600), "hace 1 hora");
-        assert_eq!(relative_time(1_000_000, 1_000_000 - 3 * 86400), "hace 3 días");
+        assert_eq!(relative_time(1000, 0, Lang::Es), "nunca");
+        assert_eq!(relative_time(1000, 990, Lang::Es), "ahora mismo");
+        assert_eq!(relative_time(10_000, 10_000 - 120, Lang::Es), "hace 2 minutos");
+        assert_eq!(relative_time(10_000, 10_000 - 3600, Lang::Es), "hace 1 hora");
+        assert_eq!(relative_time(1_000_000, 1_000_000 - 3 * 86400, Lang::Es), "hace 3 días");
+        assert_eq!(relative_time(10_000, 10_000 - 120, Lang::En), "2 minutes ago");
     }
 
     #[test]

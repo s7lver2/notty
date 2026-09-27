@@ -153,8 +153,50 @@ pub fn is_dark(theme: Theme, system_dark: bool) -> bool {
     }
 }
 
-pub fn palette(dark: bool) -> &'static Palette {
-    if dark { &DARK } else { &LIGHT }
+/// El tono de cada preset de `AccentColor`, elegido a ojo para leerse bien tanto
+/// sobre la paleta clara como la oscura (ver `with_accent`, que decide `on_accent`
+/// según su luminancia). `Azul` reutiliza el acento de siempre de cada paleta en vez
+/// de forzar un tono único, para no cambiar nada a quien no toque este ajuste.
+fn accent_rgb(color: notty_config::AccentColor, base: &Palette) -> (f32, f32, f32) {
+    use notty_config::AccentColor::*;
+    match color {
+        Azul => (base.accent.0, base.accent.1, base.accent.2),
+        Verde => (0.30, 0.72, 0.42),
+        Turquesa => (0.20, 0.75, 0.78),
+        Morado => (0.62, 0.48, 0.93),
+        Rosa => (0.93, 0.42, 0.62),
+        Rojo => (0.90, 0.35, 0.35),
+        Naranja => (0.92, 0.55, 0.25),
+        Amarillo => (0.85, 0.72, 0.20),
+    }
+}
+
+/// Sustituye el acento (y todo lo que se deriva de él: `accent_soft`, `on_accent`,
+/// `syn_keyword`) de `base` por `rgb`, manteniendo la alpha de `accent_soft` y
+/// escogiendo `on_accent` oscuro o claro según la luminancia del tono nuevo, para
+/// que el texto encima del acento siga leyéndose con cualquier color.
+fn with_accent(base: &Palette, rgb: (f32, f32, f32)) -> Palette {
+    let accent = Rgba(rgb.0, rgb.1, rgb.2, 1.0);
+    let accent_soft = Rgba(rgb.0, rgb.1, rgb.2, base.accent_soft.3);
+    let luminance = 0.299 * rgb.0 + 0.587 * rgb.1 + 0.114 * rgb.2;
+    let on_accent = if luminance > 0.55 { Rgba(0.0561, 0.0706, 0.0859, 1.0) } else { Rgba(0.9813, 0.9878, 0.9949, 1.0) };
+    Palette { accent, accent_soft, on_accent, syn_keyword: accent, ..*base }
+}
+
+/// El color de muestra de un preset de acento para el selector de Ajustes: no
+/// depende del tema actual (a diferencia de `palette`, que para `Azul` reutiliza el
+/// acento de la paleta activa).
+pub fn accent_swatch(color: notty_config::AccentColor) -> Rgba {
+    let rgb = accent_rgb(color, &DARK);
+    Rgba(rgb.0, rgb.1, rgb.2, 1.0)
+}
+
+pub fn palette(dark: bool, accent: notty_config::AccentColor) -> Palette {
+    let base = if dark { DARK } else { LIGHT };
+    if accent == notty_config::AccentColor::Azul {
+        return base;
+    }
+    with_accent(&base, accent_rgb(accent, &base))
 }
 
 #[cfg(test)]
@@ -166,6 +208,30 @@ mod tests {
         let c = Rgba(1.0, 1.0, 1.0, 1.0);
         assert_eq!(c.faded(0.5), Rgba(1.0, 1.0, 1.0, 0.5));
         assert_eq!(c.faded(1.0), c);
+    }
+
+    #[test]
+    fn azul_accent_keeps_the_original_palette() {
+        assert_eq!(palette(true, notty_config::AccentColor::Azul), DARK);
+        assert_eq!(palette(false, notty_config::AccentColor::Azul), LIGHT);
+    }
+
+    #[test]
+    fn other_accents_change_accent_and_syn_keyword_but_nothing_else() {
+        let p = palette(true, notty_config::AccentColor::Verde);
+        assert_ne!(p.accent, DARK.accent);
+        assert_eq!(p.syn_keyword, p.accent);
+        assert_eq!(p.accent_soft.3, DARK.accent_soft.3, "conserva la misma alpha de siempre");
+        // El resto de la paleta no cambia.
+        assert_eq!(p.surface, DARK.surface);
+        assert_eq!(p.text, DARK.text);
+    }
+
+    #[test]
+    fn on_accent_stays_readable_against_a_light_accent() {
+        // Amarillo es un tono claro: el texto encima debe ser oscuro, no casi blanco.
+        let p = palette(true, notty_config::AccentColor::Amarillo);
+        assert!(p.on_accent.0 < 0.5, "on_accent debería ser oscuro sobre un acento claro");
     }
 
     #[test]

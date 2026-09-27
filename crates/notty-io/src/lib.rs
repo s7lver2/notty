@@ -7,6 +7,7 @@ mod fsutil;
 mod open;
 mod pathline;
 mod recovery;
+mod session;
 mod usage;
 mod watch;
 
@@ -20,4 +21,5 @@ pub use pathline::{
 };
 pub use usage::{Usage, record_path_use, usage_path};
 pub use recovery::{RecoveryEntry, clear_recovery, dump_recovery, list_recovery, recovery_dir};
+pub use session::{load_session, save_session, session_path};
 pub use watch::{changed_since, mtime};

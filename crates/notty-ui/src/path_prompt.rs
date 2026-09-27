@@ -81,11 +81,13 @@ fn is_absolute_path(s: &str) -> bool {
 }
 
 impl PathPromptState {
-    /// Si no hay una ruta inicial que reutilizar (guardar desde CLICKME, o abrir sin
-    /// un documento ya abierto), la línea de ruta arranca en `C:\` en vez de vacía,
-    /// para que las sugerencias aparezcan al instante sin tener que teclear nada.
+    /// Si no hay una ruta inicial que reutilizar (guardar un documento nuevo, o abrir
+    /// sin ningún documento ya abierto), la línea de ruta arranca en la carpeta del
+    /// usuario en vez de vacía o en la raíz de `C:\`: así las sugerencias del primer
+    /// Tab son carpetas de verdad (Escritorio, Documentos...) en vez de tener que
+    /// teclear primero una letra para alejarse de la raíz del disco.
     pub fn new(purpose: Purpose, initial: String) -> Self {
-        let value = if initial.is_empty() { r"C:\".to_string() } else { initial };
+        let value = if initial.is_empty() { format!("{}\\", notty_io::home_dir().display()) } else { initial };
         Self {
             value,
             purpose,
@@ -371,9 +373,9 @@ mod tests {
     }
 
     #[test]
-    fn empty_initial_value_defaults_to_c_drive() {
+    fn empty_initial_value_defaults_to_home_dir() {
         let p = PathPromptState::new(Purpose::Open, String::new());
-        assert_eq!(p.value, r"C:\");
+        assert_eq!(p.value, format!("{}\\", notty_io::home_dir().display()));
     }
 
     #[test]

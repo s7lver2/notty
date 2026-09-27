@@ -105,6 +105,10 @@ struct WindowState {
     /// Tema (oscuro o no) del último pintado, y fundido en curso desde el anterior.
     last_dark: Option<bool>,
     theme_anim: Option<(bool, crate::Anim)>,
+    /// Color de acento del último pintado, y fundido en curso desde el anterior
+    /// (Ajustes → Apariencia → Color de acento), igual que `last_dark`/`theme_anim`.
+    last_accent: Option<notty_config::AccentColor>,
+    accent_anim: Option<(notty_config::AccentColor, crate::Anim)>,
     /// Si el `SetTimer` de animación (`ID_ANIM_TIMER`) está corriendo.
     anim_timer_running: bool,
     /// Aviso/panel de actualización disponible (Task 4 del plan del actualizador):
@@ -184,6 +188,7 @@ impl WindowState {
             chrome_from: self.chrome_from,
             chrome_fade: self.chrome_fade_anim.map(|a| a.value(std::time::Instant::now(), 0.0, 1.0)),
             theme_from: self.theme_anim.map(|(from, a)| (from, a.value(std::time::Instant::now(), 0.0, 1.0))),
+            accent_from: self.accent_anim.map(|(from, a)| (from, a.value(std::time::Instant::now(), 0.0, 1.0))),
             menu_sel: self.menu_sel,
         }
     }
@@ -283,7 +288,7 @@ fn open_tab(w: &mut WindowState, hwnd: HWND, state: EditorState) {
 /// solo se vacía), sale encogiendo mientras sus vecinas se deslizan a ocupar el hueco.
 fn close_tab(w: &mut WindowState, hwnd: HWND, idx: usize) {
     let Some(st) = w.ws.iter().nth(idx) else { return };
-    let name = crate::doc_name(st.path.as_deref());
+    let name = crate::doc_name_lang(st.path.as_deref(), crate::lang::resolve(w.cfg.borrow().ui.lang));
     let dirty = st.doc.is_dirty();
     w.sync_layout();
     // Modo Paneles: al cerrar el panel con foco, el foco se queda en su pestaña (el
@@ -323,10 +328,10 @@ fn continue_close(w: &mut WindowState, hwnd: HWND, mut req: crate::CloseRequest)
     req.ask.retain(|id| w.ws.index_of(*id).is_some());
     if let Some(idx) = req.ask.first().and_then(|id| w.ws.index_of(*id)) {
         w.ws.activate(idx);
-        req.name = crate::doc_name(w.ws.active().path.as_deref());
+        req.name = crate::doc_name_lang(w.ws.active().path.as_deref(), crate::lang::resolve(w.cfg.borrow().ui.lang));
         close_menus(w);
         w.ws.prompt = crate::Prompt::CloseUnsaved(req);
-        unsafe { update_title(hwnd, w.ws.active()) };
+        unsafe { update_title(hwnd, w.ws.active(), lang_of(w)) };
         return;
     }
     if matches!(w.ws.prompt, crate::Prompt::CloseUnsaved(_)) {
@@ -334,7 +339,7 @@ fn continue_close(w: &mut WindowState, hwnd: HWND, mut req: crate::CloseRequest)
     }
     let to_recover = w.ws.iter().filter(|st| req.recover.contains(&st.id));
     if let Err(e) = dump_docs_to_recovery(to_recover) {
-        show_notice(w, hwnd, format!("No se pudo guardar para recuperar: {e}"));
+        show_notice(w, hwnd, format!("{}: {}", tr_w(w, "No se pudo guardar para recuperar"), tr_w_owned(w, &e.to_string())));
         return;
     }
     if req.quit {
@@ -350,7 +355,7 @@ fn continue_close(w: &mut WindowState, hwnd: HWND, mut req: crate::CloseRequest)
         close_tab(w, hwnd, i);
     }
     refresh_recovery(w);
-    unsafe { update_title(hwnd, w.ws.active()) };
+    unsafe { update_title(hwnd, w.ws.active(), lang_of(w)) };
 }
 
 /// Respuesta a "tiene cambios sin guardar" (tecla o clic).
@@ -372,7 +377,7 @@ fn answer_close(w: &mut WindowState, hwnd: HWND, choice: crate::CloseChoice) {
             let raw_dirty = w.ws.active().raw.as_ref().is_some_and(|r| r.is_dirty());
             if raw_dirty {
                 match w.ws.active_mut().raw.as_mut().map(|raw| raw.save()) {
-                    Some(Err(e)) => show_notice(w, hwnd, format!("No se pudo guardar: {e}")),
+                    Some(Err(e)) => show_notice(w, hwnd, format!("{}: {}", tr_w(w, "No se pudo guardar"), tr_w_owned(w, &e.to_string()))),
                     _ => continue_close(w, hwnd, req),
                 }
             } else if w.ws.active().path.is_none() {
@@ -413,7 +418,7 @@ fn split_pane(w: &mut WindowState, hwnd: HWND) {
         w.ws.open(maybe_vim(EditorState::new_empty(), &cfg));
         w.sync_layout();
     } else {
-        show_notice(w, hwnd, format!("Como mucho {} paneles por pestaña", crate::splits::MAX_PANES));
+        show_notice(w, hwnd, format!("{} {} {}", tr_w(w, "Como mucho"), crate::splits::MAX_PANES, tr_w(w, "paneles por pestaña")));
     }
 }
 
@@ -533,16 +538,20 @@ fn selected_text(st: &EditorState) -> String {
 
 /// Abre el menú contextual de `target` con la esquina en `(x, y)` (DIPs de cliente).
 fn open_context_menu(w: &mut WindowState, hwnd: HWND, target: CtxTarget, x: f32, y: f32) {
+    let lang = crate::lang::resolve(w.cfg.borrow().ui.lang);
     let items = match target {
         CtxTarget::Tab(i) => {
             let Some(st) = w.ws.iter().nth(i) else { return };
-            crate::context_menu::tab_menu(i, w.ws.len(), st.path.is_some())
+            crate::context_menu::tab_menu(i, w.ws.len(), st.path.is_some(), lang)
         }
-        CtxTarget::Body => crate::context_menu::body_menu(&crate::context_menu::BodyCtx {
-            selection: selected_text(w.ws.active()),
-            clipboard_has_text: clipboard_has_text(),
-            search_open: matches!(w.ws.prompt, crate::Prompt::Find(_) | crate::Prompt::Replace(_)),
-        }),
+        CtxTarget::Body => crate::context_menu::body_menu(
+            &crate::context_menu::BodyCtx {
+                selection: selected_text(w.ws.active()),
+                clipboard_has_text: clipboard_has_text(),
+                search_open: matches!(w.ws.prompt, crate::Prompt::Find(_) | crate::Prompt::Replace(_)),
+            },
+            lang,
+        ),
     };
     w.open_menu = None;
     w.about_open = false;
@@ -692,7 +701,7 @@ fn run_ctx_cmd(w: &mut WindowState, hwnd: HWND, cmd: crate::context_menu::CtxCmd
             nav_search(w, cmd == CtxCmd::FindNext);
         }
     }
-    unsafe { update_title(hwnd, w.ws.active()) };
+    unsafe { update_title(hwnd, w.ws.active(), lang_of(w)) };
     refresh_recovery(w);
 }
 
@@ -777,18 +786,18 @@ pub unsafe fn app_icon(instance: windows::Win32::Foundation::HINSTANCE) -> Optio
 }
 
 /// Título de la ventana: `"<ruta o 'sin título'>{ ' •' si hay cambios sin guardar} · notty"`.
-fn window_title(state: &EditorState) -> String {
+fn window_title(state: &EditorState, lang: notty_config::Lang) -> String {
     let base = match &state.path {
         Some(p) => p.display().to_string(),
-        None => "sin título".to_string(),
+        None => crate::strings::tr(lang, "sin título").to_string(),
     };
     let dirty = if state.doc.is_dirty() { " •" } else { "" };
     format!("{base}{dirty} · notty")
 }
 
-unsafe fn update_title(hwnd: HWND, state: &EditorState) {
+unsafe fn update_title(hwnd: HWND, state: &EditorState, lang: notty_config::Lang) {
     unsafe {
-        let title_wide = to_wide(&window_title(state));
+        let title_wide = to_wide(&window_title(state, lang));
         let _ = SetWindowTextW(hwnd, PCWSTR(title_wide.as_ptr()));
     }
 }
@@ -809,7 +818,7 @@ fn open_config_as_document(hwnd: HWND, path: std::path::PathBuf) {
                 state.path = Some(path);
                 open_tab(w, hwnd, maybe_vim(state, &cfg));
             }
-            update_title(hwnd, w.ws.active());
+            update_title(hwnd, w.ws.active(), lang_of(w));
             let _ = InvalidateRect(Some(hwnd), None, false);
         }
     }
@@ -967,7 +976,7 @@ fn try_save(w: &mut WindowState) -> SaveOutcome {
     };
     if let Some((path, Some(since))) = path_and_since {
         if notty_io::changed_since(&path, since) {
-            w.ws.open_conflict();
+            w.ws.open_conflict(crate::lang::resolve(w.cfg.borrow().ui.lang));
             return SaveOutcome::Conflict;
         }
     }
@@ -1015,7 +1024,7 @@ fn save_now(w: &mut WindowState, hwnd: HWND) -> bool {
         SaveOutcome::Saved => true,
         SaveOutcome::Conflict => false,
         SaveOutcome::Failed(e) => {
-            show_notice(w, hwnd, format!("No se pudo guardar: {e}"));
+            show_notice(w, hwnd, format!("{}: {}", tr_w(w, "No se pudo guardar"), tr_w_owned(w, &e.to_string())));
             false
         }
     }
@@ -1043,7 +1052,7 @@ fn autosave_tick(w: &mut WindowState, hwnd: HWND) {
                 let first = st.autosave_failed_rev.is_none();
                 st.autosave_failed_rev = Some(st.doc.revision());
                 if first {
-                    show_notice(w, hwnd, format!("No se pudo autoguardar: {e}"));
+                    show_notice(w, hwnd, format!("{}: {}", tr_w(w, "No se pudo autoguardar"), tr_w_owned(w, &e.to_string())));
                 }
             }
             SaveOutcome::Conflict => claim_attention(w, hwnd),
@@ -1086,7 +1095,7 @@ fn ipc_tick(w: &mut WindowState, hwnd: HWND) -> bool {
     }
     if any_opened {
         unsafe {
-            update_title(hwnd, w.ws.active());
+            update_title(hwnd, w.ws.active(), lang_of(w));
             if windows::Win32::UI::WindowsAndMessaging::IsIconic(hwnd).as_bool() {
                 let _ = ShowWindow(hwnd, SW_RESTORE);
             }
@@ -1275,7 +1284,7 @@ fn relaunch_via_setup(w: &mut WindowState, setup_exe: &std::path::Path) {
     refresh_recovery(w);
     // Sin volcado a disco, lo no guardado se perdería al cerrar: mejor no relanzar.
     if let Err(e) = dump_recovery_snapshot(w.recovery) {
-        w.update.download_error(format!("no se pudo guardar la sesión: {e}"));
+        w.update.download_error(format!("{}: {e}", tr_w(w, "no se pudo guardar la sesión")));
         return;
     }
     let current = std::env::current_exe().unwrap_or_default();
@@ -1293,17 +1302,18 @@ fn relaunch_via_setup(w: &mut WindowState, setup_exe: &std::path::Path) {
 /// Traduce `UpdateState` (Task 4 del plan del actualizador) al contenido que
 /// `render.rs` necesita para pintar el panel de notas de versión, si está abierto.
 /// `None` si no hay panel que pintar (nada encontrado, o cerrado).
-fn update_panel_content(update: &crate::UpdateState) -> Option<crate::UpdatePanelContent> {
+fn update_panel_content(update: &crate::UpdateState, lang: notty_config::Lang) -> Option<crate::UpdatePanelContent> {
     if !update.panel_open {
         return None;
     }
     let release = update.available.as_ref()?;
-    let status_line = update.error.clone().or_else(|| {
+    let status_line = update.error.as_ref().map(|e| crate::strings::tr(lang, e).to_string()).or_else(|| {
         update.progress.map(|(done, total)| {
+            let downloading = crate::strings::tr(lang, "Descargando...");
             if total > 0 {
-                format!("Descargando... {} KB / {} KB", done / 1024, total / 1024)
+                format!("{downloading} {} KB / {} KB", done / 1024, total / 1024)
             } else {
-                "Descargando...".to_string()
+                downloading.to_string()
             }
         })
     });
@@ -1325,6 +1335,24 @@ fn path_copied_progress(w: &WindowState) -> Option<f32> {
         return None;
     }
     Some(if w.animations_enabled { p } else { 0.5 })
+}
+
+/// Idioma efectivo de `w` (`Auto` ya resuelto). Atajo para traducir los avisos de
+/// `show_notice`, que se disparan desde muchos sitios sueltos de este archivo.
+fn lang_of(w: &WindowState) -> notty_config::Lang {
+    crate::lang::resolve(w.cfg.borrow().ui.lang)
+}
+
+/// `crate::strings::tr` con el idioma de `w` ya resuelto.
+fn tr_w(w: &WindowState, s: &'static str) -> &'static str {
+    crate::strings::tr(lang_of(w), s)
+}
+
+/// Como `tr_w`, pero para texto que no es `&'static` (p.ej. el mensaje de un
+/// `notty_io::CodecError` ya formateado): las pocas frases que puede devolver
+/// (`editor.rs::save`) están en la tabla igual que cualquier otra.
+fn tr_w_owned(w: &WindowState, s: &str) -> String {
+    crate::strings::tr(lang_of(w), s).to_string()
 }
 
 /// Enseña `text` unos segundos sobre la barra de estado (mismo aviso que "Ruta copiada").
@@ -1362,7 +1390,7 @@ fn handle_conflict_key(w: &mut WindowState, hwnd: HWND, vk: u32) {
             w.ws.close_prompt();
             if let Some(st) = w.ws.index_of(id).and_then(|i| w.ws.get_mut(i)) {
                 st.autosave_paused = true;
-                show_notice(w, hwnd, "Autoguardado en pausa hasta que guardes a mano");
+                show_notice(w, hwnd, tr_w(w, "Autoguardado en pausa hasta que guardes a mano"));
             }
         }
         0x0D if c.accepts_input(now) => {
@@ -1382,7 +1410,7 @@ fn handle_conflict_key(w: &mut WindowState, hwnd: HWND, vk: u32) {
                         st.autosave_paused = false;
                         st.open_mtime = st.path.as_deref().and_then(|p| notty_io::mtime(p).ok());
                     }
-                    Err(e) => show_notice(w, hwnd, format!("No se pudo guardar: {e}")),
+                    Err(e) => show_notice(w, hwnd, format!("{}: {}", tr_w(w, "No se pudo guardar"), tr_w_owned(w, &e.to_string()))),
                 },
                 crate::ConflictAnswer::UseDisk => {
                     let reopened = st.path.clone().map(|p| (crate::open_as_document(&p), p));
@@ -1395,7 +1423,7 @@ fn handle_conflict_key(w: &mut WindowState, hwnd: HWND, vk: u32) {
                             st.lossy_source = opened.lossy.then(|| path.clone());
                             st.autosave_paused = false;
                         }
-                        Some((Err(e), _)) => show_notice(w, hwnd, format!("No se pudo leer el archivo: {e}")),
+                        Some((Err(e), _)) => show_notice(w, hwnd, format!("{}: {}", tr_w(w, "No se pudo leer el archivo"), tr_w_owned(w, &e.to_string()))),
                         None => {}
                     }
                 }
@@ -1460,6 +1488,28 @@ fn refresh_recovery(w: &WindowState) {
         .collect();
     let mut guard = w.recovery.lock().unwrap_or_else(|e| e.into_inner());
     *guard = snapshot;
+}
+
+/// Guarda qué documentos con ruta quedan abiertos al cerrar la ventana (Ajustes →
+/// Archivos → "Reabrir archivos anteriores"), y cuál de ellos tenía el foco. Con el
+/// ajuste apagado borra la sesión anterior en vez de dejar una desactualizada.
+fn save_session(w: &WindowState) {
+    let file = notty_io::session_path();
+    if !w.cfg.borrow().ui.reopen_previous {
+        notty_io::save_session(&[], 0, &file);
+        return;
+    }
+    let mut paths = Vec::new();
+    let mut active = 0;
+    for (i, st) in w.ws.iter().enumerate() {
+        if let Some(p) = &st.path {
+            if i == w.ws.active_index() {
+                active = paths.len();
+            }
+            paths.push(p.clone());
+        }
+    }
+    notty_io::save_session(&paths, active, &file);
 }
 
 /// Instala el `panic hook` de recuperación: si el proceso entra en pánico, vuelca a
@@ -1563,11 +1613,13 @@ fn run_inner(
         notty_config::LoadResult::Defaulted(cfg, msg) => (cfg, Some(msg)),
     };
 
+    let run_lang = crate::lang::resolve(cfg.ui.lang);
+    let broken_label = crate::strings::tr(run_lang, "config.toml roto");
     let title = match (path, &broken_msg) {
-        (Some(p), Some(msg)) => format!("config.toml roto: {msg} — {p} · notty"),
+        (Some(p), Some(msg)) => format!("{broken_label}: {msg} — {p} · notty"),
         (Some(p), None) => format!("{p} · notty"),
-        (None, Some(msg)) => format!("config.toml roto: {msg} · notty"),
-        (None, None) => "sin título · notty".to_string(),
+        (None, Some(msg)) => format!("{broken_label}: {msg} · notty"),
+        (None, None) => format!("{} · notty", crate::strings::tr(run_lang, "sin título")),
     };
 
     unsafe {
@@ -1633,6 +1685,20 @@ fn run_inner(
             *ws.active_mut() = maybe_vim(EditorState::new_temp(*mode, ext), &cfg);
         } else if let Some(p) = path {
             *ws.active_mut() = maybe_vim(state_for_path(std::path::Path::new(p)), &cfg);
+        } else if cfg.ui.reopen_previous {
+            // Sin ningún archivo en la línea de comandos: reabre los que quedaron
+            // abiertos la última vez (Ajustes → Archivos), si alguno de ellos todavía
+            // existe. La primera línea de la sesión es la que estaba activa.
+            let previous: Vec<_> =
+                notty_io::load_session(&notty_io::session_path()).into_iter().filter(|p| p.is_file()).collect();
+            for (i, p) in previous.iter().enumerate() {
+                let state = maybe_vim(state_for_path(p), &cfg);
+                if i == 0 {
+                    *ws.active_mut() = state;
+                } else {
+                    ws.open(state);
+                }
+            }
         }
 
         // Recuperación (caída, relanzar tras actualizar o cerrar en modo "Recuperar"):
@@ -1659,7 +1725,7 @@ fn run_inner(
         let menu_visible0 = cfg.ui.menubar == notty_config::MenuBar::Visible;
         let (body, _gutter_w) = renderer.body_and_gutter(&cfg.ui, ws.len(), menu_visible0, total_lines, ws.active().raw.is_some());
         ws.active_mut().viewport = Viewport::new(renderer.line_height(), body.height());
-        update_title(hwnd, ws.active());
+        update_title(hwnd, ws.active(), run_lang);
 
         let cfg = Rc::new(RefCell::new(cfg));
 
@@ -1685,6 +1751,8 @@ fn run_inner(
             chrome_fade_anim: None,
             last_dark: None,
             theme_anim: None,
+            last_accent: None,
+            accent_anim: None,
             anim_timer_running: false,
             update: crate::UpdateState::default(),
             download_rx: None,
@@ -1794,7 +1862,10 @@ pub unsafe fn apply_dark_mode(hwnd: HWND, dark: bool) {
             &value as *const _ as *const _,
             std::mem::size_of::<i32>() as u32,
         );
-        let border = colorref(crate::theme::palette(dark).chrome);
+        // El acento no afecta a `chrome` (el borde de la ventana no lo usa), así que
+        // aquí basta con el por defecto en vez de hacer viajar el color elegido hasta
+        // esta llamada de DWM.
+        let border = colorref(crate::theme::palette(dark, notty_config::AccentColor::default()).chrome);
         let _ = DwmSetWindowAttribute(
             hwnd,
             windows::Win32::Graphics::Dwm::DWMWA_BORDER_COLOR,
@@ -1926,9 +1997,29 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         }
                     }
                     w.last_dark = Some(dark);
+                    let accent = w.cfg.borrow().ui.accent;
+                    if let Some(prev) = w.last_accent {
+                        if prev != accent {
+                            let from = match w.accent_anim {
+                                Some((f, a)) if a.value(std::time::Instant::now(), 0.0, 1.0) < 0.5 => f,
+                                _ => prev,
+                            };
+                            w.accent_anim = Some((
+                                from,
+                                crate::Anim::new_maybe(
+                                    std::time::Instant::now(),
+                                    std::time::Duration::from_millis(350),
+                                    w.animations_enabled,
+                                ),
+                            ));
+                            ensure_anim_timer(w, hwnd);
+                        }
+                    }
+                    w.last_accent = Some(accent);
                     let view = w.view_state(hwnd);
-                    w.renderer.set_update_notice(w.update.notice_text());
-                    w.renderer.set_update_panel(update_panel_content(&w.update));
+                    let lang = lang_of(w);
+                    w.renderer.set_update_notice(w.update.notice_text(lang));
+                    w.renderer.set_update_panel(update_panel_content(&w.update, lang));
                     w.renderer.set_context_menu(w.ctx_menu.clone());
                     if w.open_menu.is_some() {
                         w.renderer.set_menu_keys(crate::menu::shortcut_labels(&w.cfg.borrow()));
@@ -1953,7 +2044,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         // `paint` ya dejó).
                         let frame = w.renderer.current_frame(&ui, w.ws.len(), w.menu_bar_visible());
                         let tour = w.tour.as_mut().expect("comprobado con is_some justo arriba");
-                        tour.draw(&w.renderer, &frame, view.dark, std::time::Instant::now());
+                        tour.draw(&w.renderer, &frame, view.dark, ui.accent, std::time::Instant::now());
                     }
                 }
                 let _ = ValidateRect(Some(hwnd), None);
@@ -2158,7 +2249,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         let shift = (GetKeyState(VK_SHIFT.0 as i32) as u16 & 0x8000) != 0;
                         handle_resize_key(w, vk, shift);
                         w.swallow_char = true;
-                        update_title(hwnd, w.ws.active());
+                        update_title(hwnd, w.ws.active(), lang_of(w));
                         let _ = InvalidateRect(Some(hwnd), None, false);
                         return LRESULT(0);
                     }
@@ -2252,7 +2343,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                                 if w.layouts.panes().len() > 1 {
                                     w.resize_mode = true;
                                 } else {
-                                    show_notice(w, hwnd, "Para acomodar hacen falta dos paneles (Ctrl+Shift+Enter divide)".to_string());
+                                    show_notice(w, hwnd, tr_w(w, "Para acomodar hacen falta dos paneles (Ctrl+Shift+Enter divide)").to_string());
                                 }
                             }
                             notty_input::Command::OpenSettings => open_settings(w, hwnd),
@@ -2269,7 +2360,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                                 }
                             }
                         }
-                        update_title(hwnd, w.ws.active());
+                        update_title(hwnd, w.ws.active(), lang_of(w));
                         let _ = InvalidateRect(Some(hwnd), None, false);
                         return LRESULT(0);
                     }
@@ -2291,7 +2382,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             _ => false,
                         };
                         if handled {
-                            update_title(hwnd, w.ws.active());
+                            update_title(hwnd, w.ws.active(), lang_of(w));
                             let _ = InvalidateRect(Some(hwnd), None, false);
                             return LRESULT(0);
                         }
@@ -2306,7 +2397,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
 
                     if w.ws.active().raw.is_some() {
                         handle_raw_keydown(w, hwnd, vk, action);
-                        update_title(hwnd, w.ws.active());
+                        update_title(hwnd, w.ws.active(), lang_of(w));
                         let _ = InvalidateRect(Some(hwnd), None, false);
                         return LRESULT(0);
                     }
@@ -2330,12 +2421,12 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         crate::EditorAction::None => {}
                         crate::EditorAction::Copy | crate::EditorAction::Cut => {
                             clipboard_copy(w, hwnd, matches!(action, crate::EditorAction::Cut));
-                            update_title(hwnd, w.ws.active());
+                            update_title(hwnd, w.ws.active(), lang_of(w));
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                         crate::EditorAction::Paste => {
                             clipboard_paste(w, hwnd);
-                            update_title(hwnd, w.ws.active());
+                            update_title(hwnd, w.ws.active(), lang_of(w));
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                         crate::EditorAction::OpenPathPrompt => {
@@ -2365,12 +2456,12 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         }
                         crate::EditorAction::Save => {
                             save_now(w, hwnd);
-                            update_title(hwnd, w.ws.active());
+                            update_title(hwnd, w.ws.active(), lang_of(w));
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                         other => {
                             w.ws.active_mut().apply(other, std::time::Instant::now());
-                            update_title(hwnd, w.ws.active());
+                            update_title(hwnd, w.ws.active(), lang_of(w));
                             refresh_recovery(w);
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
@@ -2391,19 +2482,19 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         }
                         if w.ws.active().raw.is_some() {
                             handle_raw_char(w, ch);
-                            update_title(hwnd, w.ws.active());
+                            update_title(hwnd, w.ws.active(), lang_of(w));
                             let _ = InvalidateRect(Some(hwnd), None, false);
                             return LRESULT(0);
                         }
                         if w.ws.active().vim.is_some() {
                             handle_vim_char(w, ch);
-                            update_title(hwnd, w.ws.active());
+                            update_title(hwnd, w.ws.active(), lang_of(w));
                             refresh_recovery(w);
                             let _ = InvalidateRect(Some(hwnd), None, false);
                             return LRESULT(0);
                         }
                         w.ws.active_mut().insert_char(ch, std::time::Instant::now());
-                        update_title(hwnd, w.ws.active());
+                        update_title(hwnd, w.ws.active(), lang_of(w));
                         refresh_recovery(w);
                         let _ = InvalidateRect(Some(hwnd), None, false);
                     }
@@ -2464,7 +2555,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     if matches!(hit, Hit::Body | Hit::ScrollThumb | Hit::ScrollTrack) {
                         if let Some(i) = w.pane_at(x, y).filter(|&i| i != w.layouts.focus()) {
                             focus_pane(w, i);
-                            update_title(hwnd, w.ws.active());
+                            update_title(hwnd, w.ws.active(), lang_of(w));
                             // Las barras de scroll registradas son de antes del cambio de
                             // foco: ese clic solo enfoca.
                             if hit != Hit::Body {
@@ -2483,7 +2574,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             if let Some(i) = w.renderer.tab_scroll_target(hit == Hit::TabScrollLeft) {
                                 w.ws.activate(i);
                                 start_tab_switch_anim(w, hwnd);
-                                update_title(hwnd, w.ws.active());
+                                update_title(hwnd, w.ws.active(), lang_of(w));
                             }
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
@@ -2494,7 +2585,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                                 _ => crate::CloseChoice::Cancel,
                             };
                             answer_close(w, hwnd, choice);
-                            update_title(hwnd, w.ws.active());
+                            update_title(hwnd, w.ws.active(), lang_of(w));
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                         Hit::Overwrite(k) => {
@@ -2562,13 +2653,13 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         crate::Hit::TabClose(i) => {
                             let docs = tab_docs(w, i);
                             request_close(w, hwnd, &docs, false);
-                            update_title(hwnd, w.ws.active());
+                            update_title(hwnd, w.ws.active(), lang_of(w));
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                         crate::Hit::NewTab => {
                             let cfg = w.cfg.borrow().clone();
                             open_tab(w, hwnd, maybe_vim(crate::EditorState::new_empty(), &cfg));
-                            update_title(hwnd, w.ws.active());
+                            update_title(hwnd, w.ws.active(), lang_of(w));
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                         crate::Hit::Menu(i) => {
@@ -2710,7 +2801,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     if hit == Hit::Body {
                         if let Some(i) = w.pane_at(x, y).filter(|&i| i != w.layouts.focus()) {
                             focus_pane(w, i);
-                            update_title(hwnd, w.ws.active());
+                            update_title(hwnd, w.ws.active(), lang_of(w));
                         }
                     }
                     if hit == Hit::Body && w.ws.active().raw.is_none() {
@@ -2809,7 +2900,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     // Alt+1…9: panel N de la pestaña (modo Paneles).
                     if (0x31..=0x39).contains(&vk) && w.splits_on() && (GetKeyState(VK_CONTROL.0 as i32) as u16 & 0x8000) == 0 {
                         focus_pane(w, (vk - 0x31) as usize);
-                        update_title(hwnd, w.ws.active());
+                        update_title(hwnd, w.ws.active(), lang_of(w));
                         let _ = InvalidateRect(Some(hwnd), None, false);
                         return LRESULT(0);
                     }
@@ -2833,7 +2924,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 if wparam.0 == ID_IPC_TIMER {
                     if let Some(w) = ptr.as_mut() {
                         if ipc_tick(w, hwnd) {
-                            update_title(hwnd, w.ws.active());
+                            update_title(hwnd, w.ws.active(), lang_of(w));
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                     }
@@ -2855,6 +2946,9 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         if w.theme_anim.is_some_and(|(_, a)| a.is_done(now)) {
                             w.theme_anim = None;
                         }
+                        if w.accent_anim.is_some_and(|(_, a)| a.is_done(now)) {
+                            w.accent_anim = None;
+                        }
                         w.tab_anims.prune(now);
                         let tour_animating = w.tour.as_ref().is_some_and(|t| t.is_animating(now));
                         let still_animating = w.tab_anims.is_animating()
@@ -2862,6 +2956,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             || w.tab_switch_anim.is_some()
                             || w.chrome_fade_anim.is_some()
                             || w.theme_anim.is_some()
+                            || w.accent_anim.is_some()
                             || tour_animating
                             || path_copied_progress(w).is_some()
                             || notice_progress(w).is_some();
@@ -2897,6 +2992,9 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 LRESULT(0)
             }
             WM_DESTROY => {
+                if let Some(w) = ptr.as_ref() {
+                    save_session(w);
+                }
                 let _ = KillTimer(Some(hwnd), ID_AUTOSAVE_TIMER);
                 let _ = KillTimer(Some(hwnd), ID_IPC_TIMER);
                 let _ = KillTimer(Some(hwnd), ID_ANIM_TIMER);
@@ -3011,7 +3109,7 @@ fn run_menu_item(w: &mut WindowState, hwnd: HWND, menu_idx: usize, item_idx: usi
         MenuCmd::About => w.about_open = true,
     }
     unsafe {
-        update_title(hwnd, w.ws.active());
+        update_title(hwnd, w.ws.active(), lang_of(w));
     }
 }
 
@@ -3024,11 +3122,11 @@ fn toggle_raw(w: &mut WindowState, hwnd: HWND) {
     // Entrar y salir de raw recarga desde disco: con cambios sin guardar se perderían.
     let st = w.ws.active();
     if st.raw.as_ref().is_some_and(|r| r.is_dirty()) {
-        show_notice(w, hwnd, "Guarda antes de salir de raw");
+        show_notice(w, hwnd, tr_w(w, "Guarda antes de salir de raw"));
         return;
     }
     if st.raw.is_none() && st.doc.is_dirty() {
-        show_notice(w, hwnd, "Guarda antes de ver como raw");
+        show_notice(w, hwnd, tr_w(w, "Guarda antes de ver como raw"));
         return;
     }
     let st = w.ws.active_mut();
@@ -3080,7 +3178,7 @@ fn handle_raw_keydown(w: &mut WindowState, hwnd: HWND, vk: u32, action: crate::E
     }
     if matches!(action, crate::EditorAction::Save) {
         if let Some(Err(e)) = w.ws.active_mut().raw.as_mut().map(|raw| raw.save()) {
-            show_notice(w, hwnd, format!("No se pudo guardar: {e}"));
+            show_notice(w, hwnd, format!("{}: {}", tr_w(w, "No se pudo guardar"), tr_w_owned(w, &e.to_string())));
         }
     }
 }
@@ -3129,7 +3227,7 @@ fn handle_prompt_keydown(w: &mut WindowState, hwnd: HWND, vk: u32, mods: Modifie
         if let Some(choice) = crate::CloseChoice::from_vk(vk) {
             w.swallow_char = true;
             answer_close(w, hwnd, choice);
-            unsafe { update_title(hwnd, w.ws.active()) };
+            unsafe { update_title(hwnd, w.ws.active(), lang_of(w)) };
         }
         return;
     }
@@ -3327,7 +3425,7 @@ fn answer_overwrite(w: &mut WindowState, hwnd: HWND, choice: crate::OverwriteCho
                     }
                     notty_io::record_path_use(&path);
                     w.ws.close_prompt();
-                    unsafe { update_title(hwnd, w.ws.active()) };
+                    unsafe { update_title(hwnd, w.ws.active(), lang_of(w)) };
                 }
                 Err(e) => {
                     if let crate::Prompt::Path(p) = &mut w.ws.prompt {
@@ -3429,7 +3527,7 @@ fn commit_path_prompt_with(w: &mut WindowState, hwnd: HWND, force_overwrite: boo
         notty_io::record_path_use(&path);
         w.ws.close_prompt();
         unsafe {
-            update_title(hwnd, w.ws.active());
+            update_title(hwnd, w.ws.active(), lang_of(w));
         }
         if let Some(req) = then_close {
             continue_close(w, hwnd, req);
@@ -3489,7 +3587,7 @@ fn commit_vim_cmdline(w: &mut WindowState, hwnd: HWND) {
         crate::VimCmd::Unknown(_) => {}
     }
     unsafe {
-        update_title(hwnd, w.ws.active());
+        update_title(hwnd, w.ws.active(), lang_of(w));
     }
 }
 

@@ -129,7 +129,7 @@ fn shell_open(target: &str) {
 /// Selector de carpetas nativo (`IFileOpenDialog` con `FOS_PICKFOLDERS`). Si la carpeta
 /// elegida no se llama ya "notty", se instala en una subcarpeta "notty" dentro de ella,
 /// como hacen los instaladores de Windows.
-fn pick_install_folder(hwnd: HWND, current: &Path) -> Option<PathBuf> {
+fn pick_install_folder(hwnd: HWND, current: &Path, lang: notty_config::Lang) -> Option<PathBuf> {
     use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize};
     use windows::Win32::UI::Shell::{FOS_FORCEFILESYSTEM, FOS_PICKFOLDERS, FileOpenDialog, IFileOpenDialog, SHCreateItemFromParsingName, IShellItem, SIGDN_FILESYSPATH};
     unsafe {
@@ -138,7 +138,7 @@ fn pick_install_folder(hwnd: HWND, current: &Path) -> Option<PathBuf> {
             let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER).ok()?;
             let opts = dialog.GetOptions().ok()?;
             dialog.SetOptions(opts | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM).ok()?;
-            let title = to_wide("Carpeta de instalación de notty");
+            let title = to_wide(notty_ui::strings::tr(lang, "Carpeta de instalación de notty"));
             let _ = dialog.SetTitle(PCWSTR(title.as_ptr()));
             if let Some(parent) = current.parent() {
                 let wide = to_wide(&parent.display().to_string());
@@ -172,7 +172,7 @@ fn open_default_apps() {
 /// `PostMessageW(WM_INSTALL_EVENT)` (Task 6 Paso 4). Si `install` devuelve `Err`, se
 /// avisa por separado con `WM_INSTALL_FAILED` para que `wndproc` distinga 1602/1618
 /// del resto (ver `ui::State::on_install_failed`).
-fn spawn_install(hwnd: HWND, toggles: FeatureToggles, install_folder: PathBuf) {
+fn spawn_install(hwnd: HWND, toggles: FeatureToggles, install_folder: PathBuf, lang: notty_config::Lang) {
     let send_hwnd = SendHwnd(hwnd);
     std::thread::spawn(move || {
         // `let send_hwnd = send_hwnd;` fuerza a que la clausura capture la variable
@@ -187,7 +187,7 @@ fn spawn_install(hwnd: HWND, toggles: FeatureToggles, install_folder: PathBuf) {
         };
         if MSI_BYTES.is_empty() {
             fail(
-                "Este notty-setup se compiló sin el paquete MSI dentro (falta installer\\notty.msi al compilar). Construye el MSI con tools/release.ps1 y vuelve a compilar notty-setup.".into(),
+                notty_ui::strings::tr(lang, "Este notty-setup se compiló sin el paquete MSI dentro (falta installer\\notty.msi al compilar). Construye el MSI con tools/release.ps1 y vuelve a compilar notty-setup.").into(),
                 1620,
             );
             return;
@@ -195,7 +195,7 @@ fn spawn_install(hwnd: HWND, toggles: FeatureToggles, install_folder: PathBuf) {
         let msi_path = match extract_embedded_msi() {
             Ok(p) => p,
             Err(e) => {
-                fail(format!("No se pudo extraer el paquete a la carpeta temporal: {e}"), 1619);
+                fail(format!("{}: {e}", notty_ui::strings::tr(lang, "No se pudo extraer el paquete a la carpeta temporal")), 1619);
                 return;
             }
         };
@@ -299,7 +299,8 @@ fn run_wizard(check_for_newer: bool) -> Result<()> {
 
         let (x, y, w_px, h_px, dpi) = centered_on_cursor_monitor(WIN_W, WIN_H);
 
-        let title = to_wide("Instalar notty");
+        let lang = notty_ui::lang::detect_system_lang();
+        let title = to_wide(notty_ui::strings::tr(lang, "Instalar notty"));
         // Ventana con barra de título nativa (que `WM_NCCALCSIZE` quita) en vez de
         // `WS_POPUP`: así Windows le da su animación de apertura y de minimizar.
         let hwnd = CreateWindowExW(
@@ -319,6 +320,7 @@ fn run_wizard(check_for_newer: bool) -> Result<()> {
         setup_chrome(hwnd);
 
         let renderer = notty_ui::Renderer::new(hwnd, dpi)?;
+        renderer.set_lang(lang);
         let animations_enabled = notty_ui::window::system_animations_enabled();
         let state = Box::new(State::new(renderer, animations_enabled));
         let ptr = Box::into_raw(state);
@@ -640,7 +642,7 @@ fn back_to_options(st: &mut State) {
 fn start_install(hwnd: HWND, st: &mut State) {
     st.reset_install();
     st.go_to(Step::Installing);
-    spawn_install(hwnd, st.toggles, st.install_folder.clone());
+    spawn_install(hwnd, st.toggles, st.install_folder.clone(), st.renderer.lang());
     ensure_anim_timer(st, hwnd);
 }
 
@@ -663,7 +665,7 @@ fn open_notty_and_exit(hwnd: HWND, st: &mut State) {
 fn handle_click(hwnd: HWND, st: &mut State, hit: Hit) {
     match hit {
         Hit::ChangeFolder => {
-            if let Some(folder) = pick_install_folder(hwnd, &st.install_folder) {
+            if let Some(folder) = pick_install_folder(hwnd, &st.install_folder, st.renderer.lang()) {
                 st.install_folder = folder;
             }
         }
@@ -722,7 +724,8 @@ fn run_update_screen(from: &str, to: &str, relaunch: bool) -> Result<()> {
 
         let (x, y, w_px, h_px, dpi) = centered_on_cursor_monitor(UPDATE_W, UPDATE_H);
 
-        let title = to_wide("Actualizar notty");
+        let lang = notty_ui::lang::detect_system_lang();
+        let title = to_wide(notty_ui::strings::tr(lang, "Actualizar notty"));
         // `WS_THICKFRAME` para poder redimensionarla; su marco lo quita `WM_NCCALCSIZE`.
         let hwnd = CreateWindowExW(
             Default::default(),
@@ -748,6 +751,7 @@ fn run_update_screen(from: &str, to: &str, relaunch: bool) -> Result<()> {
         let _ = DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, &border as *const _ as *const _, std::mem::size_of::<u32>() as u32);
 
         let renderer = notty_ui::Renderer::new(hwnd, dpi)?;
+        renderer.set_lang(lang);
         let state = Box::new(UpdateState {
             renderer,
             from: from.to_string(),
@@ -821,7 +825,7 @@ fn paint_update(st: &mut UpdateState) {
     let mut hits = Vec::new();
 
     r.begin_paint(pal.win);
-    draw_titlebar(r, "Actualizar notty", w, st.hover, &mut hits);
+    draw_titlebar(r, r.tr("Actualizar notty"), w, st.hover, &mut hits);
 
     // `.body{padding:14px 32px 0}` (menos margen si la ventana es estrecha). Recortado
     // encima del pie para que nada lo pise aunque la ventana sea baja.
@@ -831,14 +835,14 @@ fn paint_update(st: &mut UpdateState) {
     let foot_top = h - notty_setup::ui::FOOT_H;
     r.push_clip(Rect::new(0.0, TITLEBAR_H, w, foot_top));
     let mut y = TITLEBAR_H + 14.0;
-    adaptive::text_fit(r, "Actualización disponible", &r.fonts().ui_20_semibold, Rect::new(x, y, right, y + 27.0), pal.text);
+    adaptive::text_fit(r, r.tr("Actualización disponible"), &r.fonts().ui_20_semibold, Rect::new(x, y, right, y + 27.0), pal.text);
     y += 27.0 + 6.0;
 
     // `.ver`: "1.2.0 → <b>1.3.0</b> · firma verificada ✓"
     let mono = &r.fonts().mono_12;
     let bold = &r.fonts().mono_12_semibold;
     let head = format!("{} → ", st.from);
-    let tail = " · firma verificada ✓";
+    let tail = r.tr(" · firma verificada ✓");
     let head_w = r.measure(&head, mono);
     let to_w = r.measure(&st.to, bold).min((right - x - head_w).max(0.0));
     r.text(&head, mono, Rect::new(x, y, right, y + 18.0), pal.text_2);
@@ -850,13 +854,14 @@ fn paint_update(st: &mut UpdateState) {
     // `.notes{padding:10px 12px;line-height:1.65}`
     let line_h = 12.0 * 1.65;
     let text_w = right - x - 24.0;
-    let notes_h = r.measure_wrapped(UPDATE_NOTES, &r.fonts().ui_12, text_w, Some(line_h)) + 20.0;
-    let notes = Rect::new(x, y, right, y + notes_h);
-    r.fill_round(notes, 6.0, pal.field_bg);
-    r.stroke_round_rect(notes, 6.0, 1.0, pal.foot_border);
-    r.text_wrapped(UPDATE_NOTES, &r.fonts().ui_12, Rect::new(x + 12.0, y + 10.0, right - 12.0, notes.bottom), pal.scene_text, Some(line_h));
+    let notes = r.tr(UPDATE_NOTES);
+    let notes_h = r.measure_wrapped(notes, &r.fonts().ui_12, text_w, Some(line_h)) + 20.0;
+    let notes_r = Rect::new(x, y, right, y + notes_h);
+    r.fill_round(notes_r, 6.0, pal.field_bg);
+    r.stroke_round_rect(notes_r, 6.0, 1.0, pal.foot_border);
+    r.text_wrapped(notes, &r.fonts().ui_12, Rect::new(x + 12.0, y + 10.0, right - 12.0, notes_r.bottom), pal.scene_text, Some(line_h));
     y += notes_h + 10.0;
-    let hint = "Tus pestañas y borradores se restaurarán al terminar.";
+    let hint = r.tr("Tus pestañas y borradores se restaurarán al terminar.");
     let hint_h = r.measure_wrapped(hint, &r.fonts().ui_11_5, right - x, None).max(16.0);
     r.text_wrapped(hint, &r.fonts().ui_11_5, Rect::new(x, y, right, y + hint_h), pal.text_3, None);
     r.pop_clip();
@@ -867,14 +872,14 @@ fn paint_update(st: &mut UpdateState) {
     r.fill(foot, pal.foot);
     r.stroke_line(0.0, foot.top + 0.5, w, foot.top + 0.5, 1.0, pal.foot_border);
     if !st.installing {
-        let update_btn = primary_button(r, foot.right - 20.0, cy, "Actualizar", true, st.hover == Hit::Next);
-        let later = secondary_button(r, update_btn.left - 6.0, cy, "Más tarde", st.hover == Hit::Back);
+        let update_btn = primary_button(r, foot.right - 20.0, cy, r.tr("Actualizar"), true, st.hover == Hit::Next);
+        let later = secondary_button(r, update_btn.left - 6.0, cy, r.tr("Más tarde"), st.hover == Hit::Back);
         hits.push((later, Hit::Back));
         hits.push((update_btn, Hit::Next));
     } else if let ui::InstallPhase::Running { progress, .. } = &st.install {
         let pct = *progress as f32 / 100.0;
         r.fill(Rect::new(0.0, foot.top, w * pct, foot.top + 2.0), pal.accent);
-        r.text(&format!("Actualizando… {progress} %"), &r.fonts().ui_12, Rect::new(20.0, foot.top, foot.right - 20.0, foot.bottom), pal.text_3);
+        r.text(&format!("{}… {progress} %", r.tr("Actualizando")), &r.fonts().ui_12, Rect::new(20.0, foot.top, foot.right - 20.0, foot.bottom), pal.text_3);
     }
 
     r.end_paint();
@@ -951,7 +956,7 @@ extern "system" fn update_wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                         Hit::Next => {
                             st.installing = true;
                             let install_folder = PathBuf::from(r"C:\Program Files\notty");
-                            spawn_install(hwnd, FeatureToggles::default(), install_folder);
+                            spawn_install(hwnd, FeatureToggles::default(), install_folder, st.renderer.lang());
                         }
                         _ => {}
                     }
