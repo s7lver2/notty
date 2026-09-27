@@ -1070,6 +1070,7 @@ impl Renderer {
         self.recover_device();
         self.hits.clear();
         self.pending_dropdown = None;
+        let lang = crate::lang::resolve(ui.lang);
         let pal_owned = match view.theme_from {
             Some((from_dark, t)) => theme::palette(from_dark, ui.accent).mix(&theme::palette(view.dark, ui.accent), t),
             None => theme::palette(view.dark, ui.accent),
@@ -1117,7 +1118,7 @@ impl Renderer {
                 full.menubar = Rect::new(0.0, frame.menubar.bottom - layout::MENUBAR_H, w, frame.menubar.bottom);
                 self.push_clip(frame.menubar);
                 self.set_fade(k);
-                self.draw_menubar(view, pal, full);
+                self.draw_menubar(view, pal, full, lang);
                 self.set_fade(1.0);
                 self.pop_clip();
             }
@@ -1330,7 +1331,7 @@ impl Renderer {
                     vim: state.vim.is_some(),
                     raw: is_raw,
                 };
-                self.draw_dropdown(crate::menu::MENUS[i].items, x, top, checks, view, pal);
+                self.draw_dropdown(crate::menu::MENUS[i].items, x, top, checks, view, pal, lang);
             }
 
             if let Some(p) = self.path_copied {
@@ -1500,14 +1501,15 @@ impl Renderer {
 
     /// Barra de menús (`.menubar`): "Archivo Editar Buscar Ver Ayuda".
     #[allow(unused_unsafe)]
-    unsafe fn draw_menubar(&mut self, view: &ViewState, pal: &theme::Palette, frame: layout::Frame) {
+    unsafe fn draw_menubar(&mut self, view: &ViewState, pal: &theme::Palette, frame: layout::Frame, lang: notty_config::Lang) {
         unsafe {
             self.fill(frame.menubar, pal.chrome);
             let mut x = layout::MENUBAR_PAD_X;
             let top = frame.menubar.top + (layout::MENUBAR_H - 22.0) / 2.0;
             let mut open_x = None;
             for (i, def) in crate::menu::MENUS.iter().enumerate() {
-                let w = self.measure(def.name, &self.fonts.ui_12_5) + layout::MENU_BTN_PAD_X * 2.0;
+                let name = crate::strings::tr(lang, def.name);
+                let w = self.measure(name, &self.fonts.ui_12_5) + layout::MENU_BTN_PAD_X * 2.0;
                 if x + w > frame.menubar.right - layout::MENUBAR_PAD_X {
                     break;
                 }
@@ -1521,7 +1523,7 @@ impl Renderer {
                 // izquierdo y todo el relleno se amontona a la derecha, en vez de quedar
                 // repartido a los dos lados como el resto de botones de la app.
                 let label_r = Rect::new(r.left + layout::MENU_BTN_PAD_X, r.top, r.right - layout::MENU_BTN_PAD_X, r.bottom);
-                self.text(def.name, &self.fonts.ui_12_5, label_r, pal.text);
+                self.text(name, &self.fonts.ui_12_5, label_r, pal.text);
                 self.hits.push((r, Hit::Menu(i)));
                 if view.open_menu == Some(i) {
                     open_x = Some(x);
@@ -1543,6 +1545,7 @@ impl Renderer {
         checks: crate::menu::MenuChecks,
         view: &ViewState,
         pal: &theme::Palette,
+        lang: notty_config::Lang,
     ) {
         use crate::menu::MenuItem;
         let keys = self.menu_keys.clone();
@@ -1550,6 +1553,7 @@ impl Renderer {
             .iter()
             .map(|it| match it {
                 MenuItem::Entry { label, shortcut, cmd } => {
+                    let label = crate::strings::tr(lang, label);
                     let shortcut = keys.iter().find(|(c, _)| c == cmd).map(|(_, s)| s.as_str()).unwrap_or(shortcut);
                     MenuRow { label, shortcut, enabled: true, sep: false, check: checks.state_of(*cmd) }
                 }

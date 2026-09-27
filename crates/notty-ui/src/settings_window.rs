@@ -1132,7 +1132,8 @@ fn paint(st: &mut State) {
     r.set_transform(base);
 
     let cfg_ref = st.cfg.borrow();
-    let mut ui = Ui::new(r, pal, &mut st.tw, &mut st.hits, &st.fmts, st.hover, st.pressed, now, base);
+    let lang = crate::lang::resolve(cfg_ref.ui.lang);
+    let mut ui = Ui::new(r, pal, &mut st.tw, &mut st.hits, &st.fmts, st.hover, st.pressed, now, base, lang);
 
     // Barra de título.
     let titlebar = Rect::new(0.0, 0.0, w, TITLEBAR_H);

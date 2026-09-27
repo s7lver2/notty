@@ -3,7 +3,8 @@
 //! pasa a `Config` cuando se toca algo. No sabe dibujar ni de Win32/Direct2D.
 
 use notty_config::{
-    AccentColor, Config, Files, FontFamily, HotkeyMechanism, MenuBar, OnCloseUnsaved, Preset, TabsPosition, TempMode, Theme,
+    AccentColor, Config, Files, FontFamily, HotkeyMechanism, Lang, MenuBar, OnCloseUnsaved, Preset, TabsPosition, TempMode,
+    Theme,
 };
 use notty_input::Command;
 
@@ -134,6 +135,7 @@ pub enum SettingKey {
     AccentColor,
     ReopenPrevious,
     TabIcons,
+    Lang,
 }
 
 /// El valor elegido; `apply` decide qué campo de `Config` toca según `SettingKey`.
@@ -150,6 +152,7 @@ pub enum SettingValue {
     FontFamily(FontFamily),
     OnCloseUnsaved(OnCloseUnsaved),
     AccentColor(AccentColor),
+    Lang(Lang),
 }
 
 /// Opciones de un selector: `(etiqueta, valor)`.
@@ -212,6 +215,12 @@ pub const ACCENT_OPTS: Options = &[
     ("Rojo", SettingValue::AccentColor(AccentColor::Rojo)),
     ("Naranja", SettingValue::AccentColor(AccentColor::Naranja)),
     ("Amarillo", SettingValue::AccentColor(AccentColor::Amarillo)),
+];
+
+pub const LANG_OPTS: Options = &[
+    ("Auto", SettingValue::Lang(Lang::Auto)),
+    ("Español", SettingValue::Lang(Lang::Es)),
+    ("English", SettingValue::Lang(Lang::En)),
 ];
 
 pub const HOTKEY_OPTS: Options = &[
@@ -384,6 +393,10 @@ pub fn apply(cfg: &mut Config, key: SettingKey, value: SettingValue) {
             cfg.ui.tab_icons = b;
             return;
         }
+        (SettingKey::Lang, SettingValue::Lang(l)) => {
+            cfg.ui.lang = l;
+            return;
+        }
         _ => {}
     }
     match (key, value) {
@@ -437,6 +450,7 @@ pub fn selected_index(cfg: &Config, key: SettingKey, options: Options) -> Option
         SettingKey::HotkeyMechanism => SettingValue::HotkeyMechanism(cfg.hotkey.mechanism),
         SettingKey::FontFamily => SettingValue::FontFamily(cfg.ui.font_family),
         SettingKey::AccentColor => SettingValue::AccentColor(cfg.ui.accent),
+        SettingKey::Lang => SettingValue::Lang(cfg.ui.lang),
         _ => return None,
     };
     options.iter().position(|(_, v)| *v == current)
@@ -454,6 +468,7 @@ pub fn options_for(key: SettingKey) -> Options {
         SettingKey::OnCloseUnsaved => ON_CLOSE_OPTS,
         SettingKey::HotkeyMechanism => HOTKEY_OPTS,
         SettingKey::AccentColor => ACCENT_OPTS,
+        SettingKey::Lang => LANG_OPTS,
         _ => &[],
     }
 }

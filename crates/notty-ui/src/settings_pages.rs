@@ -188,6 +188,8 @@ fn item(ui: &mut Ui, d: &PageData, j: usize) {
 }
 
 fn header(ui: &mut Ui, x: f32, y: f32, w: f32, title: &str, hint: &str) -> f32 {
+    let title = ui.tr(title);
+    let hint = ui.tr(hint);
     ui.text(title, 20.0, true, Rect::new(x, y, x + w, y + 28.0), ui.pal.text);
     if !hint.is_empty() {
         let hw = ui.measure(hint, 12.0, false);
@@ -209,23 +211,27 @@ fn crumb_header(ui: &mut Ui, d: &PageData, x: f32, y: f32, w: f32) -> f32 {
     ui.icon(icon::ATRAS, x + 14.0 - 3.0 * h, y + 14.0, 16.0, 1.8, c);
     ui.hit(back, Hit::Back);
     let cx = x + 34.0;
-    let cw = ui.measure(parent.name(), 20.0, true);
+    let parent_name = ui.tr(parent.name());
+    let cw = ui.measure(parent_name, 20.0, true);
     let ch = ui.hover_t(Hit::Crumb, 150);
     let crumb = Rect::new(cx, y, cx + cw, y + 28.0);
-    ui.text(parent.name(), 20.0, true, crumb, ui.pal.text_2.mix(ui.pal.text, ch));
+    ui.text(parent_name, 20.0, true, crumb, ui.pal.text_2.mix(ui.pal.text, ch));
     ui.hit(crumb, Hit::Crumb);
     ui.icon(icon::CHEVRON, crumb.right + 13.0, y + 14.0, 14.0, 2.0, ui.pal.text_3);
-    ui.text(d.page.name(), 20.0, true, Rect::new(crumb.right + 26.0, y, x + w, y + 28.0), ui.pal.text);
+    let page_name = ui.tr(d.page.name());
+    ui.text(page_name, 20.0, true, Rect::new(crumb.right + 26.0, y, x + w, y + 28.0), ui.pal.text);
     y + 28.0
 }
 
 fn label(ui: &mut Ui, x: f32, y: f32, w: f32, s: &str) -> f32 {
+    let s = ui.tr(s);
     ui.text(s, 12.0, false, Rect::new(x, y, x + w, y + 16.0), ui.pal.text_2);
     y + 16.0
 }
 
 /// `.grp`: cabecera de grupo en versalitas.
 fn group(ui: &mut Ui, x: f32, y: f32, w: f32, s: &str) -> f32 {
+    let s = ui.tr(s);
     let y = y + 12.0;
     ui.text(&s.to_uppercase(), 11.0, false, Rect::new(x + 2.0, y, x + w, y + 16.0), ui.pal.text_3);
     y + 18.0
@@ -234,10 +240,13 @@ fn group(ui: &mut Ui, x: f32, y: f32, w: f32, s: &str) -> f32 {
 const DESC_LH: f32 = 16.0;
 
 fn desc_h(ui: &Ui, w: f32, desc: &str) -> f32 {
+    let desc = ui.tr(desc);
     if desc.is_empty() { 0.0 } else { 2.0 + ui.r.measure_wrapped(desc, &ui.font(12.0, false), w, Some(DESC_LH)).max(DESC_LH) }
 }
 
 fn title_desc(ui: &Ui, x: f32, y: f32, w: f32, title: &str, desc: &str) {
+    let title = ui.tr(title);
+    let desc = ui.tr(desc);
     ui.text(title, 13.0, false, Rect::new(x, y, x + w, y + 17.0), ui.pal.text);
     if !desc.is_empty() {
         let dh = desc_h(ui, w, desc) - 2.0;
@@ -294,7 +303,7 @@ fn toggle_row(ui: &mut Ui, x: f32, y: f32, w: f32, cfg: &Config, key: SettingKey
 /// Fila con un `.seg` a la derecha; si no cabe junto al título, baja debajo.
 fn seg_row(ui: &mut Ui, x: f32, y: f32, w: f32, cfg: &Config, key: SettingKey, title: &str) -> f32 {
     let opts = model::options_for(key);
-    let labels: Vec<&str> = opts.iter().map(|(l, _)| *l).collect();
+    let labels: Vec<&str> = opts.iter().map(|(l, _)| ui.tr(l)).collect();
     let sel = model::selected_index(cfg, key, opts);
     let nat = ui.seg_natural_w(&labels);
     let title_w = ui.measure(title, 13.0, false);
@@ -322,7 +331,7 @@ fn link_row(ui: &mut Ui, x: f32, y: f32, w: f32, hit: Hit, title: &str, desc: &s
     let g = row(ui, x, y, w, hit, 0.0, if mono_desc { "" } else { desc }, 16.0, 16.0);
     let ty = if mono_desc { g.rect.top + (g.rect.height() - 35.0) / 2.0 } else { text_y(&g, desc, ui) };
     if mono_desc {
-        ui.text(title, 13.0, false, Rect::new(g.text_x, ty, g.text_x + g.text_w, ty + 17.0), ui.pal.text);
+        ui.text(ui.tr(title), 13.0, false, Rect::new(g.text_x, ty, g.text_x + g.text_w, ty + 17.0), ui.pal.text);
         let f = ui.mono(ui.r.mono_family(), 12.0);
         ui.r.text(desc, &f, Rect::new(g.text_x, ty + 19.0, g.text_x + g.text_w, ty + 35.0), ui.pal.text_2);
     } else {
@@ -381,6 +390,8 @@ fn apariencia(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     y = label(ui, x, y, w, "Color de acento") + 8.0;
     let sel = model::selected_index(cfg, SettingKey::AccentColor, model::ACCENT_OPTS);
     y = swatches(ui, x, y, w, SettingKey::AccentColor, model::ACCENT_OPTS, sel) + 16.0;
+    y = seg_row(ui, x, y, w, cfg, SettingKey::Lang, "Idioma") + 4.0;
+    y = label(ui, x, y, w, "El idioma de la interfaz. \"Auto\" sigue el de Windows.") + 12.0;
     blk_end(ui);
 
     blk(ui, d, 5);
@@ -432,7 +443,15 @@ fn apariencia(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     let hit = Hit::Toggle(key);
     let total = crate::syntax::LANGS.len();
     let active = crate::syntax::LANGS.iter().filter(|l| !cfg.syntax_disabled.iter().any(|d| d == l.id)).count();
-    let desc_s = if cfg.ui.syntax_highlight { format!("{active} de {total} lenguajes, según la extensión del archivo") } else { "Desactivado".to_string() };
+    let desc_s = if cfg.ui.syntax_highlight {
+        if ui.lang == notty_config::Lang::En {
+            format!("{active} of {total} languages, by the file's extension")
+        } else {
+            format!("{active} de {total} lenguajes, según la extensión del archivo")
+        }
+    } else {
+        ui.tr("Desactivado").to_string()
+    };
     let desc = desc_s.as_str();
     let editar_w = ui.measure("Editar", 12.0, false);
     let g = row(ui, x, y, w, hit, 34.0, desc, 40.0 + 14.0 + editar_w, 22.0);
@@ -537,7 +556,7 @@ fn cards(
         thumb(ui, j, tr, hover);
         ui.pop_xf();
         ui.r.pop_clip();
-        ui.text(name, 12.0, false, Rect::new(r.left + 10.0, tr.bottom + 8.0, r.right - 8.0, tr.bottom + 24.0), ui.pal.text);
+        ui.text(ui.tr(name), 12.0, false, Rect::new(r.left + 10.0, tr.bottom + 8.0, r.right - 8.0, tr.bottom + 24.0), ui.pal.text);
         ui.card_end(r, hit, selected);
     }
     y + h
@@ -769,17 +788,18 @@ fn fuentes(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     let px = model::font_px(cfg);
     // Controles: muestra, buscador, tamaño.
     let f12 = ui.font(12.0, false);
-    let size_w = 8.0 + ui.measure("Tamaño", 12.0, false) + 8.0 + 80.0 + 8.0 + 44.0;
+    let tamano = ui.tr("Tamaño");
+    let size_w = 8.0 + ui.measure(tamano, 12.0, false) + 8.0 + 80.0 + 8.0 + 44.0;
     let search_w = 140.0;
     let sample_w = (w - size_w - search_w - 24.0).max(120.0);
     let row_h = 30.0;
     let sample_r = Rect::new(x, y, x + sample_w, y + row_h);
-    ui.input(sample_r, InputId::Sample, &d.inputs.sample, d.focus == Some(InputId::Sample), d.caret_on, "Texto de muestra", &f12, false);
+    ui.input(sample_r, InputId::Sample, &d.inputs.sample, d.focus == Some(InputId::Sample), d.caret_on, ui.tr("Texto de muestra"), &f12, false);
     let search_r = Rect::new(sample_r.right + 12.0, y, sample_r.right + 12.0 + search_w, y + row_h);
-    ui.input(search_r, InputId::Search, &d.inputs.search, d.focus == Some(InputId::Search), d.caret_on, "Buscar fuente", &f12, false);
+    ui.input(search_r, InputId::Search, &d.inputs.search, d.focus == Some(InputId::Search), d.caret_on, ui.tr("Buscar fuente"), &f12, false);
     let mut sx = search_r.right + 12.0;
-    ui.text("Tamaño", 12.0, false, Rect::new(sx, y, sx + 60.0, y + row_h), ui.pal.text_2);
-    sx += ui.measure("Tamaño", 12.0, false) + 8.0;
+    ui.text(tamano, 12.0, false, Rect::new(sx, y, sx + 60.0, y + row_h), ui.pal.text_2);
+    sx += ui.measure(tamano, 12.0, false) + 8.0;
     let track = Rect::new(sx, y + row_h / 2.0 - 2.0, sx + 80.0, y + row_h / 2.0 + 2.0);
     slider(ui, track, px);
     let fm = ui.mono(ui.r.mono_family(), 12.0);
@@ -789,11 +809,11 @@ fn fuentes(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     let shown = filtered_fonts(d.fonts, &d.inputs.search.text);
     let current = cfg.ui.font_family.primary_name();
     if d.fonts.is_empty() {
-        ui.text("Buscando fuentes…", 12.0, false, Rect::new(x, y, x + w, y + 20.0), ui.pal.text_3);
+        ui.text(ui.tr("Buscando fuentes…"), 12.0, false, Rect::new(x, y, x + w, y + 20.0), ui.pal.text_3);
         return y + 20.0;
     }
     if shown.is_empty() {
-        ui.text("Ninguna fuente monoespaciada coincide con la búsqueda.", 12.0, false, Rect::new(x, y, x + w, y + 20.0), ui.pal.text_3);
+        ui.text(ui.tr("Ninguna fuente monoespaciada coincide con la búsqueda."), 12.0, false, Rect::new(x, y, x + w, y + 20.0), ui.pal.text_3);
         return y + 20.0;
     }
     let sample = if d.inputs.sample.text.is_empty() { "fn main() -> Ok(0O 1lI) != {}" } else { d.inputs.sample.text.as_str() };
@@ -823,6 +843,7 @@ fn fuentes(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
         tx += nw + 8.0;
         for (tag, on) in [("Ligaduras", LIGATURE_FONTS.contains(&name.as_str())), ("De Windows", WINDOWS_FONTS.contains(&name.as_str()))] {
             if on {
+                let tag = ui.tr(tag);
                 let tw = ui.measure(tag, 11.0, false) + 12.0;
                 let tr = Rect::new(tx, y + 12.0, tx + tw, y + 28.0);
                 ui.r.fill_round(tr, 4.0, ui.pal.chrome);
@@ -886,8 +907,9 @@ fn ligaduras(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     // "Activadas" + interruptor a la derecha de la cabecera.
     let tr = Rect::new(x + w - 40.0, y - 25.0, x + w, y - 3.0);
     ui.toggle(tr, Hit::Toggle(key), on);
-    let aw = ui.measure("Activadas", 12.0, false);
-    ui.text("Activadas", 12.0, false, Rect::new(tr.left - 10.0 - aw, tr.top, tr.left - 8.0, tr.bottom), ui.pal.text_2);
+    let activadas = ui.tr("Activadas");
+    let aw = ui.measure(activadas, 12.0, false);
+    ui.text(activadas, 12.0, false, Rect::new(tr.left - 10.0 - aw, tr.top, tr.left - 8.0, tr.bottom), ui.pal.text_2);
     y += 14.0;
 
     // Tal como lo escribes / lo ves.
@@ -899,11 +921,11 @@ fn ligaduras(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     ui.r.fill_round(Rect::new(card.left + 1.0, card.top + 1.0, card.right - 1.0, card.bottom - 1.0), 7.0, ui.pal.cmd);
     let mut cy = card.top + 14.0;
     let lx = x + 16.0;
-    ui.text("Tal como lo escribes", 11.0, false, Rect::new(lx, cy, x + w, cy + 16.0), ui.pal.text_3);
+    ui.text(ui.tr("Tal como lo escribes"), 11.0, false, Rect::new(lx, cy, x + w, cy + 16.0), ui.pal.text_3);
     cy += 24.0;
     ui.r.text(LIG_SAMPLE, &f14, Rect::new(lx, cy, x + w, cy + 20.0), ui.pal.text_2);
     cy += 28.0;
-    ui.text("Tal como lo ves", 11.0, false, Rect::new(lx, cy, x + w, cy + 16.0), ui.pal.text_3);
+    ui.text(ui.tr("Tal como lo ves"), 11.0, false, Rect::new(lx, cy, x + w, cy + 16.0), ui.pal.text_3);
     cy += 24.0;
     let chars: Vec<char> = LIG_SAMPLE.chars().collect();
     let mut sorted: Vec<&crate::ligature::Entry> = entries.iter().collect();
@@ -955,10 +977,11 @@ fn ligaduras(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     let gl_r = Rect::new(seq_r.right + 32.0, y, seq_r.right + 102.0, y + 30.0);
     ui.input(gl_r, InputId::LigGlyph, &d.inputs.glyph, d.focus == Some(InputId::LigGlyph), d.caret_on, "▷", &f14, true);
     let can = model::can_add_ligature(&d.inputs.seq.text, &d.inputs.glyph.text).is_ok();
-    let bw = ui.button_w("Añadir ligadura", true);
+    let anadir = ui.tr("Añadir ligadura");
+    let bw = ui.button_w(anadir, true);
     let br = Rect::new(gl_r.right + 8.0, y - 1.0, gl_r.right + 8.0 + bw, y + 31.0);
-    ui.button(br, "Añadir ligadura", true, can, Hit::LigAdd);
-    let note = "Se guarda en config.toml";
+    ui.button(br, anadir, true, can, Hit::LigAdd);
+    let note = ui.tr("Se guarda en config.toml");
     if br.right + 14.0 + ui.measure(note, 12.0, false) < x + w {
         ui.text(note, 12.0, false, Rect::new(br.right + 14.0, y, x + w, y + 30.0), ui.pal.text_3);
     }
@@ -990,7 +1013,7 @@ fn ligaduras(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
         ui.push_xf(Matrix3x2::scale_around(1.0 + 0.35 * gs, 1.0 + 0.35 * gs, gc));
         ui.r.text_center(&e.glyph.to_string(), &f18, Rect::new(cx + 76.0, r.top, cx + 104.0, r.bottom), ui.pal.accent);
         ui.pop_xf();
-        ui.text(if e.builtin { "De serie" } else { "Propia" }, 11.0, false, Rect::new(cx + 114.0, r.top, r.right - 80.0, r.bottom), ui.pal.text_3);
+        ui.text(if e.builtin { ui.tr("De serie") } else { ui.tr("Propia") }, 11.0, false, Rect::new(cx + 114.0, r.top, r.right - 80.0, r.bottom), ui.pal.text_3);
         let tr = Rect::new(r.right - 52.0, mid - 11.0, r.right - 12.0, mid + 11.0);
         if !e.builtin {
             let del = Hit::LigDelete(j as u16);
@@ -1022,8 +1045,9 @@ fn sintaxis(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     let mut y = crumb_header(ui, d, x, top, w);
     let tr = Rect::new(x + w - 40.0, y - 25.0, x + w, y - 3.0);
     ui.toggle(tr, Hit::Toggle(key), on);
-    let aw = ui.measure("Activado", 12.0, false);
-    ui.text("Activado", 12.0, false, Rect::new(tr.left - 10.0 - aw, tr.top, tr.left - 8.0, tr.bottom), pal.text_2);
+    let activado = ui.tr("Activado");
+    let aw = ui.measure(activado, 12.0, false);
+    ui.text(activado, 12.0, false, Rect::new(tr.left - 10.0 - aw, tr.top, tr.left - 8.0, tr.bottom), pal.text_2);
     y += 14.0;
 
     // Vista previa del lenguaje elegido, con los colores de verdad.
@@ -1094,6 +1118,7 @@ fn sintaxis(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     ];
     let mut lx = x + 2.0;
     for (name, c) in legend {
+        let name = ui.tr(name);
         let nw = ui.measure(name, 11.0, false);
         if lx + 14.0 + nw > x + w {
             break;
@@ -1106,11 +1131,18 @@ fn sintaxis(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
 
     // Contador + activar/desactivar todos.
     let active = LANGS.iter().filter(|l| !cfg.syntax_disabled.iter().any(|id| id == l.id)).count();
-    ui.text(&format!("{active} de {} lenguajes activos", LANGS.len()), 12.0, false, Rect::new(x, y, x + w, y + 18.0), pal.text_2);
-    let all_w = ui.measure("Desactivar todos", 12.0, false);
-    ui.more(x + w - all_w, y + 9.0, "Desactivar todos", Hit::LangAll(false));
-    let on_w = ui.measure("Activar todos", 12.0, false);
-    ui.more(x + w - all_w - 16.0 - on_w, y + 9.0, "Activar todos", Hit::LangAll(true));
+    let count_label = if ui.lang == notty_config::Lang::En {
+        format!("{active} of {} languages active", LANGS.len())
+    } else {
+        format!("{active} de {} lenguajes activos", LANGS.len())
+    };
+    ui.text(&count_label, 12.0, false, Rect::new(x, y, x + w, y + 18.0), pal.text_2);
+    let desactivar_todos = ui.tr("Desactivar todos");
+    let all_w = ui.measure(desactivar_todos, 12.0, false);
+    ui.more(x + w - all_w, y + 9.0, desactivar_todos, Hit::LangAll(false));
+    let activar_todos = ui.tr("Activar todos");
+    let on_w = ui.measure(activar_todos, 12.0, false);
+    ui.more(x + w - all_w - 16.0 - on_w, y + 9.0, activar_todos, Hit::LangAll(true));
     y += 18.0 + 10.0;
 
     // Cuadrícula: clic en la celda = verla arriba; interruptor = encender/apagar.
@@ -1165,7 +1197,7 @@ fn ventana(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     let rect = Rect::new(x, y, x + w, y + 12.0 + 17.0 + dh + 10.0 + 38.0 + 12.0);
     ui.row_bg(rect, Hit::None, 6.0);
     title_desc(ui, x + 14.0, y + 12.0, w - 28.0, "Varios archivos", desc);
-    let labels: Vec<&str> = model::FILES_OPTS.iter().map(|(l, _)| *l).collect();
+    let labels: Vec<&str> = model::FILES_OPTS.iter().map(|(l, _)| ui.tr(l)).collect();
     ui.big_seg(Rect::new(x + 14.0, rect.bottom - 12.0 - 38.0, x + w - 14.0, rect.bottom - 12.0), SettingKey::Files, &labels, sel);
     y = rect.bottom + 16.0;
     blk_end(ui);
@@ -1349,9 +1381,9 @@ fn teclado(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     ui.pop_xf();
     let tx = ic.right + 12.0;
     let tw = x + w - 16.0 - 52.0 - tx;
-    ui.text("Modo vim siempre", 13.0, false, Rect::new(tx, y + 20.0, tx + tw, y + 37.0), ui.pal.text);
+    ui.text(ui.tr("Modo vim siempre"), 13.0, false, Rect::new(tx, y + 20.0, tx + tw, y + 37.0), ui.pal.text);
     // Descripción con las teclas como `.kbd` si cabe en una línea.
-    let parts = ["Cada ventana arranca en modo vim. ", " para insertar, ", " para salir."];
+    let parts = [ui.tr("Cada ventana arranca en modo vim. "), ui.tr(" para insertar, "), ui.tr(" para salir.")];
     let need = parts.iter().map(|p| ui.measure(p, 12.0, false)).sum::<f32>() + ui.kbd_w("i", 11.0) + ui.kbd_w("Esc", 11.0);
     let dy = y + 48.0;
     if need <= tw {
@@ -1366,7 +1398,7 @@ fn teclado(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
             }
         }
     } else {
-        ui.text("i para insertar, Esc para salir.", 12.0, false, Rect::new(tx, dy - 9.0, tx + tw, dy + 9.0), ui.pal.text_2);
+        ui.text(ui.tr("i para insertar, Esc para salir."), 12.0, false, Rect::new(tx, dy - 9.0, tx + tw, dy + 9.0), ui.pal.text_2);
     }
     ui.toggle(Rect::new(x + w - 56.0, y + 27.0, x + w - 16.0, y + 49.0), hit, on);
     y = rect.bottom;
@@ -1430,8 +1462,8 @@ fn binding_row(ui: &mut Ui, x: f32, y: f32, w: f32, cmd: Command, spec: &str, _c
     let flash = ui.tw.to(TK::Flash(cmd), 0.0, 1200, Curve::Out, ui.now);
     let bg = ui.row_c(hv.clamp(0.0, 1.0) * 2.0).mix(ui.pal.ok, 0.28 * flash);
     ui.r.fill_round(r, 6.0, bg);
-    ui.text(cmd.title(), 13.0, false, Rect::new(x + 14.0, y, x + w - 120.0, y + h), ui.pal.text);
-    let keys = if spec.is_empty() { "sin atajo" } else { spec };
+    ui.text(ui.tr(cmd.title()), 13.0, false, Rect::new(x + 14.0, y, x + w - 120.0, y + h), ui.pal.text);
+    let keys = if spec.is_empty() { ui.tr("sin atajo") } else { spec };
     let kw = ui.kbd_w(keys, 11.0);
     let press = ui.press_t(hit, 120);
     let kr = ui.kbd(x + w - 14.0 - kw, y + h / 2.0, keys, hv.clamp(0.0, 1.0), press, 11.0);
@@ -1442,6 +1474,7 @@ fn binding_row(ui: &mut Ui, x: f32, y: f32, w: f32, cmd: Command, spec: &str, _c
 }
 
 fn static_bind(ui: &mut Ui, x: f32, y: f32, w: f32, id: u16, title: &str, keys: &str) -> f32 {
+    let title = ui.tr(title);
     let hit = Hit::Static(id);
     let hv = ui.hover_t(hit, 150);
     let h = 38.0;
@@ -1572,8 +1605,9 @@ fn path_preview(ui: &mut Ui, d: &PageData, x: f32, y: f32, w: f32) -> f32 {
         }
         ui.r.fill(Rect::new(inner.left, prompt_top, inner.right, inner.bottom), pal.cmd.mix(pal.surface, 0.0).mix(Rgba(0.0, 0.0, 0.0, 1.0), 0.15));
         ui.r.fill(Rect::new(inner.left, prompt_top, inner.right, prompt_top + 1.0), pal.chrome);
-        let aw = ui.r.measure("Abrir", &fm);
-        ui.r.text("Abrir", &fm, Rect::new(inner.left + 12.0, prompt_top, inner.left + 12.0 + aw + 2.0, inner.bottom), pal.accent);
+        let abrir = ui.tr("Abrir");
+        let aw = ui.r.measure(abrir, &fm);
+        ui.r.text(abrir, &fm, Rect::new(inner.left + 12.0, prompt_top, inner.left + 12.0 + aw + 2.0, inner.bottom), pal.accent);
         let path = "E:\\notty\\cra";
         let px = inner.left + 12.0 + aw + 8.0;
         let pw = ui.r.measure(path, &fm);
@@ -1588,7 +1622,8 @@ fn path_preview(ui: &mut Ui, d: &PageData, x: f32, y: f32, w: f32) -> f32 {
         let s = 0.97 + 0.03 * t;
         ui.push_xf(Matrix3x2::scale_around(s, s, center) * Matrix3x2::translation(0.0, 12.0 * (1.0 - t)));
         ui.push_fade(t);
-        let lw = ui.measure("Diálogo de Windows", 12.0, false);
+        let dialogo_windows = ui.tr("Diálogo de Windows");
+        let lw = ui.measure(dialogo_windows, 12.0, false);
         let total = 170.0 + 14.0 + lw;
         let dx = card.left + (w - total) / 2.0;
         let dlg = Rect::new(dx, card.top + 18.0, dx + 170.0, card.top + 110.0);
@@ -1600,7 +1635,7 @@ fn path_preview(ui: &mut Ui, d: &PageData, x: f32, y: f32, w: f32) -> f32 {
         bar(ui, dlg.left + 52.0, dlg.top + 22.0, 118.0 * 0.7 * 0.85, 4.0, ui.track_c());
         bar(ui, dlg.left + 52.0, dlg.top + 31.0, 118.0 * 0.55 * 0.85, 4.0, pal.accent);
         bar(ui, dlg.left + 52.0, dlg.top + 40.0, 118.0 * 0.62 * 0.85, 4.0, ui.track_c());
-        ui.text("Diálogo de Windows", 12.0, false, Rect::new(dlg.right + 14.0, card.top, dlg.right + 14.0 + lw + 4.0, card.bottom), pal.text_2);
+        ui.text(dialogo_windows, 12.0, false, Rect::new(dlg.right + 14.0, card.top, dlg.right + 14.0 + lw + 4.0, card.bottom), pal.text_2);
         ui.pop_fade();
         ui.pop_xf();
     }
@@ -1673,8 +1708,9 @@ fn atajo(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     ui.r.fill_round(Rect::new(wr.left, wr.top, wr.right, wr.top + 10.0), 5.0, pal.chrome);
     ui.r.fill(Rect::new(wr.left, wr.top + 5.0, wr.right, wr.top + 10.0), pal.chrome);
     let t10 = ui.font(10.0, false);
-    let sw = ui.r.measure("sin título", &t10);
-    ui.r.text("sin título", &t10, Rect::new(wr.left + 8.0, wr.top + 14.0, wr.left + 8.0 + sw + 2.0, wr.top + 30.0), pal.text_2);
+    let sin_titulo = ui.tr("sin título");
+    let sw = ui.r.measure(sin_titulo, &t10);
+    ui.r.text(sin_titulo, &t10, Rect::new(wr.left + 8.0, wr.top + 14.0, wr.left + 8.0 + sw + 2.0, wr.top + 30.0), pal.text_2);
     if (el as u64 % 1000) < 500 {
         ui.r.text("▏", &t10, Rect::new(wr.left + 8.0 + sw, wr.top + 14.0, wr.right, wr.top + 30.0), pal.accent);
     }
@@ -1688,6 +1724,7 @@ fn atajo(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     let sel = model::selected_index(cfg, SettingKey::HotkeyMechanism, model::HOTKEY_OPTS);
     let cw = (w - 10.0) / 2.0;
     let defs = [("Segundo plano", "~1 MB de RAM · cualquier combinación · instantáneo"), ("Acceso directo", "Nada residente · solo Ctrl+Alt+letra")];
+    let defs: Vec<(&str, &str)> = defs.iter().map(|(t, d)| (ui.tr(t), ui.tr(d))).collect();
     let mut h: f32 = 0.0;
     for (_, desc) in &defs {
         h = h.max(28.0 + 17.0 + 6.0 + desc_h(ui, cw - 28.0, desc));
@@ -1724,13 +1761,13 @@ fn actualizaciones(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     blk_end(ui);
 
     let (headline, sub): (String, String) = match &up.phase {
-        UpdatePhase::Idle if up.up_to_date => ("notty está al día".into(), "Tienes la última versión publicada.".into()),
-        UpdatePhase::Idle => ("Sin comprobar en esta sesión".into(), "Busca cuando quieras: se consultan las releases de GitHub.".into()),
-        UpdatePhase::Checking => ("Buscando…".into(), "Consultando las releases de GitHub.".into()),
-        UpdatePhase::Found => (format!("Hay una versión nueva: {newv}"), format!("{version} → {newv}")),
-        UpdatePhase::Downloading(..) => (format!("Descargando {newv}"), "Se verifica la firma al terminar.".into()),
+        UpdatePhase::Idle if up.up_to_date => (ui.tr("notty está al día").to_string(), ui.tr("Tienes la última versión publicada.").to_string()),
+        UpdatePhase::Idle => (ui.tr("Sin comprobar en esta sesión").to_string(), ui.tr("Busca cuando quieras: se consultan las releases de GitHub.").to_string()),
+        UpdatePhase::Checking => (ui.tr("Buscando…").to_string(), ui.tr("Consultando las releases de GitHub.").to_string()),
+        UpdatePhase::Found => (format!("{}: {newv}", ui.tr("Hay una versión nueva")), format!("{version} → {newv}")),
+        UpdatePhase::Downloading(..) => (format!("{} {newv}", ui.tr("Descargando")), ui.tr("Se verifica la firma al terminar.").to_string()),
         UpdatePhase::Error(e) => (
-            if up.new_version.is_some() { "No se pudo actualizar".into() } else { "No se pudo comprobar".into() },
+            if up.new_version.is_some() { ui.tr("No se pudo actualizar").to_string() } else { ui.tr("No se pudo comprobar").to_string() },
             e.clone(),
         ),
     };
@@ -1746,10 +1783,10 @@ fn actualizaciones(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     blk(ui, d, 1);
     // Botones a la derecha.
     let (btn_label, primary, enabled, hit) = match up.phase {
-        UpdatePhase::Found => ("Descargar e instalar", true, true, Hit::Link(LinkAction::DownloadUpdate)),
+        UpdatePhase::Found => (ui.tr("Descargar e instalar"), true, true, Hit::Link(LinkAction::DownloadUpdate)),
         UpdatePhase::Downloading(..) => ("", false, false, Hit::None),
-        UpdatePhase::Checking => ("Buscar actualizaciones", false, false, Hit::Link(LinkAction::CheckUpdatesNow)),
-        _ => ("Buscar actualizaciones", false, true, Hit::Link(LinkAction::CheckUpdatesNow)),
+        UpdatePhase::Checking => (ui.tr("Buscar actualizaciones"), false, false, Hit::Link(LinkAction::CheckUpdatesNow)),
+        _ => (ui.tr("Buscar actualizaciones"), false, true, Hit::Link(LinkAction::CheckUpdatesNow)),
     };
     let bw = if btn_label.is_empty() { 0.0 } else { ui.button_w(btn_label, primary) };
     let text_x = x + 22.0 + 56.0 + 18.0;
@@ -1851,10 +1888,10 @@ fn actualizaciones(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
         ui.r.fill_round(nc, 10.0, pal.accent.faded(0.35));
         ui.r.fill_round(Rect::new(nc.left + 1.0, nc.top + 1.0, nc.right - 1.0, nc.bottom - 1.0), 9.0, ui.row_c(0.0));
         let mut ny = nc.top + 16.0;
-        ui.text(&format!("Novedades de v{newv}"), 13.0, true, Rect::new(x + 22.0, ny, x + w - 22.0, ny + 20.0), pal.text);
+        ui.text(&format!("{} v{newv}", ui.tr("Novedades de")), 13.0, true, Rect::new(x + 22.0, ny, x + w - 22.0, ny + 20.0), pal.text);
         ny += 30.0;
         if bullets.is_empty() {
-            ui.text("Esta versión no trae notas.", 12.0, false, Rect::new(x + 22.0, ny, x + w - 22.0, ny + 18.0), pal.text_2);
+            ui.text(ui.tr("Esta versión no trae notas."), 12.0, false, Rect::new(x + 22.0, ny, x + w - 22.0, ny + 18.0), pal.text_2);
         }
         for (j, b) in bullets.iter().enumerate() {
             item(ui, d, j + 3);
@@ -1862,7 +1899,7 @@ fn actualizaciones(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
             ui.end_enter();
         }
         if up.release_url.is_some() {
-            ui.more(x + 22.0, ny + 10.0, "Ver todas las notas en GitHub", Hit::Link(LinkAction::ReleaseNotes));
+            ui.more(x + 22.0, ny + 10.0, ui.tr("Ver todas las notas en GitHub"), Hit::Link(LinkAction::ReleaseNotes));
         }
         y = nc.bottom + 14.0;
         blk_end(ui);
@@ -1874,25 +1911,26 @@ fn actualizaciones(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     ui.end_enter();
     item(ui, d, 1);
     let desc = "Cada instalador se comprueba con Ed25519 antes de ejecutarse.";
-    let sw = ui.measure("Siempre", 12.0, false) + 20.0;
+    let siempre = ui.tr("Siempre");
+    let sw = ui.measure(siempre, 12.0, false) + 20.0;
     let g = row(ui, x, y, w, Hit::None, 0.0, desc, sw, 18.0);
     title_desc(ui, g.text_x, text_y(&g, desc, ui), g.text_w, "Firma verificada", desc);
     let cy = g.ctrl.top + 9.0;
     ui.icon(icon::ESCUDO, g.ctrl.left + 7.0, cy, 14.0, 2.0, pal.ok);
-    ui.text("Siempre", 12.0, false, Rect::new(g.ctrl.left + 20.0, cy - 9.0, g.ctrl.right + 4.0, cy + 9.0), pal.ok);
+    ui.text(siempre, 12.0, false, Rect::new(g.ctrl.left + 20.0, cy - 9.0, g.ctrl.right + 4.0, cy + 9.0), pal.ok);
     y = g.rect.bottom + 14.0;
     ui.end_enter();
     blk_end(ui);
 
     blk(ui, d, 4);
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    let a = "Versión instalada ";
+    let a = ui.tr("Versión instalada ");
     let aw = ui.measure(a, 12.0, false);
     ui.text(a, 12.0, false, Rect::new(x, y, x + aw + 2.0, y + 18.0), pal.text_3);
     let fm = ui.mono(ui.r.mono_family(), 12.0);
     let vw = ui.r.measure(version, &fm);
     ui.r.text(version, &fm, Rect::new(x + aw, y, x + aw + vw + 2.0, y + 18.0), pal.text_2);
-    let last = format!("Última comprobación: {}", model::relative_time(now, cfg.updates.last_check));
+    let last = format!("{}: {}", ui.tr("Última comprobación"), model::relative_time(now, cfg.updates.last_check));
     ui.text(&last, 12.0, false, Rect::new(x + aw + vw + 16.0, y, x + w, y + 18.0), pal.text_3);
     y += 18.0;
     blk_end(ui);
@@ -1931,7 +1969,7 @@ fn acerca(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     let tx = logo.right + 24.0;
     let tw = x + w - 20.0 - tx;
     ui.text("notty", 26.0, true, Rect::new(tx, card.top + 26.0, tx + tw, card.top + 60.0), pal.text);
-    ui.text("El Bloc de notas, pero rápido y con teclado.", 12.5, false, Rect::new(tx, card.top + 62.0, tx + tw, card.top + 80.0), pal.text_2);
+    ui.text(ui.tr("El Bloc de notas, pero rápido y con teclado."), 12.5, false, Rect::new(tx, card.top + 62.0, tx + tw, card.top + 80.0), pal.text_2);
     // Versión + estado del actualizador, como chips.
     let fm = ui.mono(ui.r.mono_family(), 11.5);
     let ver = format!("v{}", crate::app_version());
@@ -1940,10 +1978,10 @@ fn acerca(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     ui.r.fill_round(vr, 10.0, pal.accent_soft);
     ui.r.text_center(&ver, &fm, vr, pal.accent);
     let (st_txt, st_c) = match (&d.update.phase, d.update.up_to_date, &d.update.new_version) {
-        (UpdatePhase::Found, _, Some(v)) => (format!("Hay una versión nueva: {v}"), pal.accent),
-        (UpdatePhase::Checking, _, _) => ("Buscando actualizaciones…".to_string(), pal.text_2),
-        (_, true, _) => ("Al día".to_string(), pal.ok),
-        _ => ("Buscar actualizaciones".to_string(), pal.text_2),
+        (UpdatePhase::Found, _, Some(v)) => (format!("{}: {v}", ui.tr("Hay una versión nueva")), pal.accent),
+        (UpdatePhase::Checking, _, _) => (ui.tr("Buscando actualizaciones…").to_string(), pal.text_2),
+        (_, true, _) => (ui.tr("Al día").to_string(), pal.ok),
+        _ => (ui.tr("Buscar actualizaciones").to_string(), pal.text_2),
     };
     let sw = ui.measure(&st_txt, 11.5, false) + 22.0;
     let sr = Rect::new(vr.right + 8.0, vr.top, vr.right + 8.0 + sw, vr.bottom);
@@ -1977,7 +2015,7 @@ fn acerca(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
         if j > 0 {
             ui.r.fill(Rect::new(x + 14.0, ry, x + w - 14.0, ry + 1.0), pal.line);
         }
-        ui.text(k, 12.0, false, Rect::new(x + 14.0, ry, x + 130.0, ry + row_h), pal.text_2);
+        ui.text(ui.tr(k), 12.0, false, Rect::new(x + 14.0, ry, x + 130.0, ry + row_h), pal.text_2);
         let v = ellipsize_mid(ui, v, &fm12, w - 160.0);
         ui.r.text(&v, &fm12, Rect::new(x + 140.0, ry + 7.0, x + w - 14.0, ry + row_h), pal.text);
         ui.end_enter();
@@ -2004,7 +2042,7 @@ fn acerca(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
 
     // Pie: con qué está hecho.
     y += 18.0;
-    let credit = "Hecho con Rust, Direct2D, DirectWrite y tree-sitter.";
+    let credit = ui.tr("Hecho con Rust, Direct2D, DirectWrite y tree-sitter.");
     ui.text(credit, 11.0, false, Rect::new(x, y, x + w, y + 16.0), pal.text_3);
     y + 16.0
 }
@@ -2039,8 +2077,9 @@ fn ayuda(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
 
     blk(ui, d, 1);
     let hit = Hit::Link(LinkAction::RepeatTutorial);
-    let bw = ui.button_w("Empezar", true);
-    let desc = "El recorrido guiado sobre la ventana principal, paso a paso.";
+    let empezar = ui.tr("Empezar");
+    let bw = ui.button_w(empezar, true);
+    let desc = ui.tr("El recorrido guiado sobre la ventana principal, paso a paso.");
     let tx = x + 20.0 + 48.0 + 16.0;
     let tw = x + w - 20.0 - bw - 16.0 - tx;
     let h = (36.0 + 20.0 + desc_h(ui, tw, desc)).max(84.0);
@@ -2057,9 +2096,9 @@ fn ayuda(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     ui.pop_xf();
     let th = 20.0 + desc_h(ui, tw, desc);
     let ty = y + (h - th) / 2.0;
-    ui.text("Repetir tutorial", 14.0, false, Rect::new(tx, ty, tx + tw, ty + 20.0), pal.text);
+    ui.text(ui.tr("Repetir tutorial"), 14.0, false, Rect::new(tx, ty, tx + tw, ty + 20.0), pal.text);
     ui.r.text_wrapped(desc, &ui.font(12.0, false), Rect::new(tx, ty + 22.0, tx + tw, ty + th), pal.text_2, Some(DESC_LH));
-    ui.button(Rect::new(x + w - 20.0 - bw, y + h / 2.0 - 16.0, x + w - 20.0, y + h / 2.0 + 16.0), "Empezar", true, true, hit);
+    ui.button(Rect::new(x + w - 20.0 - bw, y + h / 2.0 - 16.0, x + w - 20.0, y + h / 2.0 + 16.0), empezar, true, true, hit);
     y = r.bottom + 16.0;
     blk_end(ui);
 
