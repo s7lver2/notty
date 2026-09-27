@@ -1113,9 +1113,7 @@ fn paint(st: &mut State) {
         }
         _ => theme::palette(dark),
     };
-    if st.renderer.recover_device() {
-        st.logo = None;
-    }
+    st.renderer.recover_device();
     let (w, h) = st.renderer.size_dips();
     let update = (st.update_info)();
     let caret_on = st.focus.is_some() && (now.saturating_duration_since(st.caret_since).as_millis() % 1060) < 530;
