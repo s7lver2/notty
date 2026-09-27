@@ -181,6 +181,7 @@ pub fn open(
     on_created: impl Fn(HWND),
 ) -> Result<()> {
     let start_page = Page::from_id(start_section).unwrap_or(Page::Apariencia);
+    let lang = crate::lang::resolve(cfg.borrow().ui.lang);
     unsafe {
         let instance = GetModuleHandleW(None)?;
         let class_name = w!("NottySettingsClass");
@@ -202,7 +203,7 @@ pub fn open(
         let scale = dpi as f32 / 96.0;
         let (x, y, w_px, h_px) = initial_rect(parent, scale);
 
-        let title = to_wide("Ajustes · notty");
+        let title = to_wide(&format!("{} · notty", crate::strings::tr(lang, "Ajustes")));
         let hwnd = CreateWindowExW(
             Default::default(),
             class_name,
@@ -1288,6 +1289,7 @@ fn draw_rail(ui: &mut Ui, page: Page, update: &UpdateInfo, _w: f32, h: f32, hove
 
 #[allow(clippy::too_many_arguments)]
 fn nav_item(ui: &mut Ui, br: Rect, hit: Hit, d: &str, label: &str, active: bool, i: usize, open: bool) {
+    let label = ui.tr(label);
     let pal = ui.pal;
     let hv = ui.hover_t(hit, 150);
     let bg = if active { pal.accent.faded(0.14) } else { pal.hover.faded(hv) };

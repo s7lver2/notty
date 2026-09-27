@@ -463,6 +463,7 @@ impl<'a> Ui<'a> {
 
     /// `.more`: enlace de acento con subrayado que crece desde la izquierda.
     pub fn more(&mut self, x: f32, cy: f32, label: &str, hit: Hit) -> Rect {
+        let label = self.tr(label);
         let w = self.measure(label, 12.0, false);
         let r = Rect::new(x, cy - 9.0, x + w, cy + 9.0);
         let t = self.hover_t(hit, 250);

@@ -420,7 +420,7 @@ fn apariencia(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
         "Desactivadas".to_string()
     };
     let hit = Hit::Toggle(SettingKey::Ligatures);
-    let editar_w = ui.measure("Editar", 12.0, false);
+    let editar_w = ui.measure(ui.tr("Editar"), 12.0, false);
     let g = row(ui, x, y, w, hit, 34.0, &desc, 40.0 + 14.0 + editar_w, 22.0);
     let lig_on = cfg.ui.ligatures;
     let (cx, cy) = ui.ic_begin(g.ic, g.hover, ui.pal.surface);
@@ -451,7 +451,7 @@ fn apariencia(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
         ui.tr("Desactivado").to_string()
     };
     let desc = desc_s.as_str();
-    let editar_w = ui.measure("Editar", 12.0, false);
+    let editar_w = ui.measure(ui.tr("Editar"), 12.0, false);
     let g = row(ui, x, y, w, hit, 34.0, desc, 40.0 + 14.0 + editar_w, 22.0);
     let on = cfg.ui.syntax_highlight;
     let (cx, cy) = ui.ic_begin(g.ic, g.hover, ui.pal.surface);
