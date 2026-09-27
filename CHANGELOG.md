@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.5.0
+
+- Ajustes → Ventana recuerda el ancho/alto/maximizado al cerrar notty, con un botón para restablecer el tamaño de siempre.
+- Nueva opción "Ajustar texto a la ventana": las líneas largas pasan a la siguiente línea en vez de salirse por el borde, y se reajustan solas al redimensionar.
+- Ajustes → Archivos: "Guardar por defecto en" (Carpeta de usuario, Escritorio, Documentos, Descargas) para Guardar como.
+
 ## v0.4.0
 
 - Sistema de idiomas: Auto (sigue el de Windows), Español o Inglés, elegible desde Ajustes → Ayuda. Traducción casi completa de la app: editor, Ajustes, menús, tour, ventana de bienvenida, panel de actualizaciones y el instalador entero (asistente, opciones, progreso de MSI, errores, pantalla de auto-actualización).
