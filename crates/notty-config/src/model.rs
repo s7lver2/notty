@@ -214,6 +214,9 @@ pub struct FilesConfig {
     pub default_extension: String,
     pub large_file_mb: u32,
     pub on_close_unsaved: OnCloseUnsaved,
+    /// Abrir un archivo (Explorador, `notepad archivo`) en la ventana de notty que ya
+    /// esté abierta en vez de en una nueva.
+    pub open_in_existing_window: bool,
 }
 
 impl Default for FilesConfig {
@@ -224,6 +227,7 @@ impl Default for FilesConfig {
             default_extension: ".txt".to_string(),
             large_file_mb: 50,
             on_close_unsaved: OnCloseUnsaved::default(),
+            open_in_existing_window: true,
         }
     }
 }
@@ -482,6 +486,7 @@ font_family = \"{old}\"
         assert_eq!(f.default_extension, ".txt");
         assert_eq!(f.large_file_mb, 50);
         assert_eq!(f.on_close_unsaved, OnCloseUnsaved::Preguntar);
+        assert!(f.open_in_existing_window);
     }
 
     #[test]

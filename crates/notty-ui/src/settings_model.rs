@@ -130,6 +130,7 @@ pub enum SettingKey {
     Ligatures,
     SyntaxHighlight,
     OnCloseUnsaved,
+    OpenInExistingWindow,
 }
 
 /// El valor elegido; `apply` decide qué campo de `Config` toca según `SettingKey`.
@@ -330,6 +331,10 @@ pub fn apply(cfg: &mut Config, key: SettingKey, value: SettingValue) {
             cfg.files.on_close_unsaved = v;
             return;
         }
+        (SettingKey::OpenInExistingWindow, SettingValue::Bool(b)) => {
+            cfg.files.open_in_existing_window = b;
+            return;
+        }
         (SettingKey::HotkeyMechanism, SettingValue::HotkeyMechanism(m)) => {
             cfg.hotkey.mechanism = m;
             return;
@@ -376,6 +381,7 @@ pub fn current_bool(cfg: &Config, key: SettingKey) -> bool {
         SettingKey::MergedCommandLine => cfg.ui.merged_command_line,
         SettingKey::VimAlways => cfg.ui.vim_always,
         SettingKey::Autosave => cfg.files.autosave,
+        SettingKey::OpenInExistingWindow => cfg.files.open_in_existing_window,
         SettingKey::SuggestionIcons => cfg.ui.suggestion_icons,
         SettingKey::NativeFileDialog => cfg.ui.native_file_dialog,
         SettingKey::Ligatures => cfg.ui.ligatures,
@@ -569,6 +575,14 @@ mod tests {
         apply(&mut cfg, SettingKey::OnCloseUnsaved, ON_CLOSE_OPTS[1].1);
         assert_eq!(cfg.files.on_close_unsaved, OnCloseUnsaved::Recuperar);
         assert_eq!(cfg.ui.preset, Config::default().ui.preset);
+    }
+
+    #[test]
+    fn open_in_existing_window_toggles() {
+        let mut cfg = Config::default();
+        assert!(current_bool(&cfg, SettingKey::OpenInExistingWindow));
+        apply(&mut cfg, SettingKey::OpenInExistingWindow, SettingValue::Bool(false));
+        assert!(!cfg.files.open_in_existing_window);
     }
 
     #[test]

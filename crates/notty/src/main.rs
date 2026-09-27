@@ -11,28 +11,53 @@ use notty_update::{PUBKEY, REPO};
 /// alguien escuchando (y por tanto el mensaje se envió): en ese caso el proceso actual
 /// no debe abrir ventana propia.
 fn try_forward_to_existing_instance(msg: &notty_ipc::Message) -> bool {
+    use windows::Win32::Foundation::ERROR_PIPE_BUSY;
     use windows::Win32::Storage::FileSystem::{CreateFileW, FILE_FLAGS_AND_ATTRIBUTES, FILE_GENERIC_WRITE, OPEN_EXISTING};
-    use windows::core::PCWSTR;
+    use windows::Win32::System::Pipes::WaitNamedPipeW;
+    use windows::core::{HRESULT, PCWSTR};
     let wide: Vec<u16> = notty_ipc::PIPE_NAME.encode_utf16().chain(std::iter::once(0)).collect();
-    unsafe {
-        let Ok(handle) = CreateFileW(PCWSTR(wide.as_ptr()), FILE_GENERIC_WRITE.0, Default::default(), None, OPEN_EXISTING, FILE_FLAGS_AND_ATTRIBUTES(0), None) else {
-            return false;
+    for _ in 0..5 {
+        let opened = unsafe {
+            CreateFileW(PCWSTR(wide.as_ptr()), FILE_GENERIC_WRITE.0, Default::default(), None, OPEN_EXISTING, FILE_FLAGS_AND_ATTRIBUTES(0), None)
         };
-        let bytes = notty_ipc::encode(msg);
-        let mut written = 0u32;
-        let _ = windows::Win32::Storage::FileSystem::WriteFile(handle, Some(&bytes), Some(&mut written), None);
-        let _ = windows::Win32::Foundation::CloseHandle(handle);
-        true
+        match opened {
+            Ok(handle) => {
+                // Para que la ventana que lo recibe pueda ponerse delante.
+                let _ = unsafe { windows::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow(u32::MAX) };
+                let bytes = notty_ipc::encode(msg);
+                let mut written = 0u32;
+                let ok = unsafe { windows::Win32::Storage::FileSystem::WriteFile(handle, Some(&bytes), Some(&mut written), None) }.is_ok()
+                    && written as usize == bytes.len();
+                let _ = unsafe { windows::Win32::Foundation::CloseHandle(handle) };
+                return ok;
+            }
+            // Todas las instancias del pipe ocupadas: se espera a una libre en vez de
+            // abrir otra ventana.
+            Err(e) if e.code() == HRESULT::from_win32(ERROR_PIPE_BUSY.0) => {
+                if !unsafe { WaitNamedPipeW(PCWSTR(wide.as_ptr()), 2000) }.as_bool() {
+                    return false;
+                }
+            }
+            Err(_) => return false,
+        }
     }
+    false
+}
+
+/// La otra instancia tiene su propio directorio actual: una ruta relativa se resuelve
+/// aquí, antes de mandarla.
+fn absolute_path_arg(p: &str) -> String {
+    std::path::absolute(p).map(|a| a.to_string_lossy().into_owned()).unwrap_or_else(|_| p.to_string())
 }
 
 /// Lanza el hilo servidor del pipe de instancia única: escucha en bucle, decodifica
 /// cada mensaje recibido y lo manda por `sender`. Usado tanto por la instancia normal
 /// con ventana (Task 8) como por `notty --daemon` (Task 9).
 pub(crate) fn spawn_pipe_server(sender: std::sync::mpsc::Sender<notty_ipc::Message>) {
-    std::thread::spawn(move || loop {
-        use windows::Win32::Storage::FileSystem::PIPE_ACCESS_INBOUND;
-        use windows::Win32::System::Pipes::{ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_TYPE_BYTE, PIPE_WAIT};
+    use windows::Win32::Foundation::{ERROR_PIPE_CONNECTED, HANDLE};
+    use windows::Win32::Storage::FileSystem::PIPE_ACCESS_INBOUND;
+    use windows::Win32::System::Pipes::{ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_TYPE_BYTE, PIPE_WAIT};
+    fn create() -> Option<HANDLE> {
         let wide: Vec<u16> = notty_ipc::PIPE_NAME.encode_utf16().chain(std::iter::once(0)).collect();
         let handle = unsafe {
             CreateNamedPipeW(
@@ -46,23 +71,37 @@ pub(crate) fn spawn_pipe_server(sender: std::sync::mpsc::Sender<notty_ipc::Messa
                 None,
             )
         };
-        if handle == windows::Win32::Foundation::INVALID_HANDLE_VALUE || handle.is_invalid() {
-            break;
-        }
-        if unsafe { ConnectNamedPipe(handle, None) }.is_err() {
-            let _ = unsafe { windows::Win32::Foundation::CloseHandle(handle) };
-            continue;
-        }
-        let mut buf = [0u8; 4096];
-        let mut read = 0u32;
-        if unsafe { windows::Win32::Storage::FileSystem::ReadFile(handle, Some(&mut buf), Some(&mut read), None) }.is_ok() {
-            if let Some(msg) = notty_ipc::decode(&buf[..read as usize]) {
-                let _ = sender.send(msg);
+        (handle != windows::Win32::Foundation::INVALID_HANDLE_VALUE && !handle.is_invalid()).then_some(handle)
+    }
+    std::thread::spawn(move || {
+        let Some(mut listening) = create() else { return };
+        loop {
+            let connected = match unsafe { ConnectNamedPipe(listening, None) } {
+                Ok(()) => true,
+                // El cliente llegó entre `CreateNamedPipeW` y `ConnectNamedPipe`: también vale.
+                Err(e) => e.code() == windows::core::HRESULT::from_win32(ERROR_PIPE_CONNECTED.0),
+            };
+            let current = listening;
+            // La siguiente instancia se crea antes de atender esta: así siempre hay una
+            // esperando y un cliente nunca se encuentra sin pipe (abriría otra ventana).
+            let next = create();
+            if connected {
+                let mut buf = [0u8; 4096];
+                let mut read = 0u32;
+                if unsafe { windows::Win32::Storage::FileSystem::ReadFile(current, Some(&mut buf), Some(&mut read), None) }.is_ok() {
+                    if let Some(msg) = notty_ipc::decode(&buf[..read as usize]) {
+                        let _ = sender.send(msg);
+                    }
+                }
             }
-        }
-        unsafe {
-            let _ = DisconnectNamedPipe(handle);
-            let _ = windows::Win32::Foundation::CloseHandle(handle);
+            unsafe {
+                let _ = DisconnectNamedPipe(current);
+                let _ = windows::Win32::Foundation::CloseHandle(current);
+            }
+            match next {
+                Some(h) => listening = h,
+                None => break,
+            }
         }
     });
 }
@@ -104,26 +143,28 @@ fn main() -> windows::core::Result<()> {
     let is_new_permanent = args.first().map(String::as_str) == Some("--new-permanent");
 
     let path = if new_temp || is_new_permanent { None } else { args.first().cloned() };
+    let load = notty_config::load(&notty_config::default_path());
+    let cfg_for_check = match &load {
+        notty_config::LoadResult::Loaded(c) | notty_config::LoadResult::Missing(c) | notty_config::LoadResult::Defaulted(c, _) => c.clone(),
+    };
     if let Some(p) = &path {
-        let msg = notty_ipc::Message::OpenPath(p.clone());
-        if try_forward_to_existing_instance(&msg) {
-            return Ok(());
+        if cfg_for_check.files.open_in_existing_window {
+            let msg = notty_ipc::Message::OpenPath(absolute_path_arg(p));
+            if try_forward_to_existing_instance(&msg) {
+                return Ok(());
+            }
         }
     }
 
     // Cada usuario tiene su propio HKCU y el instalador solo corrió como uno de ellos.
     notty_update::notepad::sync();
 
-    // Nadie escuchaba en el pipe: esta instancia se convierte en el servidor mientras
-    // viva, además de abrir su propia ventana con normalidad.
+    // Esta instancia también escucha en el pipe mientras viva, además de abrir su
+    // propia ventana con normalidad.
     let (tx, rx) = std::sync::mpsc::channel();
     let update_tx = tx.clone();
     spawn_pipe_server(tx);
 
-    let load = notty_config::load(&notty_config::default_path());
-    let cfg_for_check = match &load {
-        notty_config::LoadResult::Loaded(c) | notty_config::LoadResult::Missing(c) | notty_config::LoadResult::Defaulted(c, _) => c.clone(),
-    };
     spawn_update_check(cfg_for_check, update_tx);
 
     if new_temp {
@@ -162,6 +203,14 @@ mod ifeo_tests {
         let mut args = vec!["C:\\file.txt".to_string()];
         strip_ifeo_arg(&mut args);
         assert_eq!(args, vec!["C:\\file.txt".to_string()]);
+    }
+
+    #[test]
+    fn relative_paths_are_made_absolute_before_forwarding() {
+        let p = super::absolute_path_arg("nuevo.txt");
+        assert!(std::path::Path::new(&p).is_absolute());
+        assert!(p.ends_with("nuevo.txt"));
+        assert_eq!(super::absolute_path_arg(r"C:\a\b.txt"), r"C:\a\b.txt");
     }
 
     #[test]

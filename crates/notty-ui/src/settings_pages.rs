@@ -1464,6 +1464,11 @@ fn archivos(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
         (SettingKey::NativeFileDialog, "Selector nativo de Windows", "Abrir y Guardar como usan el diálogo de Windows en vez de la línea de ruta."),
         (SettingKey::SuggestionIcons, "Iconos en las sugerencias", "Carpeta o archivo delante de cada sugerencia al escribir una ruta."),
         (SettingKey::Autosave, "Autoguardado", "Guarda sola tras dejar de escribir. Solo si el archivo ya tiene ruta."),
+        (
+            SettingKey::OpenInExistingWindow,
+            "Abrir archivos en la ventana ya abierta",
+            "Si lo apagas, cada archivo que abras desde el Explorador sale en una ventana nueva.",
+        ),
     ];
     for (j, (key, title, desc)) in rows.iter().enumerate() {
         item(ui, d, j);

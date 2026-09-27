@@ -959,12 +959,9 @@ fn ipc_tick(w: &mut WindowState, hwnd: HWND) -> bool {
             match msg {
                 notty_ipc::Message::OpenPath(p) => {
                     if !p.is_empty() {
-                        let path = std::path::PathBuf::from(p);
-                        if let Ok(opened) = crate::open_as_document(&path) {
-                            let cfg = w.cfg.borrow().clone();
-                            opened_docs.push(maybe_vim(EditorState::from_opened(opened), &cfg));
-                            changed = true;
-                        }
+                        let cfg = w.cfg.borrow().clone();
+                        opened_docs.push(maybe_vim(state_for_path(std::path::Path::new(&p)), &cfg));
+                        changed = true;
                     }
                 }
                 notty_ipc::Message::UpdateAvailable(r) => {
@@ -976,8 +973,18 @@ fn ipc_tick(w: &mut WindowState, hwnd: HWND) -> bool {
             }
         }
     }
+    let any_opened = !opened_docs.is_empty();
     for st in opened_docs {
         open_tab(w, hwnd, st);
+    }
+    if any_opened {
+        unsafe {
+            update_title(hwnd, w.ws.active());
+            if windows::Win32::UI::WindowsAndMessaging::IsIconic(hwnd).as_bool() {
+                let _ = ShowWindow(hwnd, SW_RESTORE);
+            }
+            let _ = windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow(hwnd);
+        }
     }
     if download_tick(w) {
         changed = true;
@@ -1292,6 +1299,27 @@ fn handle_conflict_key(w: &mut WindowState, hwnd: HWND, vk: u32) {
     }
 }
 
+/// Documento para `path` como al abrirlo desde la línea de comandos: texto si se
+/// puede, vista raw si es binario, y si no existe, un documento nuevo con esa ruta.
+fn state_for_path(path: &std::path::Path) -> EditorState {
+    match crate::open_as_document(path) {
+        Ok(opened) => EditorState::from_opened(opened),
+        Err(_) => {
+            let mut state = EditorState::new_empty();
+            match crate::open_raw_doc(path) {
+                Ok(raw) => {
+                    state.raw = Some(raw);
+                    state.path = Some(path.to_path_buf());
+                }
+                // Existe pero no se puede leer: sin ruta, para que guardar no lo pise.
+                Err(_) if path.exists() => {}
+                Err(_) => state.path = Some(path.to_path_buf()),
+            }
+            state
+        }
+    }
+}
+
 /// Crea el documento con el `EditorState` que toque, y si `cfg.ui.vim_always` está
 /// activo, lo arranca ya en modo vim.
 fn maybe_vim(mut st: EditorState, cfg: &notty_config::Config) -> EditorState {
@@ -1497,20 +1525,7 @@ fn run_inner(
         if let Some((mode, ext)) = &initial_temp {
             *ws.active_mut() = maybe_vim(EditorState::new_temp(*mode, ext), &cfg);
         } else if let Some(p) = path {
-            let p = std::path::Path::new(p);
-            match crate::open_as_document(p) {
-                Ok(opened) => *ws.active_mut() = maybe_vim(EditorState::from_opened(opened), &cfg),
-                Err(_) => {
-                    // No es texto (o no se pudo decodificar): se abre directamente en vista
-                    // raw, como pide la Task 7 de este plan.
-                    let mut state = EditorState::new_empty();
-                    state.path = Some(p.to_path_buf());
-                    if let Ok(raw) = crate::open_raw_doc(p) {
-                        state.raw = Some(raw);
-                    }
-                    *ws.active_mut() = maybe_vim(state, &cfg);
-                }
-            }
+            *ws.active_mut() = maybe_vim(state_for_path(std::path::Path::new(p)), &cfg);
         }
 
         // Recuperación (caída, relanzar tras actualizar o cerrar en modo "Recuperar"):
