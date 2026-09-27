@@ -963,6 +963,15 @@ fn run_link(st: &mut State, hwnd: HWND, action: LinkAction) {
             (st.on_repeat_tutorial)();
             post_close(hwnd);
         }
+        LinkAction::ResetWindowSize => {
+            {
+                let mut cfg = st.cfg.borrow_mut();
+                cfg.ui.win_w = notty_config::DEFAULT_WIN_W;
+                cfg.ui.win_h = notty_config::DEFAULT_WIN_H;
+                cfg.ui.win_maximized = false;
+            }
+            save_and_notify(st);
+        }
     }
 }
 

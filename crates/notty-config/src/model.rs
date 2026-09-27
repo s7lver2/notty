@@ -187,7 +187,20 @@ pub struct UiConfig {
     pub reopen_previous: bool,
     /// Icono de archivo genérico delante del nombre de cada pestaña.
     pub tab_icons: bool,
+    /// Ancho/alto (DIPs) de la ventana principal, recordado al cerrarla; "Restablecer
+    /// tamaño de ventana" (Ajustes → Ventana) los vuelve a `DEFAULT_WIN_W/H`.
+    pub win_w: f32,
+    pub win_h: f32,
+    /// Si la ventana estaba maximizada al cerrarla.
+    pub win_maximized: bool,
+    /// Ajusta las líneas largas al ancho de la ventana en vez de salirse por el borde.
+    pub wrap: bool,
 }
+
+/// Tamaño de ventana con el que arranca notty la primera vez, y al que vuelve
+/// "Restablecer tamaño de ventana" (Ajustes → Ventana).
+pub const DEFAULT_WIN_W: f32 = 920.0;
+pub const DEFAULT_WIN_H: f32 = 600.0;
 
 impl Default for UiConfig {
     fn default() -> Self {
@@ -212,6 +225,10 @@ impl Default for UiConfig {
             lang: Lang::default(),
             reopen_previous: false,
             tab_icons: false,
+            win_w: DEFAULT_WIN_W,
+            win_h: DEFAULT_WIN_H,
+            win_maximized: false,
+            wrap: false,
         };
         let preset = ui.preset;
         crate::apply_preset(&mut ui, preset);
@@ -258,6 +275,9 @@ pub struct FilesConfig {
     /// Abrir un archivo (Explorador, `notepad archivo`) en la ventana de notty que ya
     /// esté abierta en vez de en una nueva.
     pub open_in_existing_window: bool,
+    /// Carpeta de partida para "Guardar como" cuando el documento no tiene ruta
+    /// todavía (p.ej. el Escritorio). `None` usa la carpeta de usuario, como antes.
+    pub default_save_dir: Option<String>,
 }
 
 impl Default for FilesConfig {
@@ -269,6 +289,7 @@ impl Default for FilesConfig {
             large_file_mb: 50,
             on_close_unsaved: OnCloseUnsaved::default(),
             open_in_existing_window: true,
+            default_save_dir: None,
         }
     }
 }

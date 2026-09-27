@@ -16,7 +16,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DispatchMessageW, GWLP_USERDATA, GetMessageW,
-    GetWindowLongPtrW, HICON, HTCAPTION, HTCLIENT, HTMAXBUTTON, HTTOP, IDC_ARROW, IDC_IBEAM, IsWindow, IsZoomed, KillTimer,
+    GetWindowLongPtrW, GetWindowRect, HICON, HTCAPTION, HTCLIENT, HTMAXBUTTON, HTTOP, IDC_ARROW, IDC_IBEAM, IsWindow, IsZoomed, KillTimer,
     LoadCursorW, LoadIconW, MSG, NCCALCSIZE_PARAMS, PostQuitMessage, RegisterClassExW, SM_CXPADDEDBORDER,
     SM_CYFRAME, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOSIZE,
     SWP_NOZORDER, SetCursor, SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow,
@@ -393,10 +393,12 @@ fn answer_close(w: &mut WindowState, hwnd: HWND, choice: crate::CloseChoice) {
 /// "Guardar" sobre un documento sin ruta: pide dónde con la línea de ruta (o el diálogo
 /// nativo) y, si se guarda, el cierre continúa (ver `commit_path_prompt_with`).
 fn save_as_then_close(w: &mut WindowState, hwnd: HWND, req: crate::CloseRequest) {
-    let mut p = crate::PathPromptState::new(crate::Purpose::Save, String::new());
+    let initial = default_save_dir(w).map(|d| format!("{}\\", d.display())).unwrap_or_default();
+    let mut p = crate::PathPromptState::new(crate::Purpose::Save, initial);
     p.then_close = Some(req);
     if w.cfg.borrow().ui.native_file_dialog {
-        let Some(path) = crate::native_dialog::pick_path(hwnd, crate::Purpose::Save) else { return };
+        let dir = default_save_dir(w);
+        let Some(path) = crate::native_dialog::pick_path(hwnd, crate::Purpose::Save, dir.as_deref()) else { return };
         let Some(value) = path.to_str() else { return };
         let ctx = path_ctx(w);
         p.type_text(value, &ctx);
@@ -1512,6 +1514,31 @@ fn save_session(w: &WindowState) {
     notty_io::save_session(&paths, active, &file);
 }
 
+/// Recuerda el tamaño/maximizado de la ventana para la próxima vez (Ajustes → Ventana
+/// → "Restablecer tamaño de ventana" vuelve a `DEFAULT_WIN_W/H`). Si está maximizada,
+/// solo se guarda esa bandera: el tamaño restaurado (el de antes de maximizar) no
+/// cambia, para no perder el tamaño "normal" al que volver con doble clic en la barra.
+fn save_window_geometry(hwnd: HWND, w: &WindowState) {
+    unsafe {
+        let maximized = IsZoomed(hwnd).as_bool();
+        let mut cfg = w.cfg.borrow_mut();
+        cfg.ui.win_maximized = maximized;
+        if !maximized {
+            let mut rect = RECT::default();
+            if GetWindowRect(hwnd, &mut rect).is_ok() {
+                let scale = w.renderer.scale();
+                let win_w = (rect.right - rect.left) as f32 / scale;
+                let win_h = (rect.bottom - rect.top) as f32 / scale;
+                if win_w >= layout::MIN_WINDOW_W && win_h >= layout::MIN_WINDOW_H {
+                    cfg.ui.win_w = win_w;
+                    cfg.ui.win_h = win_h;
+                }
+            }
+        }
+        let _ = notty_config::save(&cfg, &notty_config::default_path());
+    }
+}
+
 /// Instala el `panic hook` de recuperación: si el proceso entra en pánico, vuelca a
 /// `notty_io::recovery_dir()` el texto de cada documento sucio del último snapshot
 /// leído (ver `refresh_recovery`). Se instala una sola vez, al arrancar `run`.
@@ -1647,6 +1674,7 @@ fn run_inner(
         };
         RegisterClassExW(&wc);
 
+        let (win_w, win_h) = (cfg.ui.win_w.max(layout::MIN_WINDOW_W), cfg.ui.win_h.max(layout::MIN_WINDOW_H));
         let title_wide = to_wide(&title);
         let hwnd = CreateWindowExW(
             WS_EX_APPWINDOW,
@@ -1655,8 +1683,8 @@ fn run_inner(
             WS_OVERLAPPEDWINDOW,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
-            920,
-            600,
+            win_w.round() as i32,
+            win_h.round() as i32,
             None,
             None,
             Some(instance.into()),
@@ -1664,7 +1692,7 @@ fn run_inner(
         )?;
 
         // La ventana se creó con un tamaño nominal en píxeles; ahora que existe, se
-        // conoce su DPI real y se ajusta a 920x600 DIPs exactos.
+        // conoce su DPI real y se ajusta a `win_w`x`win_h` DIPs exactos.
         let dpi0 = GetDpiForWindow(hwnd);
         let scale0 = dpi0 as f32 / 96.0;
         let _ = SetWindowPos(
@@ -1672,8 +1700,8 @@ fn run_inner(
             None,
             0,
             0,
-            (920.0 * scale0).round() as i32,
-            (600.0 * scale0).round() as i32,
+            (win_w * scale0).round() as i32,
+            (win_h * scale0).round() as i32,
             SWP_NOMOVE | SWP_NOZORDER,
         );
 
@@ -1778,7 +1806,8 @@ fn run_inner(
             refresh_recovery(w);
         }
 
-        let _ = ShowWindow(hwnd, SW_SHOW);
+        let start_maximized = ptr.as_ref().is_some_and(|w| w.cfg.borrow().ui.win_maximized);
+        let _ = ShowWindow(hwnd, if start_maximized { SW_MAXIMIZE } else { SW_SHOW });
         let _ = SetTimer(Some(hwnd), ID_AUTOSAVE_TIMER, 1000, None);
         let _ = SetTimer(Some(hwnd), ID_IPC_TIMER, 150, None);
 
@@ -2677,7 +2706,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         crate::Hit::Body if w.ws.active().raw.is_none() => {
                             w.open_menu = None;
                             let (body, gutter_w) = w.body_and_gutter();
-                            let idx = w.renderer.char_index_at(w.ws.active(), body, gutter_w, x, y);
+                            let idx = w.renderer.char_index_at(w.ws.active(), body, gutter_w, x, y, w.cfg.borrow().ui.wrap);
                             w.ws.active_mut().doc.set_cursor(idx);
                             w.selection_anchor = idx;
                             w.mouse_down = true;
@@ -2729,7 +2758,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     }
                     if w.mouse_down {
                         let (body, gutter_w) = w.body_and_gutter();
-                        let idx = w.renderer.char_index_at(w.ws.active(), body, gutter_w, x, y);
+                        let idx = w.renderer.char_index_at(w.ws.active(), body, gutter_w, x, y, w.cfg.borrow().ui.wrap);
                         w.ws.active_mut().doc.set_selection(w.selection_anchor, idx);
                         let _ = InvalidateRect(Some(hwnd), None, false);
                     }
@@ -2806,7 +2835,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     }
                     if hit == Hit::Body && w.ws.active().raw.is_none() {
                         let (body, gutter_w) = w.body_and_gutter();
-                        let idx = w.renderer.char_index_at(w.ws.active(), body, gutter_w, x, y);
+                        let idx = w.renderer.char_index_at(w.ws.active(), body, gutter_w, x, y, w.cfg.borrow().ui.wrap);
                         let sel = w.ws.active().doc.selection();
                         let r = sel.range();
                         if sel.is_empty() || idx < r.start || idx > r.end {
@@ -2994,6 +3023,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             WM_DESTROY => {
                 if let Some(w) = ptr.as_ref() {
                     save_session(w);
+                    save_window_geometry(hwnd, w);
                 }
                 let _ = KillTimer(Some(hwnd), ID_AUTOSAVE_TIMER);
                 let _ = KillTimer(Some(hwnd), ID_IPC_TIMER);
@@ -3356,12 +3386,26 @@ fn handle_path_key(w: &mut WindowState, hwnd: HWND, vk: u32, mods: Modifiers) {
 /// línea de ruta de abajo); si no, abre la línea de ruta de siempre con `initial`
 /// como valor de partida. Devuelve `true` cuando abrió la línea de ruta (para que
 /// quien llama sepa si le toca arrancar `start_popup_anim`).
+/// Carpeta configurada en Ajustes → Archivos → "Guardar por defecto en" (Escritorio,
+/// Documentos, Descargas...), si hay una. `None` deja el comportamiento de siempre
+/// (carpeta de usuario).
+fn default_save_dir(w: &WindowState) -> Option<std::path::PathBuf> {
+    let dir = w.cfg.borrow().files.default_save_dir.clone()?;
+    (!dir.is_empty()).then(|| std::path::PathBuf::from(dir))
+}
+
 fn start_path_entry(w: &mut WindowState, hwnd: HWND, purpose: crate::Purpose, initial: String) -> bool {
+    let initial = if initial.is_empty() && purpose == crate::Purpose::Save {
+        default_save_dir(w).map(|d| format!("{}\\", d.display())).unwrap_or(initial)
+    } else {
+        initial
+    };
     if !w.cfg.borrow().ui.native_file_dialog {
         w.ws.prompt = crate::Prompt::Path(crate::PathPromptState::new(purpose, initial));
         return true;
     }
-    if let Some(path) = crate::native_dialog::pick_path(hwnd, purpose) {
+    let dir = if purpose == crate::Purpose::Save { default_save_dir(w) } else { None };
+    if let Some(path) = crate::native_dialog::pick_path(hwnd, purpose, dir.as_deref()) {
         if let Some(value) = path.to_str() {
             let ctx = path_ctx(w);
             let mut p = crate::PathPromptState::new(purpose, String::new());
@@ -3378,7 +3422,8 @@ fn open_native_dialog(w: &mut WindowState, hwnd: HWND) {
         crate::Prompt::Path(p) => p.purpose,
         _ => return,
     };
-    let Some(path) = crate::native_dialog::pick_path(hwnd, purpose) else { return };
+    let dir = if purpose == crate::Purpose::Save { default_save_dir(w) } else { None };
+    let Some(path) = crate::native_dialog::pick_path(hwnd, purpose, dir.as_deref()) else { return };
     let Some(value) = path.to_str() else { return };
     let ctx = path_ctx(w);
     if let crate::Prompt::Path(p) = &mut w.ws.prompt {
