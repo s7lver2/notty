@@ -35,6 +35,9 @@ pub struct PathPromptState {
     /// Guardar un documento nuevo sobre una ruta que ya existe: en vez de escribir
     /// encima, se pregunta (sobrescribir / abrir el existente / cancelar).
     pub ask_overwrite: bool,
+    /// Guardar como pedido desde "cerrar con cambios sin guardar": si se guarda, el
+    /// cierre sigue donde se quedó.
+    pub then_close: Option<crate::CloseRequest>,
     undo_stack: Vec<String>,
     /// Historial de rutas usadas: ordena las sugerencias por uso frecuente y reciente.
     usage: notty_io::Usage,
@@ -92,6 +95,7 @@ impl PathPromptState {
             last_error: None,
             all_selected: false,
             ask_overwrite: false,
+            then_close: None,
             undo_stack: Vec::new(),
             usage: notty_io::Usage::load(),
         }

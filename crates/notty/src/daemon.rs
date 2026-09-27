@@ -59,8 +59,9 @@ pub fn run() -> Result<()> {
         nid.szTip[..tip.as_wide().len()].copy_from_slice(tip.as_wide());
         let _ = Shell_NotifyIconW(NIM_ADD, &nid);
 
-        let (tx, _rx) = std::sync::mpsc::channel();
-        super::spawn_pipe_server(tx);
+        // Sin servidor del pipe a propósito: el daemon no tiene ventana donde abrir nada,
+        // y si escuchara se tragaría los archivos reenviados. Así, sin ventana abierta,
+        // `notty archivo.txt` abre la suya propia.
 
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {

@@ -22,15 +22,15 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyState, ReleaseCapture, SetCapture, SetFocus, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CS_DROPSHADOW, CreateWindowExW, DefWindowProcW, DispatchMessageW, GWLP_USERDATA, GetClientRect, GetMessageW,
+    CS_DROPSHADOW, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GWLP_USERDATA, GetClientRect, GetMessageW,
     GetWindowLongPtrW, GetWindowRect, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCAPTION, HTCLIENT, HTLEFT, HTRIGHT,
     HTTOP, HTTOPLEFT, HTTOPRIGHT, IDC_ARROW, IsIconic, IsZoomed, KillTimer, LoadCursorW, MINMAXINFO, MSG,
-    NCCALCSIZE_PARAMS, PostMessageW, RegisterClassExW, SC_KEYMENU, SM_CXFRAME, SM_CXPADDEDBORDER, SW_RESTORE,
+    NCCALCSIZE_PARAMS, PostMessageW, PostQuitMessage, RegisterClassExW, SC_KEYMENU, SM_CXFRAME, SM_CXPADDEDBORDER, SW_RESTORE,
     SW_SHOW, SWP_FRAMECHANGED, SWP_NOZORDER, SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos,
     ShowWindow, TranslateMessage, WM_CHAR, WM_CLOSE, WM_DESTROY, WM_DPICHANGED, WM_GETMINMAXINFO, WM_KEYDOWN,
     WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCALCSIZE,
     WM_NCHITTEST, WM_PAINT, WM_SETTINGCHANGE, WM_SIZE, WM_SYSCHAR, WM_SYSCOMMAND, WM_SYSKEYDOWN, WM_SYSKEYUP,
-    WM_TIMER, WM_XBUTTONDOWN, WNDCLASSEXW, WS_CLIPSIBLINGS, WS_POPUP, WS_THICKFRAME,
+    WM_QUIT, WM_TIMER, WM_XBUTTONDOWN, WNDCLASSEXW, WS_CLIPSIBLINGS, WS_POPUP, WS_THICKFRAME,
 };
 use windows::Win32::UI::Controls::WM_MOUSELEAVE;
 use windows::core::{PCWSTR, Result, w};
@@ -302,6 +302,14 @@ pub fn open(
             if ptr.is_null() {
                 break;
             }
+        }
+        if msg.message == WM_QUIT {
+            // Este bucle se ha comido el WM_QUIT (p. ej. relanzar tras actualizar):
+            // se cierra Ajustes y se reenvía para que el bucle principal también salga.
+            if !(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut State).is_null() {
+                let _ = DestroyWindow(hwnd);
+            }
+            PostQuitMessage(msg.wParam.0 as i32);
         }
     }
     Ok(())
@@ -1105,6 +1113,9 @@ fn paint(st: &mut State) {
         }
         _ => theme::palette(dark),
     };
+    if st.renderer.recover_device() {
+        st.logo = None;
+    }
     let (w, h) = st.renderer.size_dips();
     let update = (st.update_info)();
     let caret_on = st.focus.is_some() && (now.saturating_duration_since(st.caret_since).as_millis() % 1060) < 530;

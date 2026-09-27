@@ -5,8 +5,13 @@ use notty_io::{LineEnding, TextEncoding};
 
 use crate::{OpenedDoc, Viewport};
 
+static NEXT_DOC_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
 /// Todo lo que necesita una ventana de notty para saber qué mostrar y qué guardar.
 pub struct EditorState {
+    /// Identidad estable del documento (los índices cambian al cerrar pestañas): con
+    /// ella los prompts saben a qué documento pertenece su respuesta.
+    pub id: u64,
     pub doc: Document,
     pub viewport: Viewport,
     pub encoding: TextEncoding,
@@ -24,11 +29,20 @@ pub struct EditorState {
     pub temp: Option<notty_config::TempMode>,
     pub open_mtime: Option<std::time::SystemTime>,
     pub syntax: crate::syntax::SyntaxCache,
+    /// Ruta del archivo si se abrió con bytes que no se pudieron decodificar (se
+    /// ven como U+FFFD): guardar encima destruiría esos bytes, así que `save` se niega.
+    pub lossy_source: Option<PathBuf>,
+    /// Revisión del documento en la que falló el último autoguardado: no se reintenta
+    /// hasta que haya cambios nuevos (ni se repite el aviso hasta que uno salga bien).
+    pub autosave_failed_rev: Option<u64>,
+    /// Autoguardado en pausa hasta el próximo guardado a mano (se canceló un conflicto).
+    pub autosave_paused: bool,
 }
 
 impl EditorState {
     pub fn new_empty() -> Self {
         Self {
+            id: NEXT_DOC_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             doc: Document::new("", LineEnding::Crlf.as_str()),
             viewport: Viewport { first_line: 0, visible_lines: 1 },
             encoding: TextEncoding::Utf8,
@@ -41,24 +55,23 @@ impl EditorState {
             temp: None,
             open_mtime: None,
             syntax: Default::default(),
+            lossy_source: None,
+            autosave_failed_rev: None,
+            autosave_paused: false,
         }
     }
 
     pub fn from_opened(opened: OpenedDoc) -> Self {
         let open_mtime = notty_io::mtime(&opened.path).ok();
+        let lossy_source = opened.lossy.then(|| opened.path.clone());
         Self {
             doc: opened.document,
-            viewport: Viewport { first_line: 0, visible_lines: 1 },
             encoding: opened.encoding,
             eol: opened.eol,
             path: Some(opened.path),
-            vim: None,
-            raw: None,
-            raw_cursor: 0,
-            raw_pending_nibble: None,
-            temp: None,
             open_mtime,
-            syntax: Default::default(),
+            lossy_source,
+            ..Self::new_empty()
         }
     }
 
@@ -87,10 +100,10 @@ impl EditorState {
         let end = self.line_end(head);
 
         match action {
-            MoveLeft => self.doc.set_cursor(head.saturating_sub(1)),
-            ExtendLeft => self.doc.set_selection(anchor, head.saturating_sub(1)),
-            MoveRight => self.doc.set_cursor((head + 1).min(buf_len)),
-            ExtendRight => self.doc.set_selection(anchor, (head + 1).min(buf_len)),
+            MoveLeft => self.doc.set_cursor(self.prev_index(head)),
+            ExtendLeft => self.doc.set_selection(anchor, self.prev_index(head)),
+            MoveRight => self.doc.set_cursor(self.next_index(head)),
+            ExtendRight => self.doc.set_selection(anchor, self.next_index(head)),
             MoveUp => self.vertical(-1, false),
             ExtendUp => self.vertical(-1, true),
             MoveDown => self.vertical(1, false),
@@ -129,6 +142,18 @@ impl EditorState {
         self.viewport.scroll_to_include(line, self.doc.buffer().len_lines());
     }
 
+    /// Un paso a la izquierda, saltando `\r\n` entero (el cursor nunca queda entre ambos).
+    fn prev_index(&self, idx: usize) -> usize {
+        let buf = self.doc.buffer();
+        if idx >= 2 && buf.slice(idx - 2..idx) == "\r\n" { idx - 2 } else { idx.saturating_sub(1) }
+    }
+
+    fn next_index(&self, idx: usize) -> usize {
+        let buf = self.doc.buffer();
+        let n = buf.len_chars();
+        if idx + 2 <= n && buf.slice(idx..idx + 2) == "\r\n" { idx + 2 } else { (idx + 1).min(n) }
+    }
+
     fn line_end(&self, idx: usize) -> usize {
         let buf = self.doc.buffer();
         let (line, _) = buf.line_col(idx);
@@ -140,6 +165,9 @@ impl EditorState {
 
     pub fn save(&mut self) -> Result<(), notty_io::CodecError> {
         let path = self.path.clone().ok_or_else(|| notty_io::CodecError::Io("sin ruta".to_string()))?;
+        if self.lossy_source.as_deref().is_some_and(|src| crate::same_file(src, &path)) {
+            return Err(notty_io::CodecError::Io("tiene bytes ilegibles; guárdalo con otro nombre".to_string()));
+        }
         crate::save_document(&self.doc, &path, self.encoding)?;
         self.doc.mark_saved();
         Ok(())
@@ -205,6 +233,31 @@ mod tests {
         let mut s = state("abc");
         s.apply(MoveRight, Instant::now());
         assert_eq!(s.doc.selection(), notty_core::Selection::caret(1));
+    }
+
+    #[test]
+    fn horizontal_moves_step_over_crlf() {
+        let mut s = state("a\r\nb");
+        s.doc.set_cursor(1);
+        s.apply(MoveRight, Instant::now());
+        assert_eq!(s.doc.selection().head, 3);
+        s.apply(MoveLeft, Instant::now());
+        assert_eq!(s.doc.selection().head, 1);
+        s.apply(ExtendRight, Instant::now());
+        assert_eq!(s.doc.selection().head, 3);
+        s.doc.set_cursor(3);
+        s.apply(ExtendLeft, Instant::now());
+        assert_eq!(s.doc.selection().head, 1);
+    }
+
+    #[test]
+    fn vertical_and_end_never_land_inside_crlf() {
+        let mut s = state("abc\r\nx");
+        s.doc.set_cursor(6);
+        s.apply(MoveUp, Instant::now());
+        assert_eq!(s.doc.selection().head, 1);
+        s.apply(MoveEnd, Instant::now());
+        assert_eq!(s.doc.selection().head, 3);
     }
 
     #[test]
@@ -311,6 +364,22 @@ mod tests {
     fn save_without_path_is_an_error() {
         let mut s = state("hola");
         assert!(s.save().is_err());
+    }
+
+    #[test]
+    fn lossy_document_refuses_to_overwrite_its_source() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("roto.txt");
+        // UTF-8 válido al principio (la muestra de detección) y un byte inválido después.
+        let mut bytes = "a".repeat(9000).into_bytes();
+        bytes.push(0xFF);
+        std::fs::write(&p, &bytes).unwrap();
+        let mut s = EditorState::from_opened(crate::open_as_document(&p).unwrap());
+        s.insert_char('x', Instant::now());
+        assert!(s.save().is_err());
+        assert_eq!(std::fs::read(&p).unwrap(), bytes);
+        s.path = Some(dir.path().join("otro.txt"));
+        assert!(s.save().is_ok());
     }
 
     #[test]

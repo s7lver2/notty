@@ -815,6 +815,7 @@ fn draw_titlebar(r: &notty_ui::Renderer, title: &str, w: f32, hover: Hit, hits: 
 fn paint_update(st: &mut UpdateState) {
     use notty_ui::layout::{Rect, TITLEBAR_H};
     let pal = notty_setup::palette::DARK;
+    st.renderer.recover_device();
     let (w, h) = st.renderer.size_dips();
     let r = &st.renderer;
     let mut hits = Vec::new();

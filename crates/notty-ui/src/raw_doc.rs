@@ -84,10 +84,19 @@ impl RawDoc {
     pub fn save(&mut self) -> io::Result<()> {
         let Some(buf) = self.edit_buf.take() else { return Ok(()) };
         self.view = RawBytes::Owned(Vec::new());
-        notty_io::atomic_write(&self.path, &buf)?;
+        let result = notty_io::atomic_write(&self.path, &buf);
+        if result.is_err() {
+            // El disco no cambió: se vuelve a mapear el original para que `is_modified`
+            // siga marcando lo editado (o, si ni eso, una copia de lo editado).
+            self.view = match notty_io::open_raw(&self.path) {
+                Ok(Opened::Raw { bytes, .. }) => bytes,
+                _ => RawBytes::Owned(buf.clone()),
+            };
+        } else {
+            self.dirty = false;
+        }
         self.edit_buf = Some(buf);
-        self.dirty = false;
-        Ok(())
+        result
     }
 }
 
@@ -183,6 +192,24 @@ mod tests {
         doc.save().unwrap();
         assert!(!doc.is_dirty());
         assert_eq!(fs::read(&p).unwrap(), vec![9, 2, 3]);
+    }
+
+    #[test]
+    fn failed_save_keeps_edits_and_dirty() {
+        let dir = tempdir().unwrap();
+        let p = dir.path().join("a.bin");
+        fs::write(&p, [1u8, 2, 3]).unwrap();
+        let mut doc = open_raw_doc(&p).unwrap();
+        doc.enable_write();
+        doc.set_byte(1, 0xFF);
+        // Un directorio en la ruta de destino hace fallar la escritura atómica.
+        fs::remove_file(&p).unwrap();
+        fs::create_dir(&p).unwrap();
+        assert!(doc.save().is_err());
+        assert!(doc.is_dirty());
+        assert!(doc.is_editing());
+        assert_eq!(doc.len(), 3);
+        assert_eq!(doc.byte(1), 0xFF);
     }
 
     #[test]

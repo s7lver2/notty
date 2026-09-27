@@ -16,8 +16,19 @@ impl Workspace {
         self.prompt = crate::Prompt::None;
     }
 
+    /// Pregunta por el conflicto del documento activo.
     pub fn open_conflict(&mut self) {
-        self.prompt = crate::Prompt::Conflict;
+        let st = self.active();
+        let name = crate::doc_name(st.path.as_deref());
+        self.prompt = crate::Prompt::Conflict(crate::ConflictState::new(st.id, name, std::time::Instant::now()));
+    }
+
+    /// Guardar como pertenece al documento en el que se abrió: si se cambia de
+    /// documento, se cierra en vez de guardar otro en esa ruta.
+    fn after_switch(&mut self, before: usize) {
+        if self.active != before && matches!(&self.prompt, crate::Prompt::Path(p) if p.purpose == crate::Purpose::Save) {
+            self.prompt = crate::Prompt::None;
+        }
     }
 
     /// Acceso simultáneo al prompt (mutable) y al documento activo (solo lectura):
@@ -57,6 +68,15 @@ impl Workspace {
         self.docs.get_mut(idx)
     }
 
+    pub fn get(&self, idx: usize) -> Option<&EditorState> {
+        self.docs.get(idx)
+    }
+
+    /// Índice actual del documento con `EditorState::id == id`, si sigue abierto.
+    pub fn index_of(&self, id: u64) -> Option<usize> {
+        self.docs.iter().position(|d| d.id == id)
+    }
+
     /// `EditorState::new_empty`/`from_opened` no conocen el tamaño de la ventana (se
     /// crean con `visible_lines: 1`): se hereda el de la pestaña activa, que sí lo
     /// tiene, para que el documento no se vea "de una línea" hasta el próximo resize.
@@ -67,15 +87,21 @@ impl Workspace {
     }
 
     pub fn activate(&mut self, idx: usize) {
+        let before = self.active;
         self.active = idx.min(self.docs.len() - 1);
+        self.after_switch(before);
     }
 
     pub fn next(&mut self) {
+        let before = self.active;
         self.active = (self.active + 1) % self.docs.len();
+        self.after_switch(before);
     }
 
     pub fn prev(&mut self) {
+        let before = self.active;
         self.active = (self.active + self.docs.len() - 1) % self.docs.len();
+        self.after_switch(before);
     }
 
     /// Cierra la pestaña activa. Devuelve `true` si de verdad quedó una lista más
@@ -221,9 +247,23 @@ mod tests {
     }
 
     #[test]
-    fn open_conflict_sets_the_prompt() {
+    fn open_conflict_is_bound_to_the_active_doc() {
         let mut w = Workspace::new();
+        w.open(EditorState::new_empty());
+        let id = w.active().id;
         w.open_conflict();
-        assert!(matches!(w.prompt, crate::Prompt::Conflict));
+        w.activate(0);
+        assert!(matches!(&w.prompt, crate::Prompt::Conflict(c) if c.doc == id));
+    }
+
+    #[test]
+    fn switching_docs_closes_a_save_prompt() {
+        let mut w = Workspace::new();
+        w.open(EditorState::new_empty());
+        w.prompt = Prompt::Path(crate::PathPromptState::new(crate::Purpose::Save, String::new()));
+        w.activate(1);
+        assert!(matches!(w.prompt, Prompt::Path(_)));
+        w.prev();
+        assert!(matches!(w.prompt, Prompt::None));
     }
 }

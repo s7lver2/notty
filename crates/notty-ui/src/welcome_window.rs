@@ -674,6 +674,7 @@ fn paint(st: &mut State) {
     };
     let pal_mixed = theme::LIGHT.mix(&theme::DARK, dark_k);
     let pal = &pal_mixed;
+    st.renderer.recover_device();
     let (w, h) = st.renderer.size_dips();
     let r = &st.renderer;
     let compact_rail = w < RAIL_COMPACT_BELOW;

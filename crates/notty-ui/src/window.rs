@@ -20,7 +20,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     LoadCursorW, LoadIconW, MSG, NCCALCSIZE_PARAMS, PostQuitMessage, RegisterClassExW, SM_CXPADDEDBORDER,
     SM_CYFRAME, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOSIZE,
     SWP_NOZORDER, SetCursor, SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow,
-    TranslateMessage, WHEEL_DELTA, WM_ACTIVATE, WM_CHAR, WM_DESTROY, WM_DPICHANGED, WM_KEYDOWN, WM_LBUTTONDOWN,
+    TranslateMessage, WHEEL_DELTA, WM_ACTIVATE, WM_CHAR, WM_CLOSE, WM_DESTROY, WM_ENDSESSION, WM_DPICHANGED, WM_KEYDOWN, WM_LBUTTONDOWN,
     WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCALCSIZE, WM_NCHITTEST, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP,
     WM_NCMOUSELEAVE, WM_NCMOUSEMOVE, WM_PAINT, WM_SETCURSOR, WM_SETTINGCHANGE, WM_SIZE, WM_SYSKEYDOWN, WM_TIMER,
     WNDCLASSEXW, WS_EX_APPWINDOW, WS_OVERLAPPEDWINDOW, MINMAXINFO, SIZE_MINIMIZED, WM_CONTEXTMENU, WM_GETMINMAXINFO,
@@ -51,7 +51,7 @@ const ID_ANIM_TIMER: usize = 3;
 /// volcar a `notty_io::recovery_dir()`. Vive en memoria estática (`Box::leak`) para que
 /// el hook, que se instala una única vez para todo el proceso, tenga una dirección
 /// válida sin depender de que el hilo que entra en pánico coopere activamente.
-type RecoverySnapshot = Mutex<Vec<(String, String, bool)>>;
+type RecoverySnapshot = Mutex<Vec<(String, String, bool, Option<std::path::PathBuf>)>>;
 
 /// Estado ligado a una ventana concreta: se guarda en `GWLP_USERDATA` mientras vive.
 struct WindowState {
@@ -139,8 +139,14 @@ struct WindowState {
     about_open: bool,
     /// Cuándo se copió la ruta por última vez (aviso de 1,8 s).
     path_copied_at: Option<std::time::Instant>,
+    /// Aviso breve en la barra de estado (texto y cuándo apareció), ver `show_notice`.
+    notice: Option<(String, std::time::Instant)>,
     /// Descartar el próximo `WM_CHAR` (la tecla ya se usó en `WM_KEYDOWN`).
     swallow_char: bool,
+    /// Mitad alta de un par sustituto pendiente de `WM_CHAR` (emoji).
+    pending_surrogate: Option<u16>,
+    /// Ya se resolvió qué hacer con lo no guardado: el próximo `WM_CLOSE` cierra de verdad.
+    close_confirmed: bool,
     /// Paneles de `Files::Splits`. Se mantiene al día también en los otros modos (al
     /// cerrar documentos) para que volver a Paneles no apunte a índices que ya no existen.
     splits: crate::splits::Splits,
@@ -276,6 +282,99 @@ fn close_tab(w: &mut WindowState, hwnd: HWND, idx: usize) {
         w.splits.sync(w.ws.active_index());
         w.tab_anims.on_close(idx, name, dirty, std::time::Instant::now(), w.animations_enabled);
         ensure_anim_timer(w, hwnd);
+    }
+}
+
+/// Cierra los documentos `indices` (y la ventana si `quit`), resolviendo antes lo que
+/// no esté guardado según `files.on_close_unsaved`: preguntar o volcar a recuperación.
+fn request_close(w: &mut WindowState, hwnd: HWND, indices: &[usize], quit: bool) {
+    let mode = w.cfg.borrow().files.on_close_unsaved;
+    let req = crate::CloseRequest::new(indices.iter().filter_map(|&i| w.ws.get(i)), mode, quit);
+    continue_close(w, hwnd, req);
+}
+
+/// Pregunta por el siguiente documento pendiente o, si no queda ninguno, cierra.
+fn continue_close(w: &mut WindowState, hwnd: HWND, mut req: crate::CloseRequest) {
+    req.ask.retain(|id| w.ws.index_of(*id).is_some());
+    if let Some(idx) = req.ask.first().and_then(|id| w.ws.index_of(*id)) {
+        w.ws.activate(idx);
+        req.name = crate::doc_name(w.ws.active().path.as_deref());
+        close_menus(w);
+        w.ws.prompt = crate::Prompt::CloseUnsaved(req);
+        unsafe { update_title(hwnd, w.ws.active()) };
+        return;
+    }
+    if matches!(w.ws.prompt, crate::Prompt::CloseUnsaved(_)) {
+        w.ws.close_prompt();
+    }
+    let to_recover = w.ws.iter().filter(|st| req.recover.contains(&st.id));
+    if let Err(e) = dump_docs_to_recovery(to_recover) {
+        show_notice(w, hwnd, format!("No se pudo guardar para recuperar: {e}"));
+        return;
+    }
+    if req.quit {
+        w.close_confirmed = true;
+        unsafe {
+            let _ = windows::Win32::UI::WindowsAndMessaging::PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0));
+        }
+        return;
+    }
+    let mut idxs: Vec<usize> = req.targets.iter().filter_map(|id| w.ws.index_of(*id)).collect();
+    idxs.sort_unstable();
+    for i in idxs.into_iter().rev() {
+        close_tab(w, hwnd, i);
+    }
+    refresh_recovery(w);
+    unsafe { update_title(hwnd, w.ws.active()) };
+}
+
+/// Respuesta a "tiene cambios sin guardar" (tecla o clic).
+fn answer_close(w: &mut WindowState, hwnd: HWND, choice: crate::CloseChoice) {
+    let crate::Prompt::CloseUnsaved(mut req) = std::mem::take(&mut w.ws.prompt) else { return };
+    match choice {
+        crate::CloseChoice::Cancel => {}
+        crate::CloseChoice::Discard => {
+            req.ask.remove(0);
+            continue_close(w, hwnd, req);
+        }
+        crate::CloseChoice::Save => {
+            let Some(idx) = req.ask.first().and_then(|id| w.ws.index_of(*id)) else {
+                continue_close(w, hwnd, req);
+                return;
+            };
+            w.ws.activate(idx);
+            req.ask.remove(0);
+            let raw_dirty = w.ws.active().raw.as_ref().is_some_and(|r| r.is_dirty());
+            if raw_dirty {
+                match w.ws.active_mut().raw.as_mut().map(|raw| raw.save()) {
+                    Some(Err(e)) => show_notice(w, hwnd, format!("No se pudo guardar: {e}")),
+                    _ => continue_close(w, hwnd, req),
+                }
+            } else if w.ws.active().path.is_none() {
+                save_as_then_close(w, hwnd, req);
+            } else if save_now(w, hwnd) {
+                continue_close(w, hwnd, req);
+            }
+            // Si no se pudo guardar (o hay conflicto con el disco), el cierre se para ahí.
+        }
+    }
+}
+
+/// "Guardar" sobre un documento sin ruta: pide dónde con la línea de ruta (o el diálogo
+/// nativo) y, si se guarda, el cierre continúa (ver `commit_path_prompt_with`).
+fn save_as_then_close(w: &mut WindowState, hwnd: HWND, req: crate::CloseRequest) {
+    let mut p = crate::PathPromptState::new(crate::Purpose::Save, String::new());
+    p.then_close = Some(req);
+    if w.cfg.borrow().ui.native_file_dialog {
+        let Some(path) = crate::native_dialog::pick_path(hwnd, crate::Purpose::Save) else { return };
+        let Some(value) = path.to_str() else { return };
+        let ctx = path_ctx(w);
+        p.type_text(value, &ctx);
+        w.ws.prompt = crate::Prompt::Path(p);
+        commit_path_prompt(w, hwnd);
+    } else {
+        w.ws.prompt = crate::Prompt::Path(p);
+        start_popup_anim(w, hwnd);
     }
 }
 
@@ -428,21 +527,16 @@ fn run_ctx_cmd(w: &mut WindowState, hwnd: HWND, cmd: crate::context_menu::CtxCmd
             let cfg = w.cfg.borrow().clone();
             open_tab(w, hwnd, maybe_vim(crate::EditorState::new_empty(), &cfg));
         }
-        CtxCmd::CloseTab(i) => close_tab(w, hwnd, i),
+        CtxCmd::CloseTab(i) => request_close(w, hwnd, &[i], false),
         CtxCmd::CloseOthers(i) => {
             if i < w.ws.len() {
-                for j in (0..w.ws.len()).rev() {
-                    if j != i {
-                        close_tab(w, hwnd, j);
-                    }
-                }
-                w.ws.activate(0);
+                let others: Vec<usize> = (0..w.ws.len()).filter(|&j| j != i).collect();
+                request_close(w, hwnd, &others, false);
             }
         }
         CtxCmd::CloseRight(i) => {
-            for j in (i + 1..w.ws.len()).rev() {
-                close_tab(w, hwnd, j);
-            }
+            let right: Vec<usize> = (i + 1..w.ws.len()).collect();
+            request_close(w, hwnd, &right, false);
         }
         CtxCmd::CopyPath(i) => {
             if let Some(p) = path_of(w, i) {
@@ -759,7 +853,7 @@ fn start_tour(hwnd: HWND) {
 
 /// Guarda el documento activo, pero antes comprueba si el archivo cambió en disco
 /// desde que se abrió: si es así, abre `Prompt::Conflict` en vez de escribir encima.
-fn try_save(w: &mut WindowState) {
+fn try_save(w: &mut WindowState) -> SaveOutcome {
     let path_and_since = {
         let st = w.ws.active();
         st.path.clone().map(|p| (p, st.open_mtime))
@@ -767,12 +861,56 @@ fn try_save(w: &mut WindowState) {
     if let Some((path, Some(since))) = path_and_since {
         if notty_io::changed_since(&path, since) {
             w.ws.open_conflict();
-            return;
+            return SaveOutcome::Conflict;
         }
     }
-    let _ = w.ws.active_mut().save();
-    if let Some(path) = w.ws.active().path.clone() {
-        w.ws.active_mut().open_mtime = notty_io::mtime(&path).ok();
+    if let Err(e) = w.ws.active_mut().save() {
+        return SaveOutcome::Failed(e.to_string());
+    }
+    let st = w.ws.active_mut();
+    st.autosave_failed_rev = None;
+    st.autosave_paused = false;
+    if let Some(path) = st.path.clone() {
+        st.open_mtime = notty_io::mtime(&path).ok();
+    }
+    SaveOutcome::Saved
+}
+
+/// Una pregunta que no puede esperar (conflicto al autoguardar): se cierran menús y,
+/// si la ventana no está delante, parpadea en la barra de tareas.
+fn claim_attention(w: &mut WindowState, hwnd: HWND) {
+    close_menus(w);
+    if !w.active_window {
+        use windows::Win32::UI::WindowsAndMessaging::{FLASHW_ALL, FLASHW_TIMERNOFG, FLASHWINFO, FlashWindowEx};
+        let info = FLASHWINFO {
+            cbSize: std::mem::size_of::<FLASHWINFO>() as u32,
+            hwnd,
+            dwFlags: FLASHW_ALL | FLASHW_TIMERNOFG,
+            uCount: 0,
+            dwTimeout: 0,
+        };
+        unsafe {
+            let _ = FlashWindowEx(&info);
+        }
+    }
+}
+
+enum SaveOutcome {
+    Saved,
+    Conflict,
+    Failed(String),
+}
+
+/// Guardado pedido por el usuario: si falla, lo dice en la barra de estado.
+/// Devuelve `true` solo si se guardó.
+fn save_now(w: &mut WindowState, hwnd: HWND) -> bool {
+    match try_save(w) {
+        SaveOutcome::Saved => true,
+        SaveOutcome::Conflict => false,
+        SaveOutcome::Failed(e) => {
+            show_notice(w, hwnd, format!("No se pudo guardar: {e}"));
+            false
+        }
     }
 }
 
@@ -781,17 +919,29 @@ fn try_save(w: &mut WindowState) {
 /// tecla, y mucho más simple — ver Task 7 Step 3 del plan). Solo se autoguarda el
 /// documento activo, solo si tiene ruta real, no es temporal volátil, y no hay ya un
 /// conflicto sin resolver.
-fn autosave_tick(w: &mut WindowState) {
+fn autosave_tick(w: &mut WindowState, hwnd: HWND) {
     if !w.cfg.borrow().files.autosave {
         return;
     }
-    if matches!(w.ws.prompt, crate::Prompt::Conflict) {
+    if matches!(w.ws.prompt, crate::Prompt::Conflict(_)) {
         return;
     }
     let st = w.ws.active();
     let has_real_path = st.path.is_some() && !matches!(st.temp, Some(notty_config::TempMode::Volatile));
-    if has_real_path && st.doc.is_dirty() {
-        try_save(w);
+    let already_failed = st.autosave_failed_rev == Some(st.doc.revision());
+    if has_real_path && st.doc.is_dirty() && !already_failed && !st.autosave_paused {
+        match try_save(w) {
+            SaveOutcome::Failed(e) => {
+                let st = w.ws.active_mut();
+                let first = st.autosave_failed_rev.is_none();
+                st.autosave_failed_rev = Some(st.doc.revision());
+                if first {
+                    show_notice(w, hwnd, format!("No se pudo autoguardar: {e}"));
+                }
+            }
+            SaveOutcome::Conflict => claim_attention(w, hwnd),
+            SaveOutcome::Saved => {}
+        }
     }
     refresh_recovery(w);
 }
@@ -809,12 +959,9 @@ fn ipc_tick(w: &mut WindowState, hwnd: HWND) -> bool {
             match msg {
                 notty_ipc::Message::OpenPath(p) => {
                     if !p.is_empty() {
-                        let path = std::path::PathBuf::from(p);
-                        if let Ok(opened) = crate::open_as_document(&path) {
-                            let cfg = w.cfg.borrow().clone();
-                            opened_docs.push(maybe_vim(EditorState::from_opened(opened), &cfg));
-                            changed = true;
-                        }
+                        let cfg = w.cfg.borrow().clone();
+                        opened_docs.push(maybe_vim(state_for_path(std::path::Path::new(&p)), &cfg));
+                        changed = true;
                     }
                 }
                 notty_ipc::Message::UpdateAvailable(r) => {
@@ -826,8 +973,18 @@ fn ipc_tick(w: &mut WindowState, hwnd: HWND) -> bool {
             }
         }
     }
+    let any_opened = !opened_docs.is_empty();
     for st in opened_docs {
         open_tab(w, hwnd, st);
+    }
+    if any_opened {
+        unsafe {
+            update_title(hwnd, w.ws.active());
+            if windows::Win32::UI::WindowsAndMessaging::IsIconic(hwnd).as_bool() {
+                let _ = ShowWindow(hwnd, SW_RESTORE);
+            }
+            let _ = windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow(hwnd);
+        }
     }
     if download_tick(w) {
         changed = true;
@@ -1009,6 +1166,11 @@ fn start_update_download(w: &mut WindowState, hwnd: HWND) {
 /// volcado fresco justo antes de relanzar es el equivalente más fiel que hay.
 fn relaunch_via_setup(w: &mut WindowState, setup_exe: &std::path::Path) {
     refresh_recovery(w);
+    // Sin volcado a disco, lo no guardado se perdería al cerrar: mejor no relanzar.
+    if let Err(e) = dump_recovery_snapshot(w.recovery) {
+        w.update.download_error(format!("no se pudo guardar la sesión: {e}"));
+        return;
+    }
     let current = std::env::current_exe().unwrap_or_default();
     let _ = std::process::Command::new(setup_exe)
         .arg("--update")
@@ -1058,6 +1220,22 @@ fn path_copied_progress(w: &WindowState) -> Option<f32> {
     Some(if w.animations_enabled { p } else { 0.5 })
 }
 
+/// Enseña `text` unos segundos sobre la barra de estado (mismo aviso que "Ruta copiada").
+fn show_notice(w: &mut WindowState, hwnd: HWND, text: impl Into<String>) {
+    w.path_copied_at = None;
+    w.notice = Some((text.into(), std::time::Instant::now()));
+    ensure_anim_timer(w, hwnd);
+}
+
+fn notice_progress(w: &WindowState) -> Option<(f32, String)> {
+    let (text, t0) = w.notice.as_ref()?;
+    let p = t0.elapsed().as_secs_f32() / 3.5;
+    if p >= 1.0 {
+        return None;
+    }
+    Some((if w.animations_enabled { p } else { 0.5 }, text.clone()))
+}
+
 /// Contenido de "Acerca de notty": versión y enlace al repositorio (si `repo` no es
 /// el marcador de posición de las compilaciones sin configurar).
 fn about_content(repo: &str) -> crate::AboutContent {
@@ -1065,33 +1243,80 @@ fn about_content(repo: &str) -> crate::AboutContent {
     crate::AboutContent { version: crate::app_version().to_string(), url }
 }
 
-/// Resuelve `Prompt::Conflict`: `M` conserva lo escrito en notty y lo guarda, `D`
-/// descarta los cambios locales y recarga lo que hay en disco. Cualquier otra tecla
-/// no hace nada (Esc ya se maneja antes, en `handle_prompt_keydown`).
-fn handle_conflict_key(w: &mut WindowState, vk: u32) {
+/// Teclas de `Prompt::Conflict`: se escribe SI o NO y Enter; Esc cancela y deja el
+/// autoguardado de ese documento en pausa hasta el próximo guardado a mano.
+fn handle_conflict_key(w: &mut WindowState, hwnd: HWND, vk: u32) {
+    let crate::Prompt::Conflict(c) = &mut w.ws.prompt else { return };
+    let now = std::time::Instant::now();
     match vk {
-        0x4D => {
-            // M: el mío.
-            let _ = w.ws.active_mut().save();
-            if let Some(path) = w.ws.active().path.clone() {
-                w.ws.active_mut().open_mtime = notty_io::mtime(&path).ok();
-            }
+        0x08 => c.backspace(),
+        0x1B => {
+            let id = c.doc;
             w.ws.close_prompt();
+            if let Some(st) = w.ws.index_of(id).and_then(|i| w.ws.get_mut(i)) {
+                st.autosave_paused = true;
+                show_notice(w, hwnd, "Autoguardado en pausa hasta que guardes a mano");
+            }
         }
-        0x44 => {
-            // D: el del disco.
-            if let Some(path) = w.ws.active().path.clone() {
-                if let Ok(opened) = crate::open_as_document(&path) {
-                    let st = w.ws.active_mut();
-                    st.doc = opened.document;
-                    st.encoding = opened.encoding;
-                    st.eol = opened.eol;
-                    st.open_mtime = notty_io::mtime(&path).ok();
-                }
+        0x0D if c.accepts_input(now) => {
+            let (id, answer) = (c.doc, c.answer());
+            if answer == crate::ConflictAnswer::Invalid {
+                c.invalid = true;
+                c.input.clear();
+                return;
             }
             w.ws.close_prompt();
+            let Some(idx) = w.ws.index_of(id) else { return };
+            let Some(st) = w.ws.get_mut(idx) else { return };
+            match answer {
+                crate::ConflictAnswer::KeepMine => match st.save() {
+                    Ok(()) => {
+                        st.autosave_failed_rev = None;
+                        st.autosave_paused = false;
+                        st.open_mtime = st.path.as_deref().and_then(|p| notty_io::mtime(p).ok());
+                    }
+                    Err(e) => show_notice(w, hwnd, format!("No se pudo guardar: {e}")),
+                },
+                crate::ConflictAnswer::UseDisk => {
+                    let reopened = st.path.clone().map(|p| (crate::open_as_document(&p), p));
+                    match reopened {
+                        Some((Ok(opened), path)) => {
+                            st.doc = opened.document;
+                            st.encoding = opened.encoding;
+                            st.eol = opened.eol;
+                            st.open_mtime = notty_io::mtime(&path).ok();
+                            st.lossy_source = opened.lossy.then(|| path.clone());
+                            st.autosave_paused = false;
+                        }
+                        Some((Err(e), _)) => show_notice(w, hwnd, format!("No se pudo leer el archivo: {e}")),
+                        None => {}
+                    }
+                }
+                crate::ConflictAnswer::Invalid => {}
+            }
         }
         _ => {}
+    }
+}
+
+/// Documento para `path` como al abrirlo desde la línea de comandos: texto si se
+/// puede, vista raw si es binario, y si no existe, un documento nuevo con esa ruta.
+fn state_for_path(path: &std::path::Path) -> EditorState {
+    match crate::open_as_document(path) {
+        Ok(opened) => EditorState::from_opened(opened),
+        Err(_) => {
+            let mut state = EditorState::new_empty();
+            match crate::open_raw_doc(path) {
+                Ok(raw) => {
+                    state.raw = Some(raw);
+                    state.path = Some(path.to_path_buf());
+                }
+                // Existe pero no se puede leer: sin ruta, para que guardar no lo pise.
+                Err(_) if path.exists() => {}
+                Err(_) => state.path = Some(path.to_path_buf()),
+            }
+            state
+        }
     }
 }
 
@@ -1117,13 +1342,13 @@ fn recovery_name(st: &EditorState, idx: usize) -> String {
 /// documentos. Se llama tras los manejadores que de verdad pueden ensuciar un
 /// documento (edición de texto, autoguardado, abrir/cerrar pestañas).
 fn refresh_recovery(w: &WindowState) {
-    let snapshot: Vec<(String, String, bool)> = w
+    let snapshot: Vec<_> = w
         .ws
         .iter()
         .enumerate()
         .map(|(i, st)| {
             let text = st.doc.buffer().slice(0..st.doc.buffer().len_chars());
-            (recovery_name(st, i), text, st.doc.is_dirty())
+            (recovery_name(st, i), text, st.doc.is_dirty(), st.path.clone())
         })
         .collect();
     let mut guard = w.recovery.lock().unwrap_or_else(|e| e.into_inner());
@@ -1136,17 +1361,44 @@ fn refresh_recovery(w: &WindowState) {
 fn install_recovery_hook(snapshot: &'static RecoverySnapshot) {
     std::panic::set_hook(Box::new(move |info| {
         eprintln!("notty: pánico: {info}");
-        let entries: Vec<notty_io::RecoveryEntry> = {
-            let guard = snapshot.lock().unwrap_or_else(|e| e.into_inner());
-            guard
-                .iter()
-                .filter(|(_, _, dirty)| *dirty)
-                .enumerate()
-                .map(|(i, (name, text, _))| notty_io::RecoveryEntry { name: format!("{i}_{name}"), text: text.clone() })
-                .collect()
-        };
-        let _ = notty_io::dump_recovery(&notty_io::recovery_dir(), &entries);
+        let _ = dump_recovery_snapshot(snapshot);
     }));
+}
+
+/// Vuelca a `notty_io::recovery_dir()` los documentos sucios del snapshot.
+fn dump_recovery_snapshot(snapshot: &RecoverySnapshot) -> std::io::Result<()> {
+    let entries: Vec<notty_io::RecoveryEntry> = {
+        let guard = snapshot.lock().unwrap_or_else(|e| e.into_inner());
+        guard
+            .iter()
+            .filter(|(_, _, dirty, _)| *dirty)
+            .enumerate()
+            .map(|(i, (name, text, _, path))| notty_io::RecoveryEntry {
+                name: format!("{i}_{name}"),
+                text: text.clone(),
+                path: path.clone(),
+            })
+            .collect()
+    };
+    notty_io::dump_recovery(&notty_io::recovery_dir(), &entries)
+}
+
+/// Vuelca `docs` a la carpeta de recuperación para que vuelvan al abrir notty (cerrar
+/// en modo "Recuperar", o Windows cerrando la sesión). El prefijo de tiempo evita
+/// pisar volcados anteriores que aún no se han recuperado.
+fn dump_docs_to_recovery<'a>(docs: impl Iterator<Item = &'a EditorState>) -> std::io::Result<()> {
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+    let entries: Vec<notty_io::RecoveryEntry> = docs
+        .map(|st| notty_io::RecoveryEntry {
+            name: format!("{stamp}_{}_{}", st.id, recovery_name(st, st.id as usize)),
+            text: st.doc.text(),
+            path: st.path.clone(),
+        })
+        .collect();
+    if entries.is_empty() {
+        return Ok(());
+    }
+    notty_io::dump_recovery(&notty_io::recovery_dir(), &entries)
 }
 
 /// Abre la ventana principal de notty y bloquea hasta que se cierra.
@@ -1273,31 +1525,19 @@ fn run_inner(
         if let Some((mode, ext)) = &initial_temp {
             *ws.active_mut() = maybe_vim(EditorState::new_temp(*mode, ext), &cfg);
         } else if let Some(p) = path {
-            let p = std::path::Path::new(p);
-            match crate::open_as_document(p) {
-                Ok(opened) => *ws.active_mut() = maybe_vim(EditorState::from_opened(opened), &cfg),
-                Err(_) => {
-                    // No es texto (o no se pudo decodificar): se abre directamente en vista
-                    // raw, como pide la Task 7 de este plan.
-                    let mut state = EditorState::new_empty();
-                    state.path = Some(p.to_path_buf());
-                    if let Ok(raw) = crate::open_raw_doc(p) {
-                        state.raw = Some(raw);
-                    }
-                    *ws.active_mut() = maybe_vim(state, &cfg);
-                }
-            }
+            *ws.active_mut() = maybe_vim(state_for_path(std::path::Path::new(p)), &cfg);
         }
 
-        // Recuperación tras una caída anterior: se ofrecen como documentos nuevos con
-        // ruta CLICKME (ninguno es "el archivo original" — solo se volcó nombre+texto,
-        // no la ruta —, así que el usuario decide dónde guardarlos, como con cualquier
-        // documento nuevo). Se borra el volcado en cuanto se han recuperado.
+        // Recuperación (caída, relanzar tras actualizar o cerrar en modo "Recuperar"):
+        // cada volcado vuelve como documento pendiente de guardar, con su ruta original
+        // si la tenía. Se borra el volcado en cuanto se han recuperado.
         let recovered = notty_io::list_recovery(&notty_io::recovery_dir());
         if !recovered.is_empty() {
             for entry in &recovered {
                 let mut st = EditorState::new_empty();
                 st.doc = notty_core::Document::new(&entry.text, "\r\n");
+                st.doc.mark_unsaved();
+                st.path = entry.path.clone();
                 ws.open(st);
             }
             let _ = notty_io::clear_recovery(&notty_io::recovery_dir());
@@ -1350,7 +1590,10 @@ fn run_inner(
             tab_anims: Default::default(),
             about_open: false,
             path_copied_at: None,
+            notice: None,
             swallow_char: false,
+            pending_surrogate: None,
+            close_confirmed: false,
             splits: crate::splits::Splits::default(),
         });
         let ptr = Box::into_raw(window_state);
@@ -1574,6 +1817,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     w.renderer.set_tab_anim(w.tab_anims.frame(std::time::Instant::now()));
                     w.renderer.set_about(if w.about_open { Some(about_content(&w.repo)) } else { None });
                     w.renderer.set_path_copied(path_copied_progress(w));
+                    w.renderer.set_notice(notice_progress(w));
                     if w.tour.is_some() {
                         w.renderer.hold_next_frame();
                     }
@@ -1835,7 +2079,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                                 let st = w.ws.active_mut();
                                 st.vim = if st.vim.is_some() { None } else { Some(crate::VimState::default()) };
                             }
-                            notty_input::Command::ToggleRaw => toggle_raw(w),
+                            notty_input::Command::ToggleRaw => toggle_raw(w, hwnd),
                             notty_input::Command::ZoomIn => {
                                 let target = w.cfg.borrow().ui.font_scale + ZOOM_STEP;
                                 set_font_scale(w, hwnd, target);
@@ -1866,7 +2110,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             }
                             notty_input::Command::CloseTab => {
                                 let i = w.ws.active_index();
-                                close_tab(w, hwnd, i);
+                                request_close(w, hwnd, &[i], false);
                             }
                             notty_input::Command::OpenSettings => open_settings(w, hwnd),
                             notty_input::Command::SplitPane => split_pane(w, hwnd),
@@ -1897,7 +2141,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     };
 
                     if w.ws.active().raw.is_some() {
-                        handle_raw_keydown(w, vk, action);
+                        handle_raw_keydown(w, hwnd, vk, action);
                         update_title(hwnd, w.ws.active());
                         let _ = InvalidateRect(Some(hwnd), None, false);
                         return LRESULT(0);
@@ -1956,7 +2200,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             // llegar aquí), F3 no tiene una búsqueda que repetir: no hace nada.
                         }
                         crate::EditorAction::Save => {
-                            try_save(w);
+                            save_now(w, hwnd);
                             update_title(hwnd, w.ws.active());
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
@@ -1975,7 +2219,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     if std::mem::take(&mut w.swallow_char) {
                         return LRESULT(0);
                     }
-                    if let Some(ch) = char::from_u32(wparam.0 as u32) {
+                    if let Some(ch) = crate::char_from_utf16_unit(&mut w.pending_surrogate, wparam.0 as u16) {
                         if !matches!(w.ws.prompt, crate::Prompt::None) {
                             handle_prompt_char(w, ch);
                             let _ = InvalidateRect(Some(hwnd), None, false);
@@ -2079,6 +2323,16 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             }
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
+                        Hit::CloseChoice(k) => {
+                            let choice = match k {
+                                0 => crate::CloseChoice::Save,
+                                1 => crate::CloseChoice::Discard,
+                                _ => crate::CloseChoice::Cancel,
+                            };
+                            answer_close(w, hwnd, choice);
+                            update_title(hwnd, w.ws.active());
+                            let _ = InvalidateRect(Some(hwnd), None, false);
+                        }
                         Hit::Overwrite(k) => {
                             let choice = match k {
                                 0 => crate::OverwriteChoice::Overwrite,
@@ -2142,7 +2396,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                         crate::Hit::TabClose(i) => {
-                            close_tab(w, hwnd, i);
+                            request_close(w, hwnd, &[i], false);
                             update_title(hwnd, w.ws.active());
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
@@ -2264,7 +2518,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         (Hit::Close, Hit::Close) => {
                             let _ = windows::Win32::UI::WindowsAndMessaging::PostMessageW(
                                 Some(hwnd),
-                                windows::Win32::UI::WindowsAndMessaging::WM_CLOSE,
+                                WM_CLOSE,
                                 WPARAM(0),
                                 LPARAM(0),
                             );
@@ -2399,7 +2653,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             WM_TIMER => {
                 if wparam.0 == ID_AUTOSAVE_TIMER {
                     if let Some(w) = ptr.as_mut() {
-                        autosave_tick(w);
+                        autosave_tick(w, hwnd);
                         let _ = InvalidateRect(Some(hwnd), None, false);
                     }
                     return LRESULT(0);
@@ -2437,7 +2691,8 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             || w.chrome_fade_anim.is_some()
                             || w.theme_anim.is_some()
                             || tour_animating
-                            || path_copied_progress(w).is_some();
+                            || path_copied_progress(w).is_some()
+                            || notice_progress(w).is_some();
                         if !still_animating {
                             let _ = KillTimer(Some(hwnd), ID_ANIM_TIMER);
                             w.anim_timer_running = false;
@@ -2447,6 +2702,27 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     return LRESULT(0);
                 }
                 DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
+            WM_CLOSE => {
+                if let Some(w) = ptr.as_mut() {
+                    if !w.close_confirmed {
+                        let all: Vec<usize> = (0..w.ws.len()).collect();
+                        request_close(w, hwnd, &all, true);
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                        return LRESULT(0);
+                    }
+                }
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
+            // Windows cierra la sesión sin mandar `WM_CLOSE`: lo no guardado se vuelca a
+            // recuperación (sea cual sea el modo) para no perderlo.
+            WM_ENDSESSION => {
+                if wparam.0 != 0 {
+                    if let Some(w) = ptr.as_ref() {
+                        let _ = dump_docs_to_recovery(w.ws.iter().filter(|st| crate::has_unsaved(st)));
+                    }
+                }
+                LRESULT(0)
             }
             WM_DESTROY => {
                 let _ = KillTimer(Some(hwnd), ID_AUTOSAVE_TIMER);
@@ -2515,7 +2791,7 @@ fn run_menu_item(w: &mut WindowState, hwnd: HWND, menu_idx: usize, item_idx: usi
                     start_popup_anim(w, hwnd);
                 }
             } else {
-                try_save(w);
+                save_now(w, hwnd);
             }
         }
         MenuCmd::SaveAs => {
@@ -2526,7 +2802,7 @@ fn run_menu_item(w: &mut WindowState, hwnd: HWND, menu_idx: usize, item_idx: usi
         MenuCmd::Settings => open_settings(w, hwnd),
         MenuCmd::CloseTab => {
             let i = w.ws.active_index();
-            close_tab(w, hwnd, i);
+            request_close(w, hwnd, &[i], false);
         }
         MenuCmd::Undo => {
             w.ws.active_mut().doc.undo();
@@ -2542,7 +2818,7 @@ fn run_menu_item(w: &mut WindowState, hwnd: HWND, menu_idx: usize, item_idx: usi
             let st = w.ws.active_mut();
             st.vim = if st.vim.is_some() { None } else { Some(crate::VimState::default()) };
         }
-        MenuCmd::ToggleRaw => toggle_raw(w),
+        MenuCmd::ToggleRaw => toggle_raw(w, hwnd),
         MenuCmd::ToggleLineNumbers => {
             let mut cfg = w.cfg.borrow_mut();
             cfg.ui.line_numbers = !cfg.ui.line_numbers;
@@ -2572,12 +2848,28 @@ fn run_menu_item(w: &mut WindowState, hwnd: HWND, menu_idx: usize, item_idx: usi
 /// Cambia entre la vista de texto normal y la vista raw (`Ctrl+Shift+H`). Si el
 /// contenido de la vista raw sigue siendo UTF-8 válido al volver a texto, se reconstruye
 /// el `Document`; si no, se queda en raw (no hay forma segura de mostrarlo como texto).
-fn toggle_raw(w: &mut WindowState) {
+fn toggle_raw(w: &mut WindowState, hwnd: HWND) {
+    // Entrar y salir de raw recarga desde disco: con cambios sin guardar se perderían.
+    let st = w.ws.active();
+    if st.raw.as_ref().is_some_and(|r| r.is_dirty()) {
+        show_notice(w, hwnd, "Guarda antes de salir de raw");
+        return;
+    }
+    if st.raw.is_none() && st.doc.is_dirty() {
+        show_notice(w, hwnd, "Guarda antes de ver como raw");
+        return;
+    }
     let st = w.ws.active_mut();
     if let Some(raw) = st.raw.take() {
-        let bytes: Vec<u8> = (0..raw.len()).map(|i| raw.byte(i)).collect();
-        if let Ok(text) = String::from_utf8(bytes) {
-            st.doc = notty_core::Document::new(&text, st.eol.as_str());
+        let reopened = st.path.as_deref().map(crate::open_as_document);
+        if let Some(Ok(opened)) = reopened {
+            st.doc = opened.document;
+            st.encoding = opened.encoding;
+            st.eol = opened.eol;
+            st.open_mtime = notty_io::mtime(&opened.path).ok();
+            st.lossy_source = opened.lossy.then(|| opened.path.clone());
+            // `first_line` venía contando filas hex, no líneas.
+            st.viewport.first_line = 0;
         } else {
             st.raw = Some(raw);
         }
@@ -2592,7 +2884,7 @@ fn toggle_raw(w: &mut WindowState) {
 }
 
 /// Flechas (mueven el byte seleccionado) y `Ctrl+S` (guarda) mientras hay un `RawDoc` activo.
-fn handle_raw_keydown(w: &mut WindowState, vk: u32, action: crate::EditorAction) {
+fn handle_raw_keydown(w: &mut WindowState, hwnd: HWND, vk: u32, action: crate::EditorAction) {
     let len = w.ws.active().raw.as_ref().map(|r| r.len()).unwrap_or(0);
     let delta: i64 = match vk {
         0x25 => -1, // Left
@@ -2615,8 +2907,8 @@ fn handle_raw_keydown(w: &mut WindowState, vk: u32, action: crate::EditorAction)
         return;
     }
     if matches!(action, crate::EditorAction::Save) {
-        if let Some(raw) = w.ws.active_mut().raw.as_mut() {
-            let _ = raw.save();
+        if let Some(Err(e)) = w.ws.active_mut().raw.as_mut().map(|raw| raw.save()) {
+            show_notice(w, hwnd, format!("No se pudo guardar: {e}"));
         }
     }
 }
@@ -2661,6 +2953,14 @@ fn path_ctx(w: &WindowState) -> notty_io::PathContext {
 }
 
 fn handle_prompt_keydown(w: &mut WindowState, hwnd: HWND, vk: u32, mods: Modifiers) {
+    if matches!(w.ws.prompt, crate::Prompt::CloseUnsaved(_)) {
+        if let Some(choice) = crate::CloseChoice::from_vk(vk) {
+            w.swallow_char = true;
+            answer_close(w, hwnd, choice);
+            unsafe { update_title(hwnd, w.ws.active()) };
+        }
+        return;
+    }
     // Pregunta "ya existe" pendiente: solo cuentan sus teclas (Esc = cancelar la
     // pregunta, no cerrar el prompt entero).
     if let crate::Prompt::Path(p) = &w.ws.prompt {
@@ -2674,6 +2974,10 @@ fn handle_prompt_keydown(w: &mut WindowState, hwnd: HWND, vk: u32, mods: Modifie
             return;
         }
     }
+    if matches!(w.ws.prompt, crate::Prompt::Conflict(_)) {
+        handle_conflict_key(w, hwnd, vk);
+        return;
+    }
     // Esc cierra cualquier prompt.
     if vk == 0x1B {
         w.ws.close_prompt();
@@ -2685,8 +2989,6 @@ fn handle_prompt_keydown(w: &mut WindowState, hwnd: HWND, vk: u32, mods: Modifie
         handle_search_key(w, vk, mods);
     } else if matches!(w.ws.prompt, crate::Prompt::VimCmdline(_)) {
         handle_vim_cmdline_key(w, hwnd, vk);
-    } else if matches!(w.ws.prompt, crate::Prompt::Conflict) {
-        handle_conflict_key(w, vk);
     }
 }
 
@@ -2702,6 +3004,8 @@ fn handle_prompt_char(w: &mut WindowState, ch: char) {
         }
     } else if matches!(w.ws.prompt, crate::Prompt::Find(_) | crate::Prompt::Replace(_)) {
         handle_search_char(w, ch);
+    } else if let crate::Prompt::Conflict(c) = &mut w.ws.prompt {
+        c.type_char(ch, std::time::Instant::now());
     }
 }
 
@@ -2898,9 +3202,13 @@ fn commit_path_prompt_with(w: &mut WindowState, hwnd: HWND, force_overwrite: boo
             }
             Err(e) => error = Some(e.to_string()),
         },
-        // Guardar un documento que aún no tenía ruta encima de un archivo que ya
-        // existe: antes de escribir encima, se pregunta (ver `answer_overwrite`).
-        notty_io::Hint::Exists if purpose == crate::Purpose::Save && w.ws.active().path.is_none() && !force_overwrite => {
+        // Guardar encima de un archivo que ya existe y no es el propio documento:
+        // antes de escribir encima, se pregunta (ver `answer_overwrite`).
+        notty_io::Hint::Exists
+            if purpose == crate::Purpose::Save
+                && !w.ws.active().path.as_deref().is_some_and(|own| crate::same_file(own, &path))
+                && !force_overwrite =>
+        {
             if let crate::Prompt::Path(p) = &mut w.ws.prompt {
                 p.ask_overwrite = true;
             }
@@ -2924,7 +3232,11 @@ fn commit_path_prompt_with(w: &mut WindowState, hwnd: HWND, force_overwrite: boo
                         let previous_path = w.ws.active().path.clone();
                         w.ws.active_mut().path = Some(path.clone());
                         match w.ws.active_mut().save() {
-                            Ok(()) => done = true,
+                            Ok(()) => {
+                                w.ws.active_mut().open_mtime = notty_io::mtime(&path).ok();
+                                w.ws.active_mut().autosave_failed_rev = None;
+                                done = true;
+                            }
                             Err(e) => {
                                 w.ws.active_mut().path = previous_path;
                                 error = Some(e.to_string());
@@ -2938,10 +3250,17 @@ fn commit_path_prompt_with(w: &mut WindowState, hwnd: HWND, force_overwrite: boo
     }
 
     if done {
+        let then_close = match &mut w.ws.prompt {
+            crate::Prompt::Path(p) => p.then_close.take(),
+            _ => None,
+        };
         notty_io::record_path_use(&path);
         w.ws.close_prompt();
         unsafe {
             update_title(hwnd, w.ws.active());
+        }
+        if let Some(req) = then_close {
+            continue_close(w, hwnd, req);
         }
     } else if let (Some(msg), crate::Prompt::Path(p)) = (error, &mut w.ws.prompt) {
         p.last_error = Some(msg);
@@ -2973,16 +3292,18 @@ fn commit_vim_cmdline(w: &mut WindowState, hwnd: HWND) {
     w.ws.close_prompt();
     match crate::parse_vim_cmd(&line) {
         crate::VimCmd::Save => {
-            try_save(w);
+            save_now(w, hwnd);
         }
         crate::VimCmd::Quit => {
             let i = w.ws.active_index();
-            close_tab(w, hwnd, i);
+            request_close(w, hwnd, &[i], false);
         }
         crate::VimCmd::SaveAndQuit => {
-            try_save(w);
-            let i = w.ws.active_index();
-            close_tab(w, hwnd, i);
+            // Si no se pudo guardar, la pestaña no se cierra: se perdería lo escrito.
+            if save_now(w, hwnd) {
+                let i = w.ws.active_index();
+                request_close(w, hwnd, &[i], false);
+            }
         }
         crate::VimCmd::Substitute { pattern, replacement, global, ignore_case } => {
             // `replace_all` ya sustituye todas las apariciones de cada línea, que es lo que

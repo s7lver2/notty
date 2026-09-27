@@ -96,6 +96,8 @@ pub enum Hit {
     /// Respuesta a "ya existe" en la línea de ruta: 0 = sobrescribir, 1 = abrir el
     /// existente, 2 = cancelar.
     Overwrite(u8),
+    /// Respuesta a "cambios sin guardar" al cerrar: 0 = guardar, 1 = no guardar, 2 = cancelar.
+    CloseChoice(u8),
     /// Enlace al repositorio en "Acerca de notty".
     AboutLink,
     /// Tirador de la barra de scroll del editor (arrastrar desplaza el documento).
@@ -240,7 +242,11 @@ fn with_ellipsis_trimming(dwrite: &IDWriteFactory, fmt: &IDWriteTextFormat) -> R
 
 pub struct Renderer {
     _d2d: ID2D1Factory,
+    hwnd: HWND,
     target: ID2D1HwndRenderTarget,
+    /// El último `EndDraw` dijo que el dispositivo se perdió (driver reiniciado,
+    /// escritorio remoto...): `recover_device` recrea el target antes de pintar.
+    device_lost: std::cell::Cell<bool>,
     dwrite: IDWriteFactory,
     brush: ID2D1SolidColorBrush,
     fonts: Fonts,
@@ -276,6 +282,8 @@ pub struct Renderer {
     about: Option<AboutContent>,
     /// Progreso (`0..1` en 1,8 s) del aviso "Ruta copiada", si hay uno en curso.
     path_copied: Option<f32>,
+    /// Aviso breve de la barra de estado (p. ej. un error al guardar): progreso y texto.
+    notice: Option<(f32, String)>,
     /// Atajos en vigor (tras reasignaciones en `[keys]`) de los elementos de menú que
     /// los tienen, ya en formato corto ("^N").
     menu_keys: Vec<(crate::menu::MenuCmd, String)>,
@@ -308,23 +316,32 @@ pub struct UpdatePanelContent {
     pub show_actualizar: bool,
 }
 
+/// Render target de `hwnd` (al tamaño actual de su área cliente) y la brocha única,
+/// que depende de él. Se llama al crear el `Renderer` y cada vez que se pierde el dispositivo.
+unsafe fn create_target(d2d: &ID2D1Factory, hwnd: HWND, dpi: u32) -> Result<(ID2D1HwndRenderTarget, ID2D1SolidColorBrush)> {
+    unsafe {
+        let mut client = windows::Win32::Foundation::RECT::default();
+        let _ = windows::Win32::UI::WindowsAndMessaging::GetClientRect(hwnd, &mut client);
+        let width = (client.right - client.left).max(1) as u32;
+        let height = (client.bottom - client.top).max(1) as u32;
+        let target = d2d.CreateHwndRenderTarget(
+            &D2D1_RENDER_TARGET_PROPERTIES::default(),
+            &D2D1_HWND_RENDER_TARGET_PROPERTIES { hwnd, pixelSize: D2D_SIZE_U { width, height }, ..Default::default() },
+        )?;
+        target.SetDpi(dpi as f32, dpi as f32);
+        let brush = target.CreateSolidColorBrush(
+            &color(Rgba(1.0, 1.0, 1.0, 1.0)),
+            Some(&D2D1_BRUSH_PROPERTIES { opacity: 1.0, transform: Matrix3x2::identity() }),
+        )?;
+        Ok((target, brush))
+    }
+}
+
 impl Renderer {
     pub fn new(hwnd: HWND, dpi: u32) -> Result<Self> {
         unsafe {
             let d2d: ID2D1Factory = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
-            let mut client = windows::Win32::Foundation::RECT::default();
-            let _ = windows::Win32::UI::WindowsAndMessaging::GetClientRect(hwnd, &mut client);
-            let width = (client.right - client.left).max(1) as u32;
-            let height = (client.bottom - client.top).max(1) as u32;
-            let target = d2d.CreateHwndRenderTarget(
-                &D2D1_RENDER_TARGET_PROPERTIES::default(),
-                &D2D1_HWND_RENDER_TARGET_PROPERTIES {
-                    hwnd,
-                    pixelSize: D2D_SIZE_U { width, height },
-                    ..Default::default()
-                },
-            )?;
-            target.SetDpi(dpi as f32, dpi as f32);
+            let (target, brush) = create_target(&d2d, hwnd, dpi)?;
 
             let dwrite: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
             let sys_fonts: IDWriteFontCollection = {
@@ -361,14 +378,11 @@ impl Renderer {
             let mono_12_semibold = make_format(&dwrite, &mono_family, layout::FONT_SUGGEST, DWRITE_FONT_WEIGHT_SEMI_BOLD)?;
             let mono_12_5 = make_format(&dwrite, &mono_family, layout::FONT_PROMPT, DWRITE_FONT_WEIGHT_NORMAL)?;
 
-            let brush = target.CreateSolidColorBrush(
-                &color(Rgba(1.0, 1.0, 1.0, 1.0)),
-                Some(&D2D1_BRUSH_PROPERTIES { opacity: 1.0, transform: Matrix3x2::identity() }),
-            )?;
-
             Ok(Self {
                 _d2d: d2d,
+                hwnd,
                 target,
+                device_lost: std::cell::Cell::new(false),
                 dwrite,
                 brush,
                 fonts: Fonts {
@@ -407,6 +421,7 @@ impl Renderer {
                 tab_scroll_targets: (None, None),
                 about: None,
                 path_copied: None,
+                notice: None,
                 menu_keys: Vec::new(),
                 syntax_disabled: Vec::new(),
                 mono_family,
@@ -574,8 +589,36 @@ impl Renderer {
 
     pub fn end_paint(&self) {
         self.hold_frame.set(false);
-        unsafe {
-            let _ = self.target.EndDraw(None, None);
+        let r = unsafe { self.target.EndDraw(None, None) };
+        self.note_end_draw(r);
+    }
+
+    /// Si `EndDraw` pide recrear el target, lo apunta y pide otro `WM_PAINT`: en vez de
+    /// quedarse en negro, el siguiente pintado empieza por `recover_device`.
+    fn note_end_draw(&self, r: Result<()>) {
+        if r.is_err_and(|e| e.code() == windows::Win32::Foundation::D2DERR_RECREATE_TARGET) {
+            self.device_lost.set(true);
+            unsafe {
+                let _ = windows::Win32::Graphics::Gdi::InvalidateRect(Some(self.hwnd), None, false);
+            }
+        }
+    }
+
+    /// Recrea el render target y la brocha si el dispositivo se perdió. Devuelve `true`
+    /// si lo hizo: quien guarde recursos propios creados con este `Renderer` (bitmaps)
+    /// debe soltarlos y volver a pedirlos. Hay que llamarla antes de `begin_paint`.
+    pub fn recover_device(&mut self) -> bool {
+        if !self.device_lost.get() {
+            return false;
+        }
+        match unsafe { create_target(&self._d2d, self.hwnd, self.dpi) } {
+            Ok((target, brush)) => {
+                self.target = target;
+                self.brush = brush;
+                self.device_lost.set(false);
+                true
+            }
+            Err(_) => false,
         }
     }
 
@@ -1009,6 +1052,7 @@ impl Renderer {
         view: &ViewState,
         ligature_table: &[(String, char)],
     ) {
+        self.recover_device();
         self.hits.clear();
         self.pending_dropdown = None;
         let pal_mixed;
@@ -1268,7 +1312,12 @@ impl Renderer {
                 self.draw_dropdown(crate::menu::MENUS[i].items, x, top, checks, view, pal);
             }
 
-            self.draw_path_copied(pal, frame.status.top);
+            if let Some(p) = self.path_copied {
+                self.draw_toast(pal, frame.status.top, p, "Ruta copiada al portapapeles", true);
+            }
+            if let Some((p, label)) = &self.notice {
+                self.draw_toast(pal, frame.status.top, *p, label, false);
+            }
             self.draw_update_panel(pal, frame.status.top, w, view);
             self.draw_about(pal, frame.body, view);
 
@@ -1291,7 +1340,8 @@ impl Renderer {
             }
 
             if !self.hold_frame.get() {
-                let _ = self.target.EndDraw(None, None);
+                let r = self.target.EndDraw(None, None);
+                self.note_end_draw(r);
             }
         }
     }
@@ -1871,10 +1921,14 @@ impl Renderer {
         self.path_copied = progress;
     }
 
+    pub fn set_notice(&mut self, notice: Option<(f32, String)>) {
+        self.notice = notice;
+    }
+
     /// Aviso "Ruta copiada al portapapeles" (maqueta `Copiado.dc.html`): sube y
-    /// aparece, se queda, y se va hacia arriba; el ✓ se dibuja trazo a trazo.
-    fn draw_path_copied(&self, pal: &theme::Palette, status_top: f32) {
-        let Some(p) = self.path_copied else { return };
+    /// aparece, se queda, y se va hacia arriba; el ✓ se dibuja trazo a trazo. Con
+    /// `ok == false` (avisos de error) lleva un "!" en vez del ✓.
+    fn draw_toast(&self, pal: &theme::Palette, status_top: f32, p: f32, label: &str, ok: bool) {
         let ease = |k: f32| crate::Curve::Out.apply(k.clamp(0.0, 1.0));
         let (alpha, dy, scale) = if p < 0.12 {
             let k = ease(p / 0.12);
@@ -1885,7 +1939,6 @@ impl Renderer {
             let k = ease((p - 0.82) / 0.18);
             (1.0 - k, -4.0 * k, 1.0)
         };
-        let label = "Ruta copiada al portapapeles";
         let tw = self.measure(label, &self.fonts.ui_12);
         let w = 12.0 + 14.0 + 8.0 + tw + 12.0;
         let left = layout::STATUS_PAD_X + 4.0;
@@ -1913,7 +1966,9 @@ impl Renderer {
             let f = (len - seg1) / seg2;
             line.push((ix + (10.0 + 9.0 * f) * k, iy + (17.0 - 10.0 * f) * k));
         }
-        if draw > 0.0 {
+        if !ok {
+            self.text("!", &self.fonts.ui_12, Rect::new(ix + 4.0, r.top, ix + 14.0, r.bottom), pal.warn);
+        } else if draw > 0.0 {
             self.stroke_polyline(&line, 2.0, pal.ok);
         }
         self.text(label, &self.fonts.ui_12, Rect::new(r.left + 34.0, r.top, r.right, r.bottom), pal.text);
@@ -2251,14 +2306,69 @@ impl Renderer {
                     let fx = x + w + 4.0;
                     self.text(line, &self.fonts.mono_12_5, Rect::new(fx, r.top, r.right - layout::STATUS_PAD_X, r.bottom), pal.text);
                 }
-                crate::Prompt::Conflict => {
-                    let msg = "El archivo cambió en disco. [M] guardar el mío   [D] usar el del disco   [Esc] cancelar";
-                    let x = r.left + layout::STATUS_PAD_X;
-                    self.text(msg, &self.fonts.ui_11_5, Rect::new(x, r.top, r.right - layout::STATUS_PAD_X, r.bottom), pal.danger);
-                }
+                crate::Prompt::CloseUnsaved(req) => self.draw_close_prompt(req, pal, r, view),
+                crate::Prompt::Conflict(c) => self.draw_conflict_prompt(c, pal, r),
                 crate::Prompt::None => {}
             }
         }
+    }
+
+    /// "El archivo cambió en disco": franja en rojo suave con un campo donde escribir
+    /// SI o NO (ver `ConflictState`).
+    fn draw_conflict_prompt(&mut self, c: &crate::ConflictState, pal: &theme::Palette, r: Rect) {
+        self.fill(r, pal.danger.faded(0.12));
+        let field_w = 70.0;
+        let fr = Rect::new(r.right - layout::STATUS_PAD_X - field_w, r.top + 3.0, r.right - layout::STATUS_PAD_X, r.bottom - 3.0);
+        self.fill_round(fr, 4.0, pal.surface);
+        self.stroke_round_rect(fr, 4.0, 1.0, pal.danger);
+        let tw = self.measure(&c.input, &self.fonts.mono_12_5);
+        let tx = fr.left + 8.0;
+        self.text(&c.input, &self.fonts.mono_12_5, Rect::new(tx, r.top, fr.right - 4.0, r.bottom), pal.text);
+        let caret_x = (tx + tw).min(fr.right - 4.0);
+        self.fill(Rect::new(caret_x, r.top + 6.0, caret_x + 1.0, r.bottom - 6.0), pal.text);
+        let msg = if c.invalid {
+            "Escribe SI o NO y pulsa Enter · Esc cancela".to_string()
+        } else {
+            format!("«{}» cambió en disco · SI + Enter guarda el tuyo encima · NO + Enter carga el del disco · Esc cancela", c.name)
+        };
+        let x = r.left + layout::STATUS_PAD_X;
+        let right = (fr.left - 10.0).max(x);
+        self.push_clip(Rect::new(x, r.top, right, r.bottom));
+        self.text(&msg, &self.fonts.ui_11_5, Rect::new(x, r.top, right, r.bottom), pal.danger);
+        self.pop_clip();
+    }
+
+    /// "«nombre» tiene cambios sin guardar" con tres botones, como "Ya existe".
+    fn draw_close_prompt(&mut self, req: &crate::CloseRequest, pal: &theme::Palette, r: Rect, view: &ViewState) {
+        let mut xr = r.right - layout::STATUS_PAD_X;
+        let choices = [("C", "Cancelar", 2u8), ("N", "No guardar", 1u8), ("G", "Guardar", 0u8)];
+        for (key, label, idx) in choices {
+            let kw = self.measure(key, &self.fonts.mono_11_bold);
+            let lw = self.measure(label, &self.fonts.ui_11_5);
+            let w = kw + 5.0 + lw + 14.0;
+            xr -= w;
+            let chip = Rect::new(xr, r.top + 3.0, xr + w, r.bottom - 3.0);
+            let hovered = view.hover == Hit::CloseChoice(idx);
+            let primary = idx == 0;
+            let bg = if hovered { pal.hover } else if primary { pal.accent_soft } else { pal.surface_2 };
+            self.fill_round(chip, 4.0, bg);
+            let kc = if primary { pal.accent } else { pal.text_hint };
+            self.text(key, &self.fonts.mono_11_bold, Rect::new(chip.left + 7.0, r.top, chip.left + 7.0 + kw, r.bottom), kc);
+            let tc = if primary { pal.accent } else { pal.text_2 };
+            self.text(label, &self.fonts.ui_11_5, Rect::new(chip.left + 7.0 + kw + 5.0, r.top, chip.right - 7.0, r.bottom), tc);
+            self.hits.push((chip, Hit::CloseChoice(idx)));
+            xr -= 6.0;
+        }
+        let more = req.ask.len().saturating_sub(1);
+        let msg = if more > 0 {
+            format!("«{}» tiene cambios sin guardar (y {more} más)", req.name)
+        } else {
+            format!("«{}» tiene cambios sin guardar", req.name)
+        };
+        let x = r.left + layout::STATUS_PAD_X;
+        self.push_clip(Rect::new(x, r.top, (xr - 10.0).max(x), r.bottom));
+        self.text(&msg, &self.fonts.ui_11_5, Rect::new(x, r.top, xr - 10.0, r.bottom), pal.warn);
+        self.pop_clip();
     }
 
     #[allow(unused_unsafe)]

@@ -3,6 +3,8 @@
 mod anim;
 pub mod chrome_text;
 pub mod clipboard;
+mod closing;
+mod conflict;
 pub mod context_menu;
 mod doc_io;
 pub mod editor;
@@ -40,7 +42,9 @@ pub mod workspace;
 
 pub use anim::{Anim, Curve, Tweens, cubic_bezier, ease_out_cubic};
 pub use chrome_text::*;
-pub use doc_io::{OpenedDoc, open_as_document, save_document};
+pub use closing::{CloseChoice, CloseRequest, has_unsaved};
+pub use conflict::{ConflictAnswer, ConflictState};
+pub use doc_io::{OpenedDoc, open_as_document, same_file, save_document};
 pub use editor::EditorState;
 pub use hex::{hex_char, hex_row, hex_rows};
 pub use keymap::{EditorAction, Modifiers, action_for_vk};
@@ -49,6 +53,7 @@ pub use prompt::Prompt;
 pub use raw_doc::{RawDoc, open_raw_doc};
 pub use render::{AboutContent, Hit, Renderer, UpdatePanelContent, ViewState};
 pub use search_prompt::SearchState;
+pub use text_input::char_from_utf16_unit;
 pub use theme::{Palette, Rgba, is_dark, palette};
 pub use update_panel::{DownloadPhase, UpdatePhase, UpdateState};
 pub use viewport::Viewport;
