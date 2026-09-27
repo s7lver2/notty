@@ -3,7 +3,7 @@
 //! pasa a `Config` cuando se toca algo. No sabe dibujar ni de Win32/Direct2D.
 
 use notty_config::{
-    Config, Files, FontFamily, HotkeyMechanism, MenuBar, OnCloseUnsaved, Preset, TabsPosition, TempMode, Theme,
+    AccentColor, Config, Files, FontFamily, HotkeyMechanism, MenuBar, OnCloseUnsaved, Preset, TabsPosition, TempMode, Theme,
 };
 use notty_input::Command;
 
@@ -131,6 +131,8 @@ pub enum SettingKey {
     SyntaxHighlight,
     OnCloseUnsaved,
     OpenInExistingWindow,
+    AccentColor,
+    ReopenPrevious,
 }
 
 /// El valor elegido; `apply` decide qué campo de `Config` toca según `SettingKey`.
@@ -146,6 +148,7 @@ pub enum SettingValue {
     HotkeyMechanism(HotkeyMechanism),
     FontFamily(FontFamily),
     OnCloseUnsaved(OnCloseUnsaved),
+    AccentColor(AccentColor),
 }
 
 /// Opciones de un selector: `(etiqueta, valor)`.
@@ -197,6 +200,17 @@ pub const TEMP_MODE_OPTS: Options = &[
 pub const ON_CLOSE_OPTS: Options = &[
     ("Preguntar", SettingValue::OnCloseUnsaved(OnCloseUnsaved::Preguntar)),
     ("Recuperar al abrir", SettingValue::OnCloseUnsaved(OnCloseUnsaved::Recuperar)),
+];
+
+pub const ACCENT_OPTS: Options = &[
+    ("Azul", SettingValue::AccentColor(AccentColor::Azul)),
+    ("Verde", SettingValue::AccentColor(AccentColor::Verde)),
+    ("Turquesa", SettingValue::AccentColor(AccentColor::Turquesa)),
+    ("Morado", SettingValue::AccentColor(AccentColor::Morado)),
+    ("Rosa", SettingValue::AccentColor(AccentColor::Rosa)),
+    ("Rojo", SettingValue::AccentColor(AccentColor::Rojo)),
+    ("Naranja", SettingValue::AccentColor(AccentColor::Naranja)),
+    ("Amarillo", SettingValue::AccentColor(AccentColor::Amarillo)),
 ];
 
 pub const HOTKEY_OPTS: Options = &[
@@ -357,6 +371,14 @@ pub fn apply(cfg: &mut Config, key: SettingKey, value: SettingValue) {
             cfg.ui.native_file_dialog = b;
             return;
         }
+        (SettingKey::AccentColor, SettingValue::AccentColor(c)) => {
+            cfg.ui.accent = c;
+            return;
+        }
+        (SettingKey::ReopenPrevious, SettingValue::Bool(b)) => {
+            cfg.ui.reopen_previous = b;
+            return;
+        }
         _ => {}
     }
     match (key, value) {
@@ -388,6 +410,7 @@ pub fn current_bool(cfg: &Config, key: SettingKey) -> bool {
         SettingKey::NativeFileDialog => cfg.ui.native_file_dialog,
         SettingKey::Ligatures => cfg.ui.ligatures,
         SettingKey::SyntaxHighlight => cfg.ui.syntax_highlight,
+        SettingKey::ReopenPrevious => cfg.ui.reopen_previous,
         SettingKey::StartWithWindows => cfg.hotkey.start_with_windows,
         SettingKey::UpdatesCheck => cfg.updates.check,
         _ => false,
@@ -407,6 +430,7 @@ pub fn selected_index(cfg: &Config, key: SettingKey, options: Options) -> Option
         SettingKey::OnCloseUnsaved => SettingValue::OnCloseUnsaved(cfg.files.on_close_unsaved),
         SettingKey::HotkeyMechanism => SettingValue::HotkeyMechanism(cfg.hotkey.mechanism),
         SettingKey::FontFamily => SettingValue::FontFamily(cfg.ui.font_family),
+        SettingKey::AccentColor => SettingValue::AccentColor(cfg.ui.accent),
         _ => return None,
     };
     options.iter().position(|(_, v)| *v == current)
@@ -423,6 +447,7 @@ pub fn options_for(key: SettingKey) -> Options {
         SettingKey::TempMode => TEMP_MODE_OPTS,
         SettingKey::OnCloseUnsaved => ON_CLOSE_OPTS,
         SettingKey::HotkeyMechanism => HOTKEY_OPTS,
+        SettingKey::AccentColor => ACCENT_OPTS,
         _ => &[],
     }
 }

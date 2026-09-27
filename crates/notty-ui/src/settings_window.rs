@@ -1103,16 +1103,16 @@ fn paint(st: &mut State) {
     let now = Instant::now();
     st.hits.clear();
     let system_dark = crate::window::system_uses_dark_mode();
+    let accent = st.cfg.borrow().ui.accent;
     let dark = is_dark(st.cfg.borrow().ui.theme, system_dark);
-    let pal_mixed;
-    let pal = match st.theme_from {
+    let pal_owned = match st.theme_from {
         Some((from_dark, t0)) if st.animations_enabled => {
             let p = (now.saturating_duration_since(t0).as_secs_f32() / (THEME_MS as f32 / 1000.0)).clamp(0.0, 1.0);
-            pal_mixed = theme::palette(from_dark).mix(theme::palette(dark), crate::ease_out_cubic(p));
-            &pal_mixed
+            theme::palette(from_dark, accent).mix(&theme::palette(dark, accent), crate::ease_out_cubic(p))
         }
-        _ => theme::palette(dark),
+        _ => theme::palette(dark, accent),
     };
+    let pal = &pal_owned;
     st.renderer.recover_device();
     let (w, h) = st.renderer.size_dips();
     let update = (st.update_info)();

@@ -1794,7 +1794,10 @@ pub unsafe fn apply_dark_mode(hwnd: HWND, dark: bool) {
             &value as *const _ as *const _,
             std::mem::size_of::<i32>() as u32,
         );
-        let border = colorref(crate::theme::palette(dark).chrome);
+        // El acento no afecta a `chrome` (el borde de la ventana no lo usa), así que
+        // aquí basta con el por defecto en vez de hacer viajar el color elegido hasta
+        // esta llamada de DWM.
+        let border = colorref(crate::theme::palette(dark, notty_config::AccentColor::default()).chrome);
         let _ = DwmSetWindowAttribute(
             hwnd,
             windows::Win32::Graphics::Dwm::DWMWA_BORDER_COLOR,
@@ -1953,7 +1956,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         // `paint` ya dejó).
                         let frame = w.renderer.current_frame(&ui, w.ws.len(), w.menu_bar_visible());
                         let tour = w.tour.as_mut().expect("comprobado con is_some justo arriba");
-                        tour.draw(&w.renderer, &frame, view.dark, std::time::Instant::now());
+                        tour.draw(&w.renderer, &frame, view.dark, ui.accent, std::time::Instant::now());
                     }
                 }
                 let _ = ValidateRect(Some(hwnd), None);

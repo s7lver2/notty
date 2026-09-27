@@ -1070,14 +1070,11 @@ impl Renderer {
         self.recover_device();
         self.hits.clear();
         self.pending_dropdown = None;
-        let pal_mixed;
-        let pal = match view.theme_from {
-            Some((from_dark, t)) => {
-                pal_mixed = theme::palette(from_dark).mix(theme::palette(view.dark), t);
-                &pal_mixed
-            }
-            None => theme::palette(view.dark),
+        let pal_owned = match view.theme_from {
+            Some((from_dark, t)) => theme::palette(from_dark, ui.accent).mix(&theme::palette(view.dark, ui.accent), t),
+            None => theme::palette(view.dark, ui.accent),
         };
+        let pal = &pal_owned;
         let state = ws.active();
         let is_raw = state.raw.is_some();
 

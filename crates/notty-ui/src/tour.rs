@@ -279,9 +279,9 @@ impl Tour {
     /// Dibuja la vela + foco + globo de la parada actual, interpolando desde la
     /// parada anterior si hay una transición en curso. Registra las zonas clicables
     /// (Siguiente/Atrás/puntos) para el siguiente `handle_click`.
-    pub fn draw(&mut self, r: &Renderer, frame: &Frame, dark: bool, now: Instant) {
+    pub fn draw(&mut self, r: &Renderer, frame: &Frame, dark: bool, accent: notty_config::AccentColor, now: Instant) {
         self.hits.clear();
-        let pal = crate::theme::palette(dark);
+        let pal = &crate::theme::palette(dark, accent);
         let (w, h) = r.size_dips();
         let full = Rect::new(0.0, 0.0, w, h);
 

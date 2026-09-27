@@ -378,6 +378,12 @@ fn apariencia(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     blk_end(ui);
 
     blk(ui, d, 4);
+    y = label(ui, x, y, w, "Color de acento") + 8.0;
+    let sel = model::selected_index(cfg, SettingKey::AccentColor, model::ACCENT_OPTS);
+    y = swatches(ui, x, y, w, SettingKey::AccentColor, model::ACCENT_OPTS, sel) + 16.0;
+    blk_end(ui);
+
+    blk(ui, d, 5);
     let px = model::font_px(cfg);
     let family = cfg.ui.font_family.primary_name();
     // Fuente
@@ -533,6 +539,33 @@ fn cards(
         ui.r.pop_clip();
         ui.text(name, 12.0, false, Rect::new(r.left + 10.0, tr.bottom + 8.0, r.right - 8.0, tr.bottom + 24.0), ui.pal.text);
         ui.card_end(r, hit, selected);
+    }
+    y + h
+}
+
+/// Fila de círculos de color (Ajustes → Apariencia → Color de acento): más
+/// compacta que `cards()`, que está pensada para miniaturas con forma de ventana.
+fn swatches(ui: &mut Ui, x: f32, y: f32, w: f32, key: SettingKey, opts: model::Options, sel: Option<usize>) -> f32 {
+    let n = opts.len() as f32;
+    let cw = (w - 8.0 * (n - 1.0)) / n;
+    let d = cw.min(40.0);
+    let h = d + 8.0;
+    for (j, (_, value)) in opts.iter().enumerate() {
+        let model::SettingValue::AccentColor(color) = value else { continue };
+        let hit = Hit::Choice(key, j as u8);
+        let cx = x + (cw + 8.0) * j as f32 + cw / 2.0;
+        let cy = y + d / 2.0;
+        let r = Rect::new(cx - cw / 2.0, y, cx - cw / 2.0 + cw, y + d);
+        let selected = sel == Some(j);
+        let hover = ui.hover_t(hit, 350);
+        ui.hit(r, hit);
+        let rgba = crate::theme::accent_swatch(*color);
+        ui.r.fill_circle(cx, cy, d / 2.0 - 2.0, rgba);
+        if selected {
+            ui.r.stroke_circle(cx, cy, d / 2.0, 2.0, ui.pal.text);
+        } else if hover > 0.0 {
+            ui.r.stroke_circle(cx, cy, d / 2.0, 1.5, ui.pal.text_3.faded(hover));
+        }
     }
     y + h
 }
