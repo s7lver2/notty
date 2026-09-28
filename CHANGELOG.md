@@ -8,6 +8,7 @@
 - Ajustes → Ventana → Animaciones: frecuencia de 30, 60 (por defecto) o 120 Hz, y "Animaciones reducidas" (más cortas y a 30 Hz) para equipos con pocos recursos.
 - Popup de Novedades la primera vez que se abre notty tras actualizarse, con una miniatura animada por novedad; se puede volver a ver en Ayuda → Novedades o en Ajustes → Acerca de → Novedades.
 - Modo vim: más comandos. `:q!` (cerrar sin guardar), `:qa`, `:qa!`, `:wa`, `:wqa`/`:xa`, `:w ruta`, `:e ruta`, `:e!` (recargar del disco), `:enew`/`:tabnew`, `:bn`/`:bp`, `:12` y `:$` (ir a línea), `:set nu`/`:set nonu`. Un comando desconocido ahora avisa en vez de no hacer nada.
+- Fix: el atajo global no funcionaba. En modo "Segundo plano" nadie arrancaba `notty --daemon`: ahora lo arranca notty al abrirse o al elegir ese modo, y "Iniciar con Windows" lo añade al inicio de sesión (`HKCU...Run`). En modo "Acceso directo" los `.lnk` se crean en el menú Inicio con Ctrl+Alt+N / Ctrl+Alt+Shift+N ya asignados y avisando a Explorer, que antes no se enteraba hasta reiniciar.
 - Fix: la ventana de Ajustes ya no muestra un marco gris claro a su alrededor al perder el foco.
 
 ## v0.5.0

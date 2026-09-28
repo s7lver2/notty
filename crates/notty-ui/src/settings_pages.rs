@@ -1438,7 +1438,7 @@ fn teclado(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     let (a, b) = if cfg.hotkey.mechanism == HotkeyMechanism::Daemon {
         ("Win+Alt+N", "Win+Alt+Shift+N")
     } else {
-        ("Ctrl+Alt+letra", "Ctrl+Alt+letra")
+        ("Ctrl+Alt+N", "Ctrl+Alt+Shift+N")
     };
     y = static_bind(ui, x, y, w, 200, "Nuevo temporal", a) + 4.0;
     y = static_bind(ui, x, y, w, 201, "Nuevo permanente", b) + 8.0;

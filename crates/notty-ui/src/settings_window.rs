@@ -1007,6 +1007,7 @@ fn set_value(st: &mut State, hwnd: HWND, key: SettingKey, value: SettingValue) {
 
 fn save_and_notify(st: &State) {
     crate::anim::configure(&st.cfg.borrow().ui);
+    crate::global_hotkey::sync(&st.cfg.borrow().hotkey);
     let _ = notty_config::save(&st.cfg.borrow(), &notty_config::default_path());
     (st.on_change)();
 }

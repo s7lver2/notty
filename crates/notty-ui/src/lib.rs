@@ -9,6 +9,7 @@ mod conflict;
 pub mod context_menu;
 mod doc_io;
 pub mod editor;
+pub mod global_hotkey;
 mod keyboard_widget;
 mod hex;
 pub mod lang;

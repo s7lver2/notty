@@ -2,7 +2,6 @@
 #![windows_subsystem = "windows"]
 
 pub(crate) mod daemon;
-pub(crate) mod shortcut;
 
 use notty_update::{PUBKEY, REPO};
 
@@ -169,6 +168,8 @@ fn main() -> windows::core::Result<()> {
     let update_tx = tx.clone();
     spawn_pipe_server(tx);
 
+    let hotkey = cfg_for_check.hotkey;
+    std::thread::spawn(move || notty_ui::global_hotkey::sync(&hotkey));
     spawn_update_check(cfg_for_check, update_tx);
 
     if new_temp {

@@ -1,7 +1,7 @@
 //! notty --daemon: sin ventana de documento. Bandeja + atajos globales + pipe.
 
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
-use windows::Win32::UI::Shell::{NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NOTIFYICONDATAW, Shell_NotifyIconW};
+use windows::Win32::UI::Shell::{NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW, Shell_NotifyIconW};
 use windows::Win32::UI::Input::KeyboardAndMouse::RegisterHotKey;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, MSG, RegisterClassExW, WM_DESTROY, WM_HOTKEY,
@@ -17,17 +17,15 @@ pub fn run() -> Result<()> {
     let cfg = match notty_config::load(&notty_config::default_path()) {
         notty_config::LoadResult::Loaded(c) | notty_config::LoadResult::Missing(c) | notty_config::LoadResult::Defaulted(c, _) => c,
     };
-    if cfg.hotkey.mechanism != notty_config::HotkeyMechanism::Daemon {
-        // El usuario eligió el mecanismo .lnk: nada residente que escuche atajos, pero
-        // sí hace falta que los accesos directos existan para que pueda asignarles una
-        // tecla rápida a mano (ver `shortcut::create` y Ajustes, Task 10).
-        let _ = ensure_lnk_shortcuts();
+    // Con el mecanismo .lnk no hay nada residente (ver `notty_ui::global_hotkey`), y
+    // con uno ya corriendo, un segundo no podría registrar los atajos.
+    if cfg.hotkey.mechanism != notty_config::HotkeyMechanism::Daemon || notty_ui::global_hotkey::daemon_running() {
         return Ok(());
     }
 
     unsafe {
         let instance = windows::Win32::System::LibraryLoader::GetModuleHandleW(None)?;
-        let class_name = w!("NottyDaemonClass");
+        let class_name = notty_ui::global_hotkey::DAEMON_CLASS;
         let icon = notty_ui::window::app_icon(instance.into());
         let wc = WNDCLASSEXW {
             cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
@@ -71,19 +69,6 @@ pub fn run() -> Result<()> {
     Ok(())
 }
 
-/// Crea (o actualiza) en el Escritorio los dos accesos directos del mecanismo `.lnk`:
-/// "notty - nuevo temporal.lnk" y "notty - nuevo permanente.lnk". Sin tecla rápida
-/// asignada por código (ver nota en `shortcut::create`): el usuario la pone a mano
-/// desde "Propiedades" en el Explorador, con Ctrl+Alt+<letra>.
-fn ensure_lnk_shortcuts() -> Result<()> {
-    let Ok(exe) = std::env::current_exe() else { return Ok(()) };
-    let Some(desktop) = std::env::var_os("USERPROFILE").map(std::path::PathBuf::from) else { return Ok(()) };
-    let desktop = desktop.join("Desktop");
-    let _ = crate::shortcut::create(&exe, "--new-temp", "notty: nuevo temporal", &desktop.join("notty - nuevo temporal.lnk"));
-    let _ = crate::shortcut::create(&exe, "--new-permanent", "notty: nuevo permanente", &desktop.join("notty - nuevo permanente.lnk"));
-    Ok(())
-}
-
 /// Convierte una cadena "Win+Alt+N" en (vk, modificadores de RegisterHotKey).
 /// Reutiliza `notty_input::parse_key_spec` para la letra y añade el bit MOD_WIN
 /// a mano, porque `Modifiers` de `notty-input` no distingue la tecla Windows
@@ -124,6 +109,8 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 LRESULT(0)
             }
             WM_DESTROY => {
+                let nid = NOTIFYICONDATAW { cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32, hWnd: hwnd, uID: 1, ..Default::default() };
+                let _ = Shell_NotifyIconW(NIM_DELETE, &nid);
                 windows::Win32::UI::WindowsAndMessaging::PostQuitMessage(0);
                 LRESULT(0)
             }
