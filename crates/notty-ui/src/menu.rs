@@ -23,6 +23,7 @@ pub enum MenuCmd {
     NewTemp,
     /// Todavía no existen en la app: se dibujan pero no hacen nada (Plan 7+).
     Shortcuts,
+    WhatsNew,
     About,
 }
 
@@ -73,6 +74,7 @@ const VER: &[MenuItem] = &[
 
 const AYUDA: &[MenuItem] = &[
     MenuItem::Entry { label: "Atajos de teclado", shortcut: "", cmd: MenuCmd::Shortcuts },
+    MenuItem::Entry { label: "Novedades", shortcut: "", cmd: MenuCmd::WhatsNew },
     MenuItem::Entry { label: "Acerca de notty", shortcut: "", cmd: MenuCmd::About },
 ];
 

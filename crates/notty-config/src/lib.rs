@@ -6,7 +6,7 @@ mod storage;
 
 pub use model::{
     AccentColor, Config, DEFAULT_WIN_H, DEFAULT_WIN_W, Files, FilesConfig, FontFamily, HotkeyConfig, HotkeyMechanism,
-    Lang, MdOpenMode, MdPreviewStyle, MenuBar, OnCloseUnsaved, Preset, TabsPosition, TempMode, Theme, UiConfig,
+    Lang, AnimHz, MdOpenMode, MdPreviewStyle, MenuBar, OnCloseUnsaved, Preset, TabsPosition, TempMode, Theme, UiConfig,
     UpdatesConfig,
 };
 pub use preset::apply_preset;

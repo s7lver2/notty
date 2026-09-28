@@ -162,6 +162,8 @@ struct WindowState {
     tab_anims: crate::tab_anim::TabAnims,
     /// Ventana "Acerca de notty" (menú Ayuda) abierta.
     about_open: bool,
+    /// Popup de Novedades abierto desde este instante (ver `crate::whats_new`).
+    whats_new_opened: Option<std::time::Instant>,
     /// Cuándo se copió la ruta por última vez (aviso de 1,8 s).
     path_copied_at: Option<std::time::Instant>,
     /// Aviso breve en la barra de estado (texto y cuándo apareció), ver `show_notice`.
@@ -275,9 +277,7 @@ impl WindowState {
 /// cada vez que arranca una animación nueva.
 fn ensure_anim_timer(w: &mut WindowState, hwnd: HWND) {
     if !w.anim_timer_running {
-        unsafe {
-            let _ = SetTimer(Some(hwnd), ID_ANIM_TIMER, 16, None);
-        }
+        crate::anim::start_frame_timer(hwnd, ID_ANIM_TIMER);
         w.anim_timer_running = true;
     }
 }
@@ -1414,6 +1414,34 @@ fn notice_progress(w: &WindowState) -> Option<(f32, String)> {
 
 /// Contenido de "Acerca de notty": versión y enlace al repositorio (si `repo` no es
 /// el marcador de posición de las compilaciones sin configurar).
+/// Abre el popup de Novedades (Ayuda → Novedades, o solo al arrancar tras actualizar).
+fn open_whats_new(w: &mut WindowState, hwnd: HWND) {
+    w.about_open = false;
+    w.whats_new_opened = Some(std::time::Instant::now());
+    ensure_anim_timer(w, hwnd);
+}
+
+/// Al arrancar: si notty se acaba de actualizar a una versión con novedades, las
+/// enseña. En cualquier caso apunta la versión actual como vista.
+fn maybe_show_whats_new(w: &mut WindowState, hwnd: HWND) {
+    let current = crate::app_version();
+    let show = {
+        let cfg = w.cfg.borrow();
+        if cfg.last_seen_version == current {
+            return;
+        }
+        crate::whats_new::should_show(&cfg.last_seen_version, cfg.first_run_done, current)
+    };
+    {
+        let mut cfg = w.cfg.borrow_mut();
+        cfg.last_seen_version = current.to_string();
+        let _ = notty_config::save(&cfg, &notty_config::default_path());
+    }
+    if show {
+        open_whats_new(w, hwnd);
+    }
+}
+
 fn about_content(repo: &str) -> crate::AboutContent {
     let url = (!repo.is_empty() && !repo.starts_with("OWNER/")).then(|| format!("https://github.com/{repo}"));
     crate::AboutContent { version: crate::app_version().to_string(), url }
@@ -1687,6 +1715,7 @@ fn run_inner(
         notty_config::LoadResult::Defaulted(cfg, msg) => (cfg, Some(msg)),
     };
 
+    crate::anim::configure(&cfg.ui);
     let run_lang = crate::lang::resolve(cfg.ui.lang);
     let broken_label = crate::strings::tr(run_lang, "config.toml roto");
     let title = match (path, &broken_msg) {
@@ -1849,6 +1878,7 @@ fn run_inner(
             menu_sel: None,
             tab_anims: Default::default(),
             about_open: false,
+            whats_new_opened: None,
             path_copied_at: None,
             notice: None,
             swallow_char: false,
@@ -1870,6 +1900,11 @@ fn run_inner(
         IPC_HWND.store(hwnd.0 as usize, std::sync::atomic::Ordering::Release);
         // Lo que llegase antes de registrar la ventana.
         wake_for_ipc();
+
+        // Recién actualizado: el popup de Novedades, una sola vez por versión.
+        if let Some(w) = ptr.as_mut() {
+            maybe_show_whats_new(w, hwnd);
+        }
 
         // Primer arranque: la ventana de bienvenida (no la del recorrido directamente,
         // ver Task 4 Step 5 del plan de tutorial) — no modal, flota sobre esta ventana
@@ -2115,6 +2150,10 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     }
                     w.renderer.set_tab_anim(w.tab_anims.frame(std::time::Instant::now()));
                     w.renderer.set_about(if w.about_open { Some(about_content(&w.repo)) } else { None });
+                    w.renderer.set_whats_new(w.whats_new_opened.and_then(|opened| {
+                        let r = crate::whats_new::release_for(crate::app_version())?;
+                        Some(crate::WhatsNewView { version: r.version, items: r.items, opened, animate: w.animations_enabled })
+                    }));
                     w.renderer.set_path_copied(path_copied_progress(w));
                     w.renderer.set_notice(notice_progress(w));
                     if w.tour.is_some() {
@@ -2357,6 +2396,11 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     };
 
                     if handle_menu_key(w, hwnd, vk) {
+                        return LRESULT(0);
+                    }
+                    if w.whats_new_opened.is_some() && (vk == 0x1B || vk == 0x0D) {
+                        w.whats_new_opened = None;
+                        let _ = InvalidateRect(Some(hwnd), None, false);
                         return LRESULT(0);
                     }
                     if w.about_open && (vk == 0x1B || vk == 0x0D) {
@@ -2645,6 +2689,13 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             Hit::CtxItem(j) => activate_menu_row(w, hwnd, j),
                             Hit::PopupBox => {}
                             _ => close_menus(w),
+                        }
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                        return LRESULT(0);
+                    }
+                    if w.whats_new_opened.is_some() {
+                        if hit != Hit::PopupBox {
+                            w.whats_new_opened = None;
                         }
                         let _ = InvalidateRect(Some(hwnd), None, false);
                         return LRESULT(0);
@@ -3084,10 +3135,11 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             || w.theme_anim.is_some()
                             || w.accent_anim.is_some()
                             || tour_animating
+                            || w.whats_new_opened.is_some()
                             || path_copied_progress(w).is_some()
                             || notice_progress(w).is_some();
                         if !still_animating {
-                            let _ = KillTimer(Some(hwnd), ID_ANIM_TIMER);
+                            crate::anim::stop_frame_timer(hwnd, ID_ANIM_TIMER);
                             w.anim_timer_running = false;
                         }
                         let _ = InvalidateRect(Some(hwnd), None, false);
@@ -3124,7 +3176,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 }
                 let _ = KillTimer(Some(hwnd), ID_AUTOSAVE_TIMER);
                 IPC_HWND.store(0, std::sync::atomic::Ordering::Release);
-                let _ = KillTimer(Some(hwnd), ID_ANIM_TIMER);
+                crate::anim::stop_frame_timer(hwnd, ID_ANIM_TIMER);
                 PostQuitMessage(0);
                 LRESULT(0)
             }
@@ -3235,6 +3287,7 @@ fn run_menu_item(w: &mut WindowState, hwnd: HWND, menu_idx: usize, item_idx: usi
         // concreta (Teclado): de momento abre Ajustes por el principio.
         MenuCmd::Shortcuts => open_settings_at(w, hwnd, "teclado"),
         MenuCmd::About => w.about_open = true,
+        MenuCmd::WhatsNew => open_whats_new(w, hwnd),
     }
     unsafe {
         update_title(hwnd, w.ws.active(), lang_of(w));

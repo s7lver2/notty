@@ -140,6 +140,8 @@ pub enum SettingKey {
     SaveDir,
     MdOpenMode,
     MdPreviewStyle,
+    AnimHz,
+    ReducedMotion,
 }
 
 /// El valor elegido; `apply` decide qué campo de `Config` toca según `SettingKey`.
@@ -160,6 +162,7 @@ pub enum SettingValue {
     SaveDir(SaveDirChoice),
     MdOpenMode(notty_config::MdOpenMode),
     MdPreviewStyle(notty_config::MdPreviewStyle),
+    AnimHz(notty_config::AnimHz),
 }
 
 /// Carpeta de partida para "Guardar como" cuando el documento no tiene ruta todavía
@@ -275,6 +278,12 @@ pub const MD_OPEN_MODE_OPTS: Options = &[
 pub const MD_PREVIEW_STYLE_OPTS: Options = &[
     ("Solo lectura", SettingValue::MdPreviewStyle(notty_config::MdPreviewStyle::ReadOnly)),
     ("En línea", SettingValue::MdPreviewStyle(notty_config::MdPreviewStyle::Inline)),
+];
+
+pub const ANIM_HZ_OPTS: Options = &[
+    ("30 Hz", SettingValue::AnimHz(notty_config::AnimHz::Hz30)),
+    ("60 Hz", SettingValue::AnimHz(notty_config::AnimHz::Hz60)),
+    ("120 Hz", SettingValue::AnimHz(notty_config::AnimHz::Hz120)),
 ];
 
 /// Atajos reasignables de Teclado, en el orden en que se listan.
@@ -466,6 +475,14 @@ pub fn apply(cfg: &mut Config, key: SettingKey, value: SettingValue) {
             cfg.ui.md_preview_style = s;
             return;
         }
+        (SettingKey::AnimHz, SettingValue::AnimHz(h)) => {
+            cfg.ui.anim_hz = h;
+            return;
+        }
+        (SettingKey::ReducedMotion, SettingValue::Bool(b)) => {
+            cfg.ui.reduced_motion = b;
+            return;
+        }
         _ => {}
     }
     match (key, value) {
@@ -502,6 +519,7 @@ pub fn current_bool(cfg: &Config, key: SettingKey) -> bool {
         SettingKey::StartWithWindows => cfg.hotkey.start_with_windows,
         SettingKey::UpdatesCheck => cfg.updates.check,
         SettingKey::Wrap => cfg.ui.wrap,
+        SettingKey::ReducedMotion => cfg.ui.reduced_motion,
         _ => false,
     }
 }
@@ -535,6 +553,7 @@ pub fn selected_index(cfg: &Config, key: SettingKey, options: Options) -> Option
         }
         SettingKey::MdOpenMode => SettingValue::MdOpenMode(cfg.ui.md_open_mode),
         SettingKey::MdPreviewStyle => SettingValue::MdPreviewStyle(cfg.ui.md_preview_style),
+        SettingKey::AnimHz => SettingValue::AnimHz(cfg.ui.anim_hz),
         _ => return None,
     };
     options.iter().position(|(_, v)| *v == current)
@@ -556,6 +575,7 @@ pub fn options_for(key: SettingKey) -> Options {
         SettingKey::SaveDir => SAVE_DIR_OPTS,
         SettingKey::MdOpenMode => MD_OPEN_MODE_OPTS,
         SettingKey::MdPreviewStyle => MD_PREVIEW_STYLE_OPTS,
+        SettingKey::AnimHz => ANIM_HZ_OPTS,
         _ => &[],
     }
 }

@@ -195,6 +195,10 @@ pub struct UiConfig {
     pub win_maximized: bool,
     /// Ajusta las líneas largas al ancho de la ventana en vez de salirse por el borde.
     pub wrap: bool,
+    /// Ajustes → Ventana → frecuencia de las animaciones.
+    pub anim_hz: AnimHz,
+    /// Animaciones más cortas y a 30 Hz, para equipos con pocos recursos.
+    pub reduced_motion: bool,
     /// Ajustes → Archivos → cómo se abre un `.md`/`.markdown` sin decir nada más.
     pub md_open_mode: MdOpenMode,
     /// Ajustes → Archivos → qué mecanismo de Previsualización usa un `.md`.
@@ -233,6 +237,8 @@ impl Default for UiConfig {
             win_h: DEFAULT_WIN_H,
             win_maximized: false,
             wrap: false,
+            anim_hz: AnimHz::default(),
+            reduced_motion: false,
             md_open_mode: MdOpenMode::default(),
             md_preview_style: MdPreviewStyle::default(),
         };
@@ -268,6 +274,18 @@ pub enum OnCloseUnsaved {
     Preguntar,
     /// Sin preguntar: se vuelca a la carpeta de recuperación y vuelve al abrir notty.
     Recuperar,
+}
+
+/// Frecuencia a la que se dibujan las animaciones (Ajustes → Ventana).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum AnimHz {
+    #[serde(rename = "30")]
+    Hz30,
+    #[default]
+    #[serde(rename = "60")]
+    Hz60,
+    #[serde(rename = "120")]
+    Hz120,
 }
 
 /// Cómo se abre un `.md`/`.markdown` sin decir nada más (Ajustes → Archivos).
@@ -362,6 +380,10 @@ pub struct Config {
     /// lo pide expresamente (eso arranca el recorrido directamente, no esta ventana).
     #[serde(default)]
     pub first_run_done: bool,
+    /// Versión con la que se abrió notty la última vez: si la de ahora es otra (se
+    /// actualizó), sale el popup de Novedades (`notty_ui::whats_new`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub last_seen_version: String,
     /// Sección `[keys]`: nombre de comando (`notty_input::Command::name`) → atajo
     /// ("Ctrl+Shift+N"). Solo guarda lo que el usuario cambió; una cadena vacía
     /// deja el comando sin atajo.

@@ -41,6 +41,7 @@ mod viewport;
 mod vim;
 mod vim_cmd;
 pub mod welcome_window;
+pub mod whats_new;
 pub mod window;
 pub mod workspace;
 
@@ -55,7 +56,7 @@ pub use keymap::{EditorAction, Modifiers, action_for_vk};
 pub use path_prompt::{OVERWRITE_QUESTION, OverwriteChoice, PathPromptState, Purpose};
 pub use prompt::Prompt;
 pub use raw_doc::{RawDoc, open_raw_doc};
-pub use render::{AboutContent, Hit, PaneView, Renderer, UpdatePanelContent, ViewState};
+pub use render::{AboutContent, Hit, PaneView, Renderer, UpdatePanelContent, ViewState, WhatsNewView};
 pub use search_prompt::SearchState;
 pub use text_input::char_from_utf16_unit;
 pub use theme::{Palette, Rgba, is_dark, palette};

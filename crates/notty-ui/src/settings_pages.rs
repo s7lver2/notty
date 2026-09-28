@@ -1212,6 +1212,17 @@ fn ventana(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
         icon::CHEVRON,
     ) + 4.0;
     blk_end(ui);
+
+    blk(ui, d, 5);
+    y = group(ui, x, y, w, "Animaciones");
+    y = seg_row(ui, x, y, w, cfg, SettingKey::AnimHz, "Frecuencia de las animaciones") + 4.0;
+    y = toggle_row(
+        ui, x, y, w, cfg,
+        SettingKey::ReducedMotion,
+        "Animaciones reducidas",
+        "Más cortas y a 30 Hz: menos trabajo para equipos con pocos recursos.",
+    ) + 4.0;
+    blk_end(ui);
     y - 4.0
 }
 

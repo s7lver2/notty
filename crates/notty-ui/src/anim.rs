@@ -148,8 +148,8 @@ impl<K: std::hash::Hash + Eq + Copy> Tweens<K> {
             *tw = Tween {
                 from: cur,
                 to: target,
-                start: now + Duration::from_millis(delay_ms),
-                duration: Duration::from_millis(ms),
+                start: now + scaled_ms(delay_ms),
+                duration: scaled_ms(ms),
                 curve,
             };
         }
@@ -159,7 +159,7 @@ impl<K: std::hash::Hash + Eq + Copy> Tweens<K> {
     /// Como `to`, pero si la clave es nueva arranca en `from` (animación de entrada).
     pub fn from_to(&mut self, key: K, from: f32, target: f32, ms: u64, curve: Curve, now: Instant) -> f32 {
         if !self.disabled && !self.map.contains_key(&key) {
-            self.map.insert(key, Tween { from, to: target, start: now, duration: Duration::from_millis(ms), curve });
+            self.map.insert(key, Tween { from, to: target, start: now, duration: scaled_ms(ms), curve });
         }
         self.to(key, target, ms, curve, now)
     }
@@ -175,7 +175,7 @@ impl<K: std::hash::Hash + Eq + Copy> Tweens<K> {
         if self.disabled {
             self.set(key, to, now);
         } else {
-            self.map.insert(key, Tween { from, to, start: now, duration: Duration::from_millis(ms), curve });
+            self.map.insert(key, Tween { from, to, start: now, duration: scaled_ms(ms), curve });
         }
     }
 
@@ -206,11 +206,11 @@ pub struct Anim {
 
 impl Anim {
     pub fn new(start: Instant, duration: Duration) -> Self {
-        Self { start, duration, enabled: true }
+        Self { start, duration: scaled(duration), enabled: true }
     }
 
     pub fn new_maybe(start: Instant, duration: Duration, enabled: bool) -> Self {
-        Self { start, duration, enabled }
+        Self { start, duration: scaled(duration), enabled }
     }
 
     /// `0.0..=1.0` lineal en el tiempo transcurrido, sin la curva de easing.
@@ -230,6 +230,79 @@ impl Anim {
     pub fn value(&self, now: Instant, from: f32, to: f32) -> f32 {
         let t = ease_out_cubic(self.progress(now));
         from + (to - from) * t
+    }
+}
+
+
+// --- Frecuencia y animaciones reducidas (Ajustes → Ventana) ---------------------------
+
+use std::sync::atomic::{AtomicU32, Ordering};
+
+/// Multiplicador de todas las duraciones (bits de un `f32`): 1.0, o 0.5 con
+/// "Animaciones reducidas".
+static DURATION_SCALE: AtomicU32 = AtomicU32::new(0x3F80_0000);
+/// Milisegundos entre frames mientras hay algo animándose.
+static FRAME_MS: AtomicU32 = AtomicU32::new(16);
+/// Temporizadores (ventana, id) que pidieron resolución de 1 ms (`timeBeginPeriod`),
+/// para devolverla al pararlos.
+static HI_RES: std::sync::Mutex<Vec<(usize, usize)>> = std::sync::Mutex::new(Vec::new());
+
+/// Aplica la frecuencia y el modo reducido de `ui`. Se llama al arrancar y cada vez
+/// que cambia algo en Ajustes; afecta a las animaciones que empiecen desde entonces.
+pub fn configure(ui: &notty_config::UiConfig) {
+    let (scale, ms) = frame_settings(ui);
+    DURATION_SCALE.store(scale.to_bits(), Ordering::Relaxed);
+    FRAME_MS.store(ms, Ordering::Relaxed);
+}
+
+/// (multiplicador de duración, ms entre frames).
+fn frame_settings(ui: &notty_config::UiConfig) -> (f32, u32) {
+    use notty_config::AnimHz;
+    if ui.reduced_motion {
+        return (0.5, 33);
+    }
+    let ms = match ui.anim_hz {
+        AnimHz::Hz30 => 33,
+        AnimHz::Hz60 => 16,
+        AnimHz::Hz120 => 8,
+    };
+    (1.0, ms)
+}
+
+pub(crate) fn scaled(d: Duration) -> Duration {
+    d.mul_f32(f32::from_bits(DURATION_SCALE.load(Ordering::Relaxed)))
+}
+
+fn scaled_ms(ms: u64) -> Duration {
+    scaled(Duration::from_millis(ms))
+}
+
+/// Arranca el temporizador de frames `id` de `hwnd` a la frecuencia configurada. Por
+/// debajo de ~15 ms Windows redondea `SetTimer` a su resolución por defecto (15,6 ms):
+/// para 120 Hz se pide resolución de 1 ms, solo mientras dure la animación.
+pub fn start_frame_timer(hwnd: windows::Win32::Foundation::HWND, id: usize) {
+    let ms = FRAME_MS.load(Ordering::Relaxed);
+    unsafe {
+        if ms < 15 {
+            let mut hi = HI_RES.lock().unwrap_or_else(|e| e.into_inner());
+            if !hi.contains(&(hwnd.0 as usize, id)) {
+                hi.push((hwnd.0 as usize, id));
+                let _ = windows::Win32::Media::timeBeginPeriod(1);
+            }
+        }
+        let _ = windows::Win32::UI::WindowsAndMessaging::SetTimer(Some(hwnd), id, ms, None);
+    }
+}
+
+/// Para el temporizador de `start_frame_timer` (y devuelve la resolución de 1 ms si la pidió).
+pub fn stop_frame_timer(hwnd: windows::Win32::Foundation::HWND, id: usize) {
+    unsafe {
+        let _ = windows::Win32::UI::WindowsAndMessaging::KillTimer(Some(hwnd), id);
+        let mut hi = HI_RES.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(i) = hi.iter().position(|&k| k == (hwnd.0 as usize, id)) {
+            hi.swap_remove(i);
+            let _ = windows::Win32::Media::timeEndPeriod(1);
+        }
     }
 }
 

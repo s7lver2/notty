@@ -24,12 +24,12 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 use windows::Win32::UI::WindowsAndMessaging::{
     CS_DROPSHADOW, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GWLP_USERDATA, GetClientRect, GetMessageW,
     GetWindowLongPtrW, GetWindowRect, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCAPTION, HTCLIENT, HTLEFT, HTRIGHT,
-    HTTOP, HTTOPLEFT, HTTOPRIGHT, IDC_ARROW, IsIconic, IsZoomed, KillTimer, LoadCursorW, MINMAXINFO, MSG,
+    HTTOP, HTTOPLEFT, HTTOPRIGHT, IDC_ARROW, IsIconic, IsZoomed, LoadCursorW, MINMAXINFO, MSG,
     NCCALCSIZE_PARAMS, PostMessageW, PostQuitMessage, RegisterClassExW, SC_KEYMENU, SM_CXFRAME, SM_CXPADDEDBORDER, SW_RESTORE,
-    SW_SHOW, SWP_FRAMECHANGED, SWP_NOZORDER, SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos,
+    SW_SHOW, SWP_FRAMECHANGED, SWP_NOZORDER, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos,
     ShowWindow, TranslateMessage, WM_CHAR, WM_CLOSE, WM_DESTROY, WM_DPICHANGED, WM_GETMINMAXINFO, WM_KEYDOWN,
     WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCALCSIZE,
-    WM_NCHITTEST, WM_PAINT, WM_SETTINGCHANGE, WM_SIZE, WM_SYSCHAR, WM_SYSCOMMAND, WM_SYSKEYDOWN, WM_SYSKEYUP,
+    WM_NCACTIVATE, WM_NCHITTEST, WM_PAINT, WM_SETTINGCHANGE, WM_SIZE, WM_SYSCHAR, WM_SYSCOMMAND, WM_SYSKEYDOWN, WM_SYSKEYUP,
     WM_QUIT, WM_TIMER, WM_XBUTTONDOWN, WNDCLASSEXW, WS_CLIPSIBLINGS, WS_POPUP, WS_THICKFRAME,
 };
 use windows::Win32::UI::Controls::WM_MOUSELEAVE;
@@ -124,9 +124,7 @@ struct State {
 
 fn ensure_anim_timer(st: &mut State, hwnd: HWND) {
     if !st.anim_timer_running {
-        unsafe {
-            let _ = SetTimer(Some(hwnd), ID_ANIM_TIMER, 16, None);
-        }
+        crate::anim::start_frame_timer(hwnd, ID_ANIM_TIMER);
         st.anim_timer_running = true;
     }
 }
@@ -382,6 +380,13 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 }
                 DefWindowProcW(hwnd, msg, wparam, lparam)
             }
+            // Al perder el foco, `DefWindowProc` repinta el marco grueso clásico de
+            // `WS_THICKFRAME` por encima (el "brillo" gris que se veía alrededor hasta
+            // pasar el ratón): con `lparam = -1` no redibuja nada del área no cliente.
+            WM_NCACTIVATE => {
+                invalidate(hwnd);
+                DefWindowProcW(hwnd, msg, wparam, LPARAM(-1))
+            }
             WM_NCCALCSIZE if wparam.0 != 0 => {
                 if IsZoomed(hwnd).as_bool() {
                     let params = &mut *(lparam.0 as *mut NCCALCSIZE_PARAMS);
@@ -629,7 +634,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         }
                         st.tw.prune(now);
                         if !st.needs_frames {
-                            let _ = KillTimer(Some(hwnd), ID_ANIM_TIMER);
+                            crate::anim::stop_frame_timer(hwnd, ID_ANIM_TIMER);
                             st.anim_timer_running = false;
                         }
                         invalidate(hwnd);
@@ -639,7 +644,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 DefWindowProcW(hwnd, msg, wparam, lparam)
             }
             WM_DESTROY => {
-                let _ = KillTimer(Some(hwnd), ID_ANIM_TIMER);
+                crate::anim::stop_frame_timer(hwnd, ID_ANIM_TIMER);
                 if !ptr.is_null() {
                     drop(Box::from_raw(ptr));
                     SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
@@ -995,6 +1000,7 @@ fn set_value(st: &mut State, hwnd: HWND, key: SettingKey, value: SettingValue) {
 }
 
 fn save_and_notify(st: &State) {
+    crate::anim::configure(&st.cfg.borrow().ui);
     let _ = notty_config::save(&st.cfg.borrow(), &notty_config::default_path());
     (st.on_change)();
 }
