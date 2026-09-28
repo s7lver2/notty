@@ -6,7 +6,8 @@
 - Rendimiento (detalles y cifras en `docs/rendimiento.md`): arranca 4-8 veces más rápido (primer pintado en ~70 ms en vez de ~360 ms), abrir archivos grandes ya no se bloquea con el resaltado de sintaxis, escribir en archivos de código grandes no se traba, en reposo ya no repinta ni se despierta cada 150 ms, y un archivo de 50 MB ocupa ~50 MB menos de RAM.
 - `tools/bench.ps1` y `cargo run --release -p notty-ui --example bench` para medir todo esto.
 - Ajustes → Ventana → Animaciones: frecuencia de 30, 60 (por defecto) o 120 Hz, y "Animaciones reducidas" (más cortas y a 30 Hz) para equipos con pocos recursos.
-- Popup de Novedades la primera vez que se abre notty tras actualizarse, con una miniatura animada por novedad; se puede volver a ver en Ayuda → Novedades.
+- Popup de Novedades la primera vez que se abre notty tras actualizarse, con una miniatura animada por novedad; se puede volver a ver en Ayuda → Novedades o en Ajustes → Acerca de → Novedades.
+- Modo vim: más comandos. `:q!` (cerrar sin guardar), `:qa`, `:qa!`, `:wa`, `:wqa`/`:xa`, `:w ruta`, `:e ruta`, `:e!` (recargar del disco), `:enew`/`:tabnew`, `:bn`/`:bp`, `:12` y `:$` (ir a línea), `:set nu`/`:set nonu`. Un comando desconocido ahora avisa en vez de no hacer nada.
 - Fix: la ventana de Ajustes ya no muestra un marco gris claro a su alrededor al perder el foco.
 
 ## v0.5.0

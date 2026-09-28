@@ -308,7 +308,7 @@ pub enum LinkAction {
     OpenRepo,
     /// Acerca de → Informar de un problema (incidencias de GitHub).
     OpenIssues,
-    /// Acerca de → Novedades (todas las releases).
+    /// Acerca de → Novedades (el popup de lo nuevo).
     OpenChangelog,
     /// Acerca de → Carpeta de configuración.
     OpenConfigFolder,

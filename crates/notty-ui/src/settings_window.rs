@@ -88,6 +88,7 @@ struct State {
     on_download: Box<dyn Fn()>,
     update_info: Box<dyn Fn() -> UpdateInfo>,
     on_repeat_tutorial: Box<dyn Fn()>,
+    on_whats_new: Box<dyn Fn()>,
     renderer: Renderer,
     page: Page,
     page_enter: Instant,
@@ -175,6 +176,7 @@ pub fn open(
     on_download: Box<dyn Fn()>,
     update_info: Box<dyn Fn() -> UpdateInfo>,
     on_repeat_tutorial: Box<dyn Fn()>,
+    on_whats_new: Box<dyn Fn()>,
     start_section: &str,
     on_created: impl Fn(HWND),
 ) -> Result<()> {
@@ -241,6 +243,7 @@ pub fn open(
             on_download,
             update_info,
             on_repeat_tutorial,
+            on_whats_new,
             renderer,
             page: start_page,
             page_enter: now,
@@ -954,7 +957,10 @@ fn run_link(st: &mut State, hwnd: HWND, action: LinkAction) {
         }
         LinkAction::OpenRepo => shell_open(hwnd, &format!("https://github.com/{repo}"), None),
         LinkAction::OpenIssues => shell_open(hwnd, &format!("https://github.com/{repo}/issues/new"), None),
-        LinkAction::OpenChangelog => shell_open(hwnd, &format!("https://github.com/{repo}/releases"), None),
+        LinkAction::OpenChangelog => {
+            (st.on_whats_new)();
+            post_close(hwnd);
+        }
         LinkAction::OpenConfigFolder => {
             let path = notty_config::default_path();
             if path.exists() {

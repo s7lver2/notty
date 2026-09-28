@@ -47,6 +47,8 @@ const TABLE: &[(&str, &str)] = &[
     ("Los archivos grandes se abren al momento y notty ya no gasta CPU en reposo.", "Big files open instantly and notty no longer uses CPU while idle."),
     ("Animaciones a tu medida", "Animations your way"),
     ("Elige 30, 60 o 120 Hz, o animaciones reducidas, en Ajustes → Ventana.", "Pick 30, 60 or 120 Hz, or reduced animations, in Settings → Window."),
+    ("Más comandos de vim", "More vim commands"),
+    (":q!, :qa, :wa, :e archivo, :e!, :tabnew, :bn/:bp, :12 para ir a una línea y más.", ":q!, :qa, :wa, :e file, :e!, :tabnew, :bn/:bp, :12 to jump to a line and more."),
     // --- settings_model.rs: Page::name ---
     ("Apariencia", "Appearance"),
     ("Fuentes", "Fonts"),
@@ -239,7 +241,9 @@ const TABLE: &[(&str, &str)] = &[
     ("Informar de un problema", "Report a problem"),
     ("Abre una incidencia en GitHub", "Opens an issue on GitHub"),
     ("Novedades", "What's new"),
-    ("Historial de cambios de cada versión", "Changelog of every version"),
+    ("Lo nuevo de esta versión", "What's new in this version"),
+    ("No es un comando de vim", "Not a vim command"),
+    ("No se pudo abrir", "Could not open"),
     ("Carpeta de configuración", "Config folder"),
     ("Hecho con Rust, Direct2D, DirectWrite y tree-sitter.", "Made with Rust, Direct2D, DirectWrite and tree-sitter."),
     // --- settings_pages.rs: Ayuda ---

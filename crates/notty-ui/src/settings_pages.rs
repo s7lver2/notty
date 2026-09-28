@@ -2051,7 +2051,7 @@ fn acerca(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     y = link_row(ui, x, y, w, Hit::Link(LinkAction::OpenIssues), "Informar de un problema", "Abre una incidencia en GitHub", false, icon::EXTERNO) + 4.0;
     ui.end_enter();
     item(ui, d, 2);
-    y = link_row(ui, x, y, w, Hit::Link(LinkAction::OpenChangelog), "Novedades", "Historial de cambios de cada versión", false, icon::CHEVRON) + 4.0;
+    y = link_row(ui, x, y, w, Hit::Link(LinkAction::OpenChangelog), "Novedades", "Lo nuevo de esta versión", false, icon::CHEVRON) + 4.0;
     ui.end_enter();
     item(ui, d, 3);
     y = link_row(ui, x, y, w, Hit::Link(LinkAction::OpenConfigFolder), "Carpeta de configuración", "%APPDATA%\\notty\\config.toml", true, icon::CHEVRON);

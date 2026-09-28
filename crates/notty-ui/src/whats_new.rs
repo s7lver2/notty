@@ -1,5 +1,6 @@
 //! "Novedades": el popup que sale la primera vez que se abre notty tras actualizarse,
-//! con lo nuevo de esa versión (y que se puede volver a ver en Ayuda → Novedades).
+//! con lo nuevo de esa versión (y que se puede volver a ver en Ayuda → Novedades
+//! o en Ajustes → Acerca de → Novedades).
 //!
 //! Para cada versión nueva basta con añadir su entrada al principio de `RELEASES`: una
 //! lista corta de novedades, cada una con una miniatura animada de `Icon`.
@@ -13,6 +14,8 @@ pub enum Icon {
     Speed,
     /// Un punto recorriendo una onda.
     Animations,
+    /// Una línea de comandos `:` que se va escribiendo.
+    Vim,
     /// Destello genérico.
     Sparkle,
 }
@@ -47,6 +50,11 @@ pub const RELEASES: &[Release] = &[Release {
             icon: Icon::Animations,
             title: "Animaciones a tu medida",
             desc: "Elige 30, 60 o 120 Hz, o animaciones reducidas, en Ajustes → Ventana.",
+        },
+        Item {
+            icon: Icon::Vim,
+            title: "Más comandos de vim",
+            desc: ":q!, :qa, :wa, :e archivo, :e!, :tabnew, :bn/:bp, :12 para ir a una línea y más.",
         },
     ],
 }];

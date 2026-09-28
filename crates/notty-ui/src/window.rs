@@ -927,6 +927,13 @@ fn open_settings_at(w: &WindowState, hwnd: HWND, section: &str) {
         }),
         Box::new(move || with_window(hwnd, |w| settings_update_info(w)).unwrap_or_default()),
         Box::new(move || start_tour(hwnd)),
+        Box::new(move || {
+            with_window(hwnd, |w| open_whats_new(w, hwnd));
+            unsafe {
+                let _ = InvalidateRect(Some(hwnd), None, false);
+                let _ = windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow(hwnd);
+            }
+        }),
         section,
         |created_hwnd| OPEN_SETTINGS_HWND.with(|c| c.set(Some(created_hwnd.0 as isize))),
     );
@@ -1412,8 +1419,6 @@ fn notice_progress(w: &WindowState) -> Option<(f32, String)> {
     Some((if w.animations_enabled { p } else { 0.5 }, text.clone()))
 }
 
-/// Contenido de "Acerca de notty": versión y enlace al repositorio (si `repo` no es
-/// el marcador de posición de las compilaciones sin configurar).
 /// Abre el popup de Novedades (Ayuda → Novedades, o solo al arrancar tras actualizar).
 fn open_whats_new(w: &mut WindowState, hwnd: HWND) {
     w.about_open = false;
@@ -1442,6 +1447,8 @@ fn maybe_show_whats_new(w: &mut WindowState, hwnd: HWND) {
     }
 }
 
+/// Contenido de "Acerca de notty": versión y enlace al repositorio (si `repo` no es
+/// el marcador de posición de las compilaciones sin configurar).
 fn about_content(repo: &str) -> crate::AboutContent {
     let url = (!repo.is_empty() && !repo.starts_with("OWNER/")).then(|| format!("https://github.com/{repo}"));
     crate::AboutContent { version: crate::app_version().to_string(), url }
@@ -3773,11 +3780,63 @@ fn commit_vim_cmdline(w: &mut WindowState, hwnd: HWND) {
     w.ws.close_prompt();
     match crate::parse_vim_cmd(&line) {
         crate::VimCmd::Save => {
-            save_now(w, hwnd);
+            if w.ws.active().path.is_none() {
+                if start_path_entry(w, hwnd, crate::Purpose::Save, String::new()) {
+                    start_popup_anim(w, hwnd);
+                }
+            } else {
+                save_now(w, hwnd);
+            }
+        }
+        crate::VimCmd::SaveAs(path) => vim_path_command(w, hwnd, crate::Purpose::Save, &path),
+        crate::VimCmd::Edit(path) => vim_path_command(w, hwnd, crate::Purpose::Open, &path),
+        crate::VimCmd::SaveAll => {
+            save_all(w, hwnd);
         }
         crate::VimCmd::Quit => {
             let i = w.ws.active_index();
             request_close(w, hwnd, &[i], false);
+        }
+        crate::VimCmd::ForceQuit => {
+            let i = w.ws.active_index();
+            close_tab(w, hwnd, i);
+            refresh_recovery(w);
+        }
+        crate::VimCmd::QuitAll => {
+            let all: Vec<usize> = (0..w.ws.len()).collect();
+            request_close(w, hwnd, &all, true);
+        }
+        crate::VimCmd::ForceQuitAll => {
+            w.close_confirmed = true;
+            unsafe {
+                let _ = windows::Win32::UI::WindowsAndMessaging::PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0));
+            }
+        }
+        crate::VimCmd::SaveAndQuitAll => {
+            if save_all(w, hwnd) {
+                let all: Vec<usize> = (0..w.ws.len()).collect();
+                request_close(w, hwnd, &all, true);
+            }
+        }
+        crate::VimCmd::Revert => revert_active(w, hwnd),
+        crate::VimCmd::New => {
+            let cfg = w.cfg.borrow().clone();
+            open_tab(w, hwnd, maybe_vim(crate::EditorState::new_empty(), &cfg));
+        }
+        crate::VimCmd::NextTab => step_tab(w, hwnd, 1),
+        crate::VimCmd::PrevTab => step_tab(w, hwnd, -1),
+        crate::VimCmd::GotoLine(n) => {
+            let st = w.ws.active_mut();
+            let total = st.doc.buffer().len_lines();
+            let line = n.saturating_sub(1).min(total.saturating_sub(1));
+            let at = st.doc.buffer().line_start(line);
+            st.doc.set_cursor(at);
+            st.viewport.scroll_to_include(line, total);
+        }
+        crate::VimCmd::LineNumbers(on) => {
+            let mut cfg = w.cfg.borrow_mut();
+            cfg.ui.line_numbers = on.unwrap_or(!cfg.ui.line_numbers);
+            let _ = notty_config::save(&cfg, &notty_config::default_path());
         }
         crate::VimCmd::SaveAndQuit => {
             // Si no se pudo guardar, la pestaña no se cierra: se perdería lo escrito.
@@ -3795,10 +3854,60 @@ fn commit_vim_cmdline(w: &mut WindowState, hwnd: HWND) {
             let opts = notty_core::SearchOptions { case_sensitive: !ignore_case, whole_word: false, regex: false };
             let _ = w.ws.active_mut().doc.replace_all(&pattern, &replacement, opts, std::time::Instant::now());
         }
-        crate::VimCmd::Unknown(_) => {}
+        crate::VimCmd::Unknown(cmd) => {
+            if !cmd.is_empty() {
+                show_notice(w, hwnd, format!("{}: :{cmd}", tr_w(w, "No es un comando de vim")));
+            }
+        }
     }
     unsafe {
         update_title(hwnd, w.ws.active(), lang_of(w));
+    }
+}
+
+/// `:e ruta` / `:w ruta`: lo mismo que escribir la ruta en la línea de Abrir/Guardar
+/// como y pulsar Enter. Si hace falta preguntar algo (ya existe) o falla, la línea se
+/// queda abierta con la pregunta o el error.
+fn vim_path_command(w: &mut WindowState, hwnd: HWND, purpose: crate::Purpose, path: &str) {
+    let ctx = path_ctx(w);
+    let mut p = crate::PathPromptState::new(purpose, String::new());
+    p.type_text(path, &ctx);
+    w.ws.prompt = crate::Prompt::Path(p);
+    commit_path_prompt(w, hwnd);
+    if matches!(w.ws.prompt, crate::Prompt::Path(_)) {
+        start_popup_anim(w, hwnd);
+    }
+}
+
+/// `:wa`: guarda los documentos con cambios que tienen ruta. `false` si alguno falló.
+fn save_all(w: &mut WindowState, hwnd: HWND) -> bool {
+    let active = w.ws.active_index();
+    let mut ok = true;
+    for i in 0..w.ws.len() {
+        if w.ws.get(i).is_some_and(|st| st.path.is_some() && st.doc.is_dirty()) {
+            w.ws.activate(i);
+            ok &= save_now(w, hwnd);
+        }
+    }
+    w.ws.activate(active);
+    ok
+}
+
+/// `:e!`: vuelve a cargar del disco el documento activo, descartando sus cambios.
+fn revert_active(w: &mut WindowState, hwnd: HWND) {
+    let Some(path) = w.ws.active().path.clone() else { return };
+    match crate::open_as_document(&path) {
+        Ok(opened) => {
+            let cfg = w.cfg.borrow().clone();
+            let state = maybe_vim(crate::EditorState::from_opened(opened), &cfg);
+            let slot = w.ws.active_mut();
+            let (visible_lines, top) = (slot.viewport.visible_lines, slot.viewport.first_line);
+            *slot = state;
+            slot.viewport.visible_lines = visible_lines;
+            slot.viewport.first_line = top.min(slot.doc.buffer().len_lines().saturating_sub(1));
+            refresh_recovery(w);
+        }
+        Err(e) => show_notice(w, hwnd, format!("{}: {}", tr_w(w, "No se pudo abrir"), tr_w_owned(w, &e.to_string()))),
     }
 }
 

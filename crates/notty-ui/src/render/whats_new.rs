@@ -180,6 +180,28 @@ impl Renderer {
                 let x = lerp(x0, x1, p);
                 self.fill_circle(x, wave(x), 3.2, pal.accent);
             }
+            Icon::Vim => {
+                // Comandos que se escriben letra a letra tras los dos puntos, con el cursor
+                // de bloque parpadeando, y se borran para dar paso al siguiente.
+                const CMDS: [&str; 4] = ["q!", "wa", "e!", "42"];
+                let period = 1.6;
+                let cmd = CMDS[(t / period) as usize % CMDS.len()];
+                let p = (t % period) / period;
+                let typed = ((p / 0.45) * (cmd.len() + 1) as f32).floor().min(cmd.len() as f32) as usize;
+                let fmt = &self.fonts.mono_12_semibold;
+                let colon_w = self.measure(":", fmt);
+                let full_w = colon_w + self.measure(cmd, fmt) + 6.0;
+                let x0 = cx - full_w / 2.0;
+                let line = Rect::new(x0, cy - 9.0, x0 + full_w + 4.0, cy + 9.0);
+                self.text(":", fmt, line, pal.accent);
+                let shown = &cmd[..typed];
+                let tx = x0 + colon_w;
+                self.text(shown, fmt, Rect::new(tx, line.top, line.right, line.bottom), pal.text);
+                let caret_x = tx + self.measure(shown, fmt) + 1.0;
+                if (t * 2.5) as u32 % 2 == 0 || p < 0.45 {
+                    self.fill_round(Rect::new(caret_x, cy - 6.5, caret_x + 6.0, cy + 6.5), 1.0, pal.text_3);
+                }
+            }
             Icon::Sparkle => {
                 let s = 1.0 + ((t * 3.0).sin() * 0.15);
                 let l = 9.0 * s;
