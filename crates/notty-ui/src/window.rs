@@ -38,20 +38,39 @@ use crate::{EditorState, Hit, Modifiers, Renderer, Viewport};
 /// Id del `SetTimer` de autoguardado (dispara cada segundo; el manejador de `WM_TIMER`
 /// decide si de verdad hay algo que guardar).
 const ID_AUTOSAVE_TIMER: usize = 1;
-/// Id del `SetTimer` de sondeo del pipe de instancia única (Task 8): más corto que el
-/// de autoguardado para que abrir un archivo desde una segunda invocación de `notty`
-/// se note casi al instante.
-const ID_IPC_TIMER: usize = 2;
+/// Llega cuando el hilo del pipe de instancia única (o el chequeo de actualizaciones)
+/// deja algo en `ipc_rx` (ver `wake_for_ipc`). Antes se sondeaba con un temporizador
+/// cada 150 ms, que despertaba la ventana 7 veces por segundo sin hacer nada.
+const WM_IPC: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 9;
+/// Ventana principal de este proceso, para `wake_for_ipc` (0 si aún no hay).
+static IPC_HWND: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Avisa a la ventana de que hay mensajes nuevos en su `ipc_rx`. Se puede llamar desde
+/// cualquier hilo; si la ventana aún no existe no hace nada (al crearse lee lo pendiente).
+pub fn wake_for_ipc() {
+    let h = IPC_HWND.load(std::sync::atomic::Ordering::Acquire);
+    if h != 0 {
+        let _ = unsafe { windows::Win32::UI::WindowsAndMessaging::PostMessageW(Some(HWND(h as *mut _)), WM_IPC, WPARAM(0), LPARAM(0)) };
+    }
+}
 /// Id del `SetTimer` de animación (60Hz): repinta mientras haya alguna animación en
 /// curso (menú/sugerencias al abrir, cambio de pestaña...) y se para en cuanto la
 /// última termina.
 const ID_ANIM_TIMER: usize = 3;
+/// Se lo manda la ventana a sí misma tras el primer pintado: arranca pintando por CPU
+/// (`Renderer::new_software`, se ve al instante) y aquí pasa a la GPU. Probado también
+/// a cargar el driver en otro hilo mientras tanto: acababa a la vez y gastaba ~12 MB más.
+const WM_GPU_READY: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 7;
+/// Lo manda `syntax` al terminar un resaltado hecho en otro hilo (archivos grandes).
+const WM_SYNTAX_READY: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 8;
 
 /// Snapshot de documentos sucios (nombre, texto, sucio) leído por el `panic hook` para
 /// volcar a `notty_io::recovery_dir()`. Vive en memoria estática (`Box::leak`) para que
 /// el hook, que se instala una única vez para todo el proceso, tenga una dirección
 /// válida sin depender de que el hilo que entra en pánico coopere activamente.
-type RecoverySnapshot = Mutex<Vec<(String, String, bool, Option<std::path::PathBuf>)>>;
+/// El texto va como `Buffer` (un rope): clonarlo cada segundo es O(1) y comparte la
+/// memoria con el documento, en vez de copiar el archivo entero.
+type RecoverySnapshot = Mutex<Vec<(String, notty_core::Buffer, bool, Option<std::path::PathBuf>)>>;
 
 /// Estado ligado a una ventana concreta: se guarda en `GWLP_USERDATA` mientras vive.
 struct WindowState {
@@ -111,6 +130,8 @@ struct WindowState {
     accent_anim: Option<(notty_config::AccentColor, crate::Anim)>,
     /// Si el `SetTimer` de animación (`ID_ANIM_TIMER`) está corriendo.
     anim_timer_running: bool,
+    /// Si ya se pidió pasar a la GPU tras el primer pintado (ver `WM_GPU_READY`).
+    gpu_requested: bool,
     /// Aviso/panel de actualización disponible (Task 4 del plan del actualizador):
     /// qué release se encontró (si alguna), si el panel de notas está abierto, y el
     /// progreso de la descarga en curso. Ver `crate::update_panel::UpdateState`.
@@ -141,6 +162,8 @@ struct WindowState {
     tab_anims: crate::tab_anim::TabAnims,
     /// Ventana "Acerca de notty" (menú Ayuda) abierta.
     about_open: bool,
+    /// Popup de Novedades abierto desde este instante (ver `crate::whats_new`).
+    whats_new_opened: Option<std::time::Instant>,
     /// Cuándo se copió la ruta por última vez (aviso de 1,8 s).
     path_copied_at: Option<std::time::Instant>,
     /// Aviso breve en la barra de estado (texto y cuándo apareció), ver `show_notice`.
@@ -208,7 +231,7 @@ impl WindowState {
         let ui = self.cfg.borrow().ui;
         let total = self.ws.active().doc.buffer().len_lines();
         let (body, gutter_w) =
-            self.renderer.body_and_gutter(&ui, self.ws.len(), self.menu_bar_visible(), total, self.ws.active().raw.is_some());
+            self.renderer.body_and_gutter(&ui, self.ws.len(), self.menu_bar_visible(), total, self.ws.active().raw.is_some() || self.ws.active().md_preview);
         let body = self.pane_rects(body).get(self.layouts.focus()).copied().unwrap_or(body);
         (body, gutter_w)
     }
@@ -254,9 +277,7 @@ impl WindowState {
 /// cada vez que arranca una animación nueva.
 fn ensure_anim_timer(w: &mut WindowState, hwnd: HWND) {
     if !w.anim_timer_running {
-        unsafe {
-            let _ = SetTimer(Some(hwnd), ID_ANIM_TIMER, 16, None);
-        }
+        crate::anim::start_frame_timer(hwnd, ID_ANIM_TIMER);
         w.anim_timer_running = true;
     }
 }
@@ -906,6 +927,13 @@ fn open_settings_at(w: &WindowState, hwnd: HWND, section: &str) {
         }),
         Box::new(move || with_window(hwnd, |w| settings_update_info(w)).unwrap_or_default()),
         Box::new(move || start_tour(hwnd)),
+        Box::new(move || {
+            with_window(hwnd, |w| open_whats_new(w, hwnd));
+            unsafe {
+                let _ = InvalidateRect(Some(hwnd), None, false);
+                let _ = windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow(hwnd);
+            }
+        }),
         section,
         |created_hwnd| OPEN_SETTINGS_HWND.with(|c| c.set(Some(created_hwnd.0 as isize))),
     );
@@ -1037,12 +1065,14 @@ fn save_now(w: &mut WindowState, hwnd: HWND) -> bool {
 /// tecla, y mucho más simple — ver Task 7 Step 3 del plan). Solo se autoguarda el
 /// documento activo, solo si tiene ruta real, no es temporal volátil, y no hay ya un
 /// conflicto sin resolver.
-fn autosave_tick(w: &mut WindowState, hwnd: HWND) {
+/// Devuelve `true` si cambió algo visible (se guardó, o hay aviso nuevo).
+fn autosave_tick(w: &mut WindowState, hwnd: HWND) -> bool {
+    refresh_recovery(w);
     if !w.cfg.borrow().files.autosave {
-        return;
+        return false;
     }
     if matches!(w.ws.prompt, crate::Prompt::Conflict(_)) {
-        return;
+        return false;
     }
     let st = w.ws.active();
     let has_real_path = st.path.is_some() && !matches!(st.temp, Some(notty_config::TempMode::Volatile));
@@ -1060,8 +1090,9 @@ fn autosave_tick(w: &mut WindowState, hwnd: HWND) {
             SaveOutcome::Conflict => claim_attention(w, hwnd),
             SaveOutcome::Saved => {}
         }
+        return true;
     }
-    refresh_recovery(w);
+    false
 }
 
 /// Sondea `w.ipc_rx` (si lo hay) por mensajes del pipe de instancia única y los
@@ -1169,6 +1200,7 @@ fn check_updates_now(w: &mut WindowState, hwnd: HWND) {
             Err(e) => ManualCheckEvent::Error(e.to_string()),
         };
         let _ = tx.send(event);
+        wake_for_ipc();
     });
     let _ = unsafe { InvalidateRect(Some(hwnd), None, false) };
 }
@@ -1230,21 +1262,31 @@ fn start_update_download(w: &mut WindowState, hwnd: HWND) {
         let dir = std::env::temp_dir().join("notty-update");
         if std::fs::create_dir_all(&dir).is_err() {
             let _ = tx.send(DownloadEvent::DownloadError("no se pudo crear el directorio temporal".to_string()));
+            wake_for_ipc();
             return;
         }
         let setup_path = dir.join("notty-setup.exe");
         let sig_path = dir.join("notty-setup.exe.sig");
 
         let progress_tx = tx.clone();
+        // La barra de progreso se repinta como mucho ~30 veces por segundo, no una por
+        // cada trozo descargado.
+        let mut last_wake: Option<std::time::Instant> = None;
         if let Err(e) = notty_update::http::download(&release.setup_url, &setup_path, |done, total| {
             let _ = progress_tx.send(DownloadEvent::Progress(done, total));
+            if last_wake.is_none_or(|t| t.elapsed() >= std::time::Duration::from_millis(33)) || done == total {
+                last_wake = Some(std::time::Instant::now());
+                wake_for_ipc();
+            }
         }) {
             let _ = tx.send(DownloadEvent::DownloadError(e.to_string()));
+            wake_for_ipc();
             return;
         }
         if let Err(e) = notty_update::http::download(&release.sig_url, &sig_path, |_, _| {}) {
             let _ = std::fs::remove_file(&setup_path);
             let _ = tx.send(DownloadEvent::DownloadError(e.to_string()));
+            wake_for_ipc();
             return;
         }
 
@@ -1252,12 +1294,14 @@ fn start_update_download(w: &mut WindowState, hwnd: HWND) {
             let _ = std::fs::remove_file(&setup_path);
             let _ = std::fs::remove_file(&sig_path);
             let _ = tx.send(DownloadEvent::DownloadError("no se pudo leer lo descargado".to_string()));
+            wake_for_ipc();
             return;
         };
         let Ok(sig): std::result::Result<[u8; 64], _> = sig_bytes.try_into() else {
             let _ = std::fs::remove_file(&setup_path);
             let _ = std::fs::remove_file(&sig_path);
             let _ = tx.send(DownloadEvent::VerifyFailed);
+            wake_for_ipc();
             return;
         };
 
@@ -1265,11 +1309,13 @@ fn start_update_download(w: &mut WindowState, hwnd: HWND) {
             let _ = std::fs::remove_file(&setup_path);
             let _ = std::fs::remove_file(&sig_path);
             let _ = tx.send(DownloadEvent::VerifyFailed);
+            wake_for_ipc();
             return;
         }
 
         let _ = hwnd_usize; // Reservado por si una relanzada futura necesita notificar a esta ventana.
         let _ = tx.send(DownloadEvent::ReadyToRelaunch(setup_path));
+        wake_for_ipc();
     });
 }
 
@@ -1373,6 +1419,34 @@ fn notice_progress(w: &WindowState) -> Option<(f32, String)> {
     Some((if w.animations_enabled { p } else { 0.5 }, text.clone()))
 }
 
+/// Abre el popup de Novedades (Ayuda → Novedades, o solo al arrancar tras actualizar).
+fn open_whats_new(w: &mut WindowState, hwnd: HWND) {
+    w.about_open = false;
+    w.whats_new_opened = Some(std::time::Instant::now());
+    ensure_anim_timer(w, hwnd);
+}
+
+/// Al arrancar: si notty se acaba de actualizar a una versión con novedades, las
+/// enseña. En cualquier caso apunta la versión actual como vista.
+fn maybe_show_whats_new(w: &mut WindowState, hwnd: HWND) {
+    let current = crate::app_version();
+    let show = {
+        let cfg = w.cfg.borrow();
+        if cfg.last_seen_version == current {
+            return;
+        }
+        crate::whats_new::should_show(&cfg.last_seen_version, cfg.first_run_done, current)
+    };
+    {
+        let mut cfg = w.cfg.borrow_mut();
+        cfg.last_seen_version = current.to_string();
+        let _ = notty_config::save(&cfg, &notty_config::default_path());
+    }
+    if show {
+        open_whats_new(w, hwnd);
+    }
+}
+
 /// Contenido de "Acerca de notty": versión y enlace al repositorio (si `repo` no es
 /// el marcador de posición de las compilaciones sin configurar).
 fn about_content(repo: &str) -> crate::AboutContent {
@@ -1457,13 +1531,21 @@ fn state_for_path(path: &std::path::Path) -> EditorState {
     }
 }
 
-/// Crea el documento con el `EditorState` que toque, y si `cfg.ui.vim_always` está
-/// activo, lo arranca ya en modo vim.
+/// Crea el documento con el `EditorState` que toque: si `cfg.ui.vim_always` está
+/// activo, lo arranca ya en modo vim; si es un `.md`/`.markdown` y Ajustes → Archivos
+/// dice que se abran en Previsualización, arranca también con ella puesta.
 fn maybe_vim(mut st: EditorState, cfg: &notty_config::Config) -> EditorState {
     if cfg.ui.vim_always {
         st.vim = Some(crate::VimState::default());
     }
+    if cfg.ui.md_open_mode == notty_config::MdOpenMode::Preview && is_markdown_path(st.path.as_deref()) {
+        st.md_preview = true;
+    }
     st
+}
+
+fn is_markdown_path(path: Option<&std::path::Path>) -> bool {
+    path.and_then(|p| p.extension()).and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("md") || e.eq_ignore_ascii_case("markdown"))
 }
 
 /// Nombre legible para un documento en el volcado de recuperación: el nombre de
@@ -1484,8 +1566,7 @@ fn refresh_recovery(w: &WindowState) {
         .iter()
         .enumerate()
         .map(|(i, st)| {
-            let text = st.doc.buffer().slice(0..st.doc.buffer().len_chars());
-            (recovery_name(st, i), text, st.doc.is_dirty(), st.path.clone())
+            (recovery_name(st, i), st.doc.buffer().clone(), st.doc.is_dirty(), st.path.clone())
         })
         .collect();
     let mut guard = w.recovery.lock().unwrap_or_else(|e| e.into_inner());
@@ -1559,7 +1640,7 @@ fn dump_recovery_snapshot(snapshot: &RecoverySnapshot) -> std::io::Result<()> {
             .enumerate()
             .map(|(i, (name, text, _, path))| notty_io::RecoveryEntry {
                 name: format!("{i}_{name}"),
-                text: text.clone(),
+                text: text.to_string(),
                 path: path.clone(),
             })
             .collect()
@@ -1632,6 +1713,7 @@ fn run_inner(
 ) -> Result<()> {
     // Snapshot de recuperación: vive el resto del proceso (`Box::leak`) para que el
     // `panic hook`, instalado una sola vez, tenga una dirección `'static` válida.
+    crate::bench_log::mark("run_inner");
     let recovery: &'static RecoverySnapshot = Box::leak(Box::new(Mutex::new(Vec::new())));
     install_recovery_hook(recovery);
 
@@ -1640,6 +1722,7 @@ fn run_inner(
         notty_config::LoadResult::Defaulted(cfg, msg) => (cfg, Some(msg)),
     };
 
+    crate::anim::configure(&cfg.ui);
     let run_lang = crate::lang::resolve(cfg.ui.lang);
     let broken_label = crate::strings::tr(run_lang, "config.toml roto");
     let title = match (path, &broken_msg) {
@@ -1673,9 +1756,14 @@ fn run_inner(
             ..Default::default()
         };
         RegisterClassExW(&wc);
+        crate::bench_log::mark("class_registered");
 
         let (win_w, win_h) = (cfg.ui.win_w.max(layout::MIN_WINDOW_W), cfg.ui.win_h.max(layout::MIN_WINDOW_H));
         let title_wide = to_wide(&title);
+        crate::bench_log::mark("before_create_window");
+        // Se crea ya al tamaño final con el DPI del sistema (el del monitor principal,
+        // donde casi siempre aparece): redimensionarla después costaba ~25 ms de arranque.
+        let sys_scale = windows::Win32::UI::HiDpi::GetDpiForSystem() as f32 / 96.0;
         let hwnd = CreateWindowExW(
             WS_EX_APPWINDOW,
             class_name,
@@ -1683,27 +1771,28 @@ fn run_inner(
             WS_OVERLAPPEDWINDOW,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
-            win_w.round() as i32,
-            win_h.round() as i32,
+            (win_w * sys_scale).round() as i32,
+            (win_h * sys_scale).round() as i32,
             None,
             None,
             Some(instance.into()),
             None,
         )?;
+        crate::bench_log::mark("window_created");
 
-        // La ventana se creó con un tamaño nominal en píxeles; ahora que existe, se
-        // conoce su DPI real y se ajusta a `win_w`x`win_h` DIPs exactos.
-        let dpi0 = GetDpiForWindow(hwnd);
-        let scale0 = dpi0 as f32 / 96.0;
-        let _ = SetWindowPos(
-            hwnd,
-            None,
-            0,
-            0,
-            (win_w * scale0).round() as i32,
-            (win_h * scale0).round() as i32,
-            SWP_NOMOVE | SWP_NOZORDER,
-        );
+        // Si acabó en un monitor con otro DPI, se ajusta a `win_w`x`win_h` DIPs exactos.
+        let scale0 = GetDpiForWindow(hwnd) as f32 / 96.0;
+        if scale0 != sys_scale {
+            let _ = SetWindowPos(
+                hwnd,
+                None,
+                0,
+                0,
+                (win_w * scale0).round() as i32,
+                (win_h * scale0).round() as i32,
+                SWP_NOMOVE | SWP_NOZORDER,
+            );
+        }
 
         let dark = crate::is_dark(cfg.ui.theme, system_uses_dark_mode());
         setup_chrome(hwnd, dark);
@@ -1744,8 +1833,11 @@ fn run_inner(
             let _ = notty_io::clear_recovery(&notty_io::recovery_dir());
         }
 
+        crate::bench_log::mark("docs_loaded");
         let dpi = GetDpiForWindow(hwnd);
-        let mut renderer = Renderer::new(hwnd, dpi)?;
+        let mut renderer = Renderer::new_software(hwnd, dpi)?;
+        crate::syntax::set_repaint_target(hwnd, WM_SYNTAX_READY);
+        crate::bench_log::mark("renderer_new");
         let _ = renderer.set_mono_family(cfg.ui.font_family.primary_name());
         let _ = renderer.set_font_scale(cfg.ui.font_scale);
 
@@ -1782,6 +1874,7 @@ fn run_inner(
             last_accent: None,
             accent_anim: None,
             anim_timer_running: false,
+            gpu_requested: false,
             update: crate::UpdateState::default(),
             download_rx: None,
             manual_check_rx: None,
@@ -1792,6 +1885,7 @@ fn run_inner(
             menu_sel: None,
             tab_anims: Default::default(),
             about_open: false,
+            whats_new_opened: None,
             path_copied_at: None,
             notice: None,
             swallow_char: false,
@@ -1806,10 +1900,18 @@ fn run_inner(
             refresh_recovery(w);
         }
 
+        crate::bench_log::mark("state_ready");
         let start_maximized = ptr.as_ref().is_some_and(|w| w.cfg.borrow().ui.win_maximized);
         let _ = ShowWindow(hwnd, if start_maximized { SW_MAXIMIZE } else { SW_SHOW });
         let _ = SetTimer(Some(hwnd), ID_AUTOSAVE_TIMER, 1000, None);
-        let _ = SetTimer(Some(hwnd), ID_IPC_TIMER, 150, None);
+        IPC_HWND.store(hwnd.0 as usize, std::sync::atomic::Ordering::Release);
+        // Lo que llegase antes de registrar la ventana.
+        wake_for_ipc();
+
+        // Recién actualizado: el popup de Novedades, una sola vez por versión.
+        if let Some(w) = ptr.as_mut() {
+            maybe_show_whats_new(w, hwnd);
+        }
 
         // Primer arranque: la ventana de bienvenida (no la del recorrido directamente,
         // ver Task 4 Step 5 del plan de tutorial) — no modal, flota sobre esta ventana
@@ -2055,6 +2157,10 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     }
                     w.renderer.set_tab_anim(w.tab_anims.frame(std::time::Instant::now()));
                     w.renderer.set_about(if w.about_open { Some(about_content(&w.repo)) } else { None });
+                    w.renderer.set_whats_new(w.whats_new_opened.and_then(|opened| {
+                        let r = crate::whats_new::release_for(crate::app_version())?;
+                        Some(crate::WhatsNewView { version: r.version, items: r.items, opened, animate: w.animations_enabled })
+                    }));
                     w.renderer.set_path_copied(path_copied_progress(w));
                     w.renderer.set_notice(notice_progress(w));
                     if w.tour.is_some() {
@@ -2065,6 +2171,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         w.renderer.set_syntax_disabled(&cfg.syntax_disabled);
                         crate::ligature::resolve(&cfg.ligature_overrides, &cfg.ligature_disabled)
                     };
+                    let paint_start = std::time::Instant::now();
                     w.renderer.paint(&w.ws, &ui, &view, &ligature_table);
                     if w.tour.is_some() {
                         // Se pinta último (capa por encima de todo lo demás), en una
@@ -2074,6 +2181,11 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         let frame = w.renderer.current_frame(&ui, w.ws.len(), w.menu_bar_visible());
                         let tour = w.tour.as_mut().expect("comprobado con is_some justo arriba");
                         tour.draw(&w.renderer, &frame, view.dark, ui.accent, std::time::Instant::now());
+                    }
+                    crate::bench_log::record_paint(paint_start.elapsed());
+                    if w.renderer.is_software() && !w.gpu_requested {
+                        w.gpu_requested = true;
+                        let _ = windows::Win32::UI::WindowsAndMessaging::PostMessageW(Some(hwnd), WM_GPU_READY, WPARAM(0), LPARAM(0));
                     }
                 }
                 let _ = ValidateRect(Some(hwnd), None);
@@ -2293,6 +2405,11 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     if handle_menu_key(w, hwnd, vk) {
                         return LRESULT(0);
                     }
+                    if w.whats_new_opened.is_some() && (vk == 0x1B || vk == 0x0D) {
+                        w.whats_new_opened = None;
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                        return LRESULT(0);
+                    }
                     if w.about_open && (vk == 0x1B || vk == 0x0D) {
                         w.about_open = false;
                         let _ = InvalidateRect(Some(hwnd), None, false);
@@ -2328,6 +2445,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                                 st.vim = if st.vim.is_some() { None } else { Some(crate::VimState::default()) };
                             }
                             notty_input::Command::ToggleRaw => toggle_raw(w, hwnd),
+                            notty_input::Command::ToggleMdPreview => toggle_md_preview(w),
                             notty_input::Command::ZoomIn => {
                                 let target = w.cfg.borrow().ui.font_scale + ZOOM_STEP;
                                 set_font_scale(w, hwnd, target);
@@ -2454,9 +2572,11 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                         crate::EditorAction::Paste => {
-                            clipboard_paste(w, hwnd);
-                            update_title(hwnd, w.ws.active(), lang_of(w));
-                            let _ = InvalidateRect(Some(hwnd), None, false);
+                            if !md_preview_readonly_blocks_edits(w) {
+                                clipboard_paste(w, hwnd);
+                                update_title(hwnd, w.ws.active(), lang_of(w));
+                                let _ = InvalidateRect(Some(hwnd), None, false);
+                            }
                         }
                         crate::EditorAction::OpenPathPrompt => {
                             let initial = w.ws.active().path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
@@ -2489,10 +2609,20 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                         other => {
-                            w.ws.active_mut().apply(other, std::time::Instant::now());
-                            update_title(hwnd, w.ws.active(), lang_of(w));
-                            refresh_recovery(w);
-                            let _ = InvalidateRect(Some(hwnd), None, false);
+                            let edits = matches!(
+                                other,
+                                crate::EditorAction::Backspace
+                                    | crate::EditorAction::DeleteForward
+                                    | crate::EditorAction::InsertNewline
+                                    | crate::EditorAction::Undo
+                                    | crate::EditorAction::Redo
+                            );
+                            if !edits || !md_preview_readonly_blocks_edits(w) {
+                                w.ws.active_mut().apply(other, std::time::Instant::now());
+                                update_title(hwnd, w.ws.active(), lang_of(w));
+                                refresh_recovery(w);
+                                let _ = InvalidateRect(Some(hwnd), None, false);
+                            }
                         }
                     }
                 }
@@ -2520,6 +2650,9 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             update_title(hwnd, w.ws.active(), lang_of(w));
                             refresh_recovery(w);
                             let _ = InvalidateRect(Some(hwnd), None, false);
+                            return LRESULT(0);
+                        }
+                        if md_preview_readonly_blocks_edits(w) {
                             return LRESULT(0);
                         }
                         w.ws.active_mut().insert_char(ch, std::time::Instant::now());
@@ -2563,6 +2696,13 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             Hit::CtxItem(j) => activate_menu_row(w, hwnd, j),
                             Hit::PopupBox => {}
                             _ => close_menus(w),
+                        }
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                        return LRESULT(0);
+                    }
+                    if w.whats_new_opened.is_some() {
+                        if hit != Hit::PopupBox {
+                            w.whats_new_opened = None;
                         }
                         let _ = InvalidateRect(Some(hwnd), None, false);
                         return LRESULT(0);
@@ -2706,7 +2846,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         crate::Hit::Body if w.ws.active().raw.is_none() => {
                             w.open_menu = None;
                             let (body, gutter_w) = w.body_and_gutter();
-                            let idx = w.renderer.char_index_at(w.ws.active(), body, gutter_w, x, y, w.cfg.borrow().ui.wrap);
+                            let idx = w.renderer.char_index_at(w.ws.active(), body, gutter_w, x, y, w.cfg.borrow().ui.wrap, w.cfg.borrow().ui.md_preview_style == notty_config::MdPreviewStyle::Inline);
                             w.ws.active_mut().doc.set_cursor(idx);
                             w.selection_anchor = idx;
                             w.mouse_down = true;
@@ -2758,7 +2898,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     }
                     if w.mouse_down {
                         let (body, gutter_w) = w.body_and_gutter();
-                        let idx = w.renderer.char_index_at(w.ws.active(), body, gutter_w, x, y, w.cfg.borrow().ui.wrap);
+                        let idx = w.renderer.char_index_at(w.ws.active(), body, gutter_w, x, y, w.cfg.borrow().ui.wrap, w.cfg.borrow().ui.md_preview_style == notty_config::MdPreviewStyle::Inline);
                         w.ws.active_mut().doc.set_selection(w.selection_anchor, idx);
                         let _ = InvalidateRect(Some(hwnd), None, false);
                     }
@@ -2835,7 +2975,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     }
                     if hit == Hit::Body && w.ws.active().raw.is_none() {
                         let (body, gutter_w) = w.body_and_gutter();
-                        let idx = w.renderer.char_index_at(w.ws.active(), body, gutter_w, x, y, w.cfg.borrow().ui.wrap);
+                        let idx = w.renderer.char_index_at(w.ws.active(), body, gutter_w, x, y, w.cfg.borrow().ui.wrap, w.cfg.borrow().ui.md_preview_style == notty_config::MdPreviewStyle::Inline);
                         let sel = w.ws.active().doc.selection();
                         let r = sel.range();
                         if sel.is_empty() || idx < r.start || idx > r.end {
@@ -2942,18 +3082,33 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 }
                 DefWindowProcW(hwnd, msg, wparam, lparam)
             }
+            WM_IPC => {
+                if let Some(w) = ptr.as_mut() {
+                    if ipc_tick(w, hwnd) {
+                        update_title(hwnd, w.ws.active(), lang_of(w));
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                    }
+                }
+                LRESULT(0)
+            }
+            WM_SYNTAX_READY => {
+                let _ = InvalidateRect(Some(hwnd), None, false);
+                LRESULT(0)
+            }
+            WM_GPU_READY => {
+                if let Some(w) = ptr.as_mut() {
+                    if w.renderer.upgrade_to_gpu() {
+                        crate::bench_log::mark("gpu");
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                    }
+                }
+                LRESULT(0)
+            }
             WM_TIMER => {
                 if wparam.0 == ID_AUTOSAVE_TIMER {
                     if let Some(w) = ptr.as_mut() {
-                        autosave_tick(w, hwnd);
-                        let _ = InvalidateRect(Some(hwnd), None, false);
-                    }
-                    return LRESULT(0);
-                }
-                if wparam.0 == ID_IPC_TIMER {
-                    if let Some(w) = ptr.as_mut() {
-                        if ipc_tick(w, hwnd) {
-                            update_title(hwnd, w.ws.active(), lang_of(w));
+                        // Sin repintar si no cambió nada: en reposo, la ventana no se despierta a dibujar.
+                        if autosave_tick(w, hwnd) {
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                     }
@@ -2987,10 +3142,11 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             || w.theme_anim.is_some()
                             || w.accent_anim.is_some()
                             || tour_animating
+                            || w.whats_new_opened.is_some()
                             || path_copied_progress(w).is_some()
                             || notice_progress(w).is_some();
                         if !still_animating {
-                            let _ = KillTimer(Some(hwnd), ID_ANIM_TIMER);
+                            crate::anim::stop_frame_timer(hwnd, ID_ANIM_TIMER);
                             w.anim_timer_running = false;
                         }
                         let _ = InvalidateRect(Some(hwnd), None, false);
@@ -3026,8 +3182,8 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     save_window_geometry(hwnd, w);
                 }
                 let _ = KillTimer(Some(hwnd), ID_AUTOSAVE_TIMER);
-                let _ = KillTimer(Some(hwnd), ID_IPC_TIMER);
-                let _ = KillTimer(Some(hwnd), ID_ANIM_TIMER);
+                IPC_HWND.store(0, std::sync::atomic::Ordering::Release);
+                crate::anim::stop_frame_timer(hwnd, ID_ANIM_TIMER);
                 PostQuitMessage(0);
                 LRESULT(0)
             }
@@ -3119,6 +3275,7 @@ fn run_menu_item(w: &mut WindowState, hwnd: HWND, menu_idx: usize, item_idx: usi
             st.vim = if st.vim.is_some() { None } else { Some(crate::VimState::default()) };
         }
         MenuCmd::ToggleRaw => toggle_raw(w, hwnd),
+        MenuCmd::ToggleMdPreview => toggle_md_preview(w),
         MenuCmd::ToggleLineNumbers => {
             let mut cfg = w.cfg.borrow_mut();
             cfg.ui.line_numbers = !cfg.ui.line_numbers;
@@ -3137,6 +3294,7 @@ fn run_menu_item(w: &mut WindowState, hwnd: HWND, menu_idx: usize, item_idx: usi
         // concreta (Teclado): de momento abre Ajustes por el principio.
         MenuCmd::Shortcuts => open_settings_at(w, hwnd, "teclado"),
         MenuCmd::About => w.about_open = true,
+        MenuCmd::WhatsNew => open_whats_new(w, hwnd),
     }
     unsafe {
         update_title(hwnd, w.ws.active(), lang_of(w));
@@ -3181,6 +3339,21 @@ fn toggle_raw(w: &mut WindowState, hwnd: HWND) {
             st.viewport.first_line = 0;
         }
     }
+}
+
+/// A diferencia de `toggle_raw`, Previsualización no lee/escribe nada del disco: es el
+/// mismo `Document` de siempre, solo cambia cómo se dibuja (`render.rs`) y, con el
+/// estilo "Solo lectura" (Ajustes → Archivos), si se puede escribir en él o no.
+fn toggle_md_preview(w: &mut WindowState) {
+    let st = w.ws.active_mut();
+    st.md_preview = !st.md_preview;
+}
+
+/// Si Previsualización (estilo "Solo lectura") bloquea la edición del documento activo
+/// ahora mismo: se deja escribir con normalidad en el estilo "En línea" (siempre, la
+/// línea con el cursor se ve y edita en markdown crudo) y fuera de Previsualización.
+fn md_preview_readonly_blocks_edits(w: &WindowState) -> bool {
+    w.ws.active().md_preview && w.cfg.borrow().ui.md_preview_style == notty_config::MdPreviewStyle::ReadOnly
 }
 
 /// Flechas (mueven el byte seleccionado) y `Ctrl+S` (guarda) mientras hay un `RawDoc` activo.
@@ -3607,11 +3780,63 @@ fn commit_vim_cmdline(w: &mut WindowState, hwnd: HWND) {
     w.ws.close_prompt();
     match crate::parse_vim_cmd(&line) {
         crate::VimCmd::Save => {
-            save_now(w, hwnd);
+            if w.ws.active().path.is_none() {
+                if start_path_entry(w, hwnd, crate::Purpose::Save, String::new()) {
+                    start_popup_anim(w, hwnd);
+                }
+            } else {
+                save_now(w, hwnd);
+            }
+        }
+        crate::VimCmd::SaveAs(path) => vim_path_command(w, hwnd, crate::Purpose::Save, &path),
+        crate::VimCmd::Edit(path) => vim_path_command(w, hwnd, crate::Purpose::Open, &path),
+        crate::VimCmd::SaveAll => {
+            save_all(w, hwnd);
         }
         crate::VimCmd::Quit => {
             let i = w.ws.active_index();
             request_close(w, hwnd, &[i], false);
+        }
+        crate::VimCmd::ForceQuit => {
+            let i = w.ws.active_index();
+            close_tab(w, hwnd, i);
+            refresh_recovery(w);
+        }
+        crate::VimCmd::QuitAll => {
+            let all: Vec<usize> = (0..w.ws.len()).collect();
+            request_close(w, hwnd, &all, true);
+        }
+        crate::VimCmd::ForceQuitAll => {
+            w.close_confirmed = true;
+            unsafe {
+                let _ = windows::Win32::UI::WindowsAndMessaging::PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0));
+            }
+        }
+        crate::VimCmd::SaveAndQuitAll => {
+            if save_all(w, hwnd) {
+                let all: Vec<usize> = (0..w.ws.len()).collect();
+                request_close(w, hwnd, &all, true);
+            }
+        }
+        crate::VimCmd::Revert => revert_active(w, hwnd),
+        crate::VimCmd::New => {
+            let cfg = w.cfg.borrow().clone();
+            open_tab(w, hwnd, maybe_vim(crate::EditorState::new_empty(), &cfg));
+        }
+        crate::VimCmd::NextTab => step_tab(w, hwnd, 1),
+        crate::VimCmd::PrevTab => step_tab(w, hwnd, -1),
+        crate::VimCmd::GotoLine(n) => {
+            let st = w.ws.active_mut();
+            let total = st.doc.buffer().len_lines();
+            let line = n.saturating_sub(1).min(total.saturating_sub(1));
+            let at = st.doc.buffer().line_start(line);
+            st.doc.set_cursor(at);
+            st.viewport.scroll_to_include(line, total);
+        }
+        crate::VimCmd::LineNumbers(on) => {
+            let mut cfg = w.cfg.borrow_mut();
+            cfg.ui.line_numbers = on.unwrap_or(!cfg.ui.line_numbers);
+            let _ = notty_config::save(&cfg, &notty_config::default_path());
         }
         crate::VimCmd::SaveAndQuit => {
             // Si no se pudo guardar, la pestaña no se cierra: se perdería lo escrito.
@@ -3629,10 +3854,60 @@ fn commit_vim_cmdline(w: &mut WindowState, hwnd: HWND) {
             let opts = notty_core::SearchOptions { case_sensitive: !ignore_case, whole_word: false, regex: false };
             let _ = w.ws.active_mut().doc.replace_all(&pattern, &replacement, opts, std::time::Instant::now());
         }
-        crate::VimCmd::Unknown(_) => {}
+        crate::VimCmd::Unknown(cmd) => {
+            if !cmd.is_empty() {
+                show_notice(w, hwnd, format!("{}: :{cmd}", tr_w(w, "No es un comando de vim")));
+            }
+        }
     }
     unsafe {
         update_title(hwnd, w.ws.active(), lang_of(w));
+    }
+}
+
+/// `:e ruta` / `:w ruta`: lo mismo que escribir la ruta en la línea de Abrir/Guardar
+/// como y pulsar Enter. Si hace falta preguntar algo (ya existe) o falla, la línea se
+/// queda abierta con la pregunta o el error.
+fn vim_path_command(w: &mut WindowState, hwnd: HWND, purpose: crate::Purpose, path: &str) {
+    let ctx = path_ctx(w);
+    let mut p = crate::PathPromptState::new(purpose, String::new());
+    p.type_text(path, &ctx);
+    w.ws.prompt = crate::Prompt::Path(p);
+    commit_path_prompt(w, hwnd);
+    if matches!(w.ws.prompt, crate::Prompt::Path(_)) {
+        start_popup_anim(w, hwnd);
+    }
+}
+
+/// `:wa`: guarda los documentos con cambios que tienen ruta. `false` si alguno falló.
+fn save_all(w: &mut WindowState, hwnd: HWND) -> bool {
+    let active = w.ws.active_index();
+    let mut ok = true;
+    for i in 0..w.ws.len() {
+        if w.ws.get(i).is_some_and(|st| st.path.is_some() && st.doc.is_dirty()) {
+            w.ws.activate(i);
+            ok &= save_now(w, hwnd);
+        }
+    }
+    w.ws.activate(active);
+    ok
+}
+
+/// `:e!`: vuelve a cargar del disco el documento activo, descartando sus cambios.
+fn revert_active(w: &mut WindowState, hwnd: HWND) {
+    let Some(path) = w.ws.active().path.clone() else { return };
+    match crate::open_as_document(&path) {
+        Ok(opened) => {
+            let cfg = w.cfg.borrow().clone();
+            let state = maybe_vim(crate::EditorState::from_opened(opened), &cfg);
+            let slot = w.ws.active_mut();
+            let (visible_lines, top) = (slot.viewport.visible_lines, slot.viewport.first_line);
+            *slot = state;
+            slot.viewport.visible_lines = visible_lines;
+            slot.viewport.first_line = top.min(slot.doc.buffer().len_lines().saturating_sub(1));
+            refresh_recovery(w);
+        }
+        Err(e) => show_notice(w, hwnd, format!("{}: {}", tr_w(w, "No se pudo abrir"), tr_w_owned(w, &e.to_string()))),
     }
 }
 

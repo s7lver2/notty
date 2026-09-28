@@ -25,6 +25,7 @@ pub enum Command {
     CloseTab,
     ToggleVim,
     ToggleRaw,
+    ToggleMdPreview,
     ZoomIn,
     ZoomOut,
     ZoomReset,
@@ -49,6 +50,7 @@ impl Command {
         Command::OpenSettings,
         Command::ToggleVim,
         Command::ToggleRaw,
+        Command::ToggleMdPreview,
         Command::ZoomIn,
         Command::ZoomOut,
         Command::ZoomReset,
@@ -74,6 +76,7 @@ impl Command {
             Command::CloseTab => "close_tab",
             Command::ToggleVim => "toggle_vim",
             Command::ToggleRaw => "toggle_raw",
+            Command::ToggleMdPreview => "toggle_md_preview",
             Command::ZoomIn => "zoom_in",
             Command::ZoomOut => "zoom_out",
             Command::ZoomReset => "zoom_reset",
@@ -103,6 +106,7 @@ impl Command {
             Command::CloseTab => "Cerrar pestaña",
             Command::ToggleVim => "Alternar vim en esta ventana",
             Command::ToggleRaw => "Ver como raw",
+            Command::ToggleMdPreview => "Ver Markdown como previsualización",
             Command::ZoomIn => "Aumentar tamaño del texto",
             Command::ZoomOut => "Reducir tamaño del texto",
             Command::ZoomReset => "Restablecer tamaño del texto",
@@ -128,6 +132,7 @@ impl Command {
             Command::CloseTab => "Ctrl+W",
             Command::ToggleVim => "Ctrl+Alt+V",
             Command::ToggleRaw => "Ctrl+Shift+H",
+            Command::ToggleMdPreview => "Ctrl+Shift+M",
             Command::ZoomIn => "Ctrl+=",
             Command::ZoomOut => "Ctrl+-",
             Command::ZoomReset => "Ctrl+0",
@@ -153,6 +158,7 @@ impl Command {
             Command::CloseTab => Some(UiCommand::CloseTab),
             Command::ToggleVim
             | Command::ToggleRaw
+            | Command::ToggleMdPreview
             | Command::ZoomIn
             | Command::ZoomOut
             | Command::ZoomReset

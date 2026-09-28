@@ -1,6 +1,7 @@
 //! notty-ui: ventana Win32, render Direct2D/DirectWrite y lógica de edición en pantalla.
 
 mod anim;
+pub mod bench_log;
 pub mod chrome_text;
 pub mod clipboard;
 mod closing;
@@ -8,9 +9,11 @@ mod conflict;
 pub mod context_menu;
 mod doc_io;
 pub mod editor;
+pub mod global_hotkey;
 mod keyboard_widget;
 mod hex;
 pub mod lang;
+pub mod markdown;
 pub mod layout;
 mod keymap;
 pub mod ligature;
@@ -39,6 +42,7 @@ mod viewport;
 mod vim;
 mod vim_cmd;
 pub mod welcome_window;
+pub mod whats_new;
 pub mod window;
 pub mod workspace;
 
@@ -53,7 +57,7 @@ pub use keymap::{EditorAction, Modifiers, action_for_vk};
 pub use path_prompt::{OVERWRITE_QUESTION, OverwriteChoice, PathPromptState, Purpose};
 pub use prompt::Prompt;
 pub use raw_doc::{RawDoc, open_raw_doc};
-pub use render::{AboutContent, Hit, PaneView, Renderer, UpdatePanelContent, ViewState};
+pub use render::{AboutContent, Hit, PaneView, Renderer, UpdatePanelContent, ViewState, WhatsNewView};
 pub use search_prompt::SearchState;
 pub use text_input::char_from_utf16_unit;
 pub use theme::{Palette, Rgba, is_dark, palette};

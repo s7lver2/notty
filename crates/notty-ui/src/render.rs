@@ -11,7 +11,7 @@ use windows::Win32::Graphics::Direct2D::{
     D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_BRUSH_PROPERTIES, D2D1_CAP_STYLE_ROUND, D2D1_COMBINE_MODE_EXCLUDE,
     D2D1_DASH_STYLE_SOLID, D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT, D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_ELLIPSE,
     D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_HWND_RENDER_TARGET_PROPERTIES, D2D1_LINE_JOIN_ROUND,
-    D2D1_RENDER_TARGET_PROPERTIES, D2D1_ROUNDED_RECT, D2D1_STROKE_STYLE_PROPERTIES, D2D1CreateFactory, ID2D1Factory,
+    D2D1_RENDER_TARGET_PROPERTIES, D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1_RENDER_TARGET_TYPE_SOFTWARE, D2D1_ROUNDED_RECT, D2D1_STROKE_STYLE_PROPERTIES, D2D1CreateFactory, ID2D1Factory,
     ID2D1HwndRenderTarget, ID2D1PathGeometry, ID2D1SolidColorBrush,
 };
 use windows::Win32::Graphics::DirectWrite::{
@@ -32,6 +32,9 @@ use crate::theme::{self, Rgba};
 use crate::{EditorState, Viewport, Workspace};
 
 mod extra;
+mod md;
+mod whats_new;
+pub use whats_new::WhatsNewView;
 
 /// Convierte un desplazamiento en chars (relativo al inicio de `text`) a un
 /// desplazamiento en unidades UTF-16, que es lo que espera `IDWriteTextLayout`.
@@ -100,6 +103,9 @@ pub enum Hit {
     CloseChoice(u8),
     /// Enlace al repositorio en "Acerca de notty".
     AboutLink,
+    /// Botones "✕" y "Entendido" del popup de Novedades.
+    WhatsNewClose,
+    WhatsNewOk,
     /// Tirador de la barra de scroll del editor (arrastrar desplaza el documento).
     ScrollThumb,
     /// Zona de la pista por encima/debajo del tirador: clic avanza una página.
@@ -264,6 +270,8 @@ pub struct Renderer {
     /// El último `EndDraw` dijo que el dispositivo se perdió (driver reiniciado,
     /// escritorio remoto...): `recover_device` recrea el target antes de pintar.
     device_lost: std::cell::Cell<bool>,
+    /// Pintando por CPU (ver `new_software`).
+    software: bool,
     dwrite: IDWriteFactory,
     brush: ID2D1SolidColorBrush,
     fonts: Fonts,
@@ -301,6 +309,7 @@ pub struct Renderer {
     tab_scroll_targets: (Option<usize>, Option<usize>),
     /// "Acerca de notty" abierto.
     about: Option<AboutContent>,
+    whats_new: Option<WhatsNewView>,
     /// Progreso (`0..1` en 1,8 s) del aviso "Ruta copiada", si hay uno en curso.
     path_copied: Option<f32>,
     /// Aviso breve de la barra de estado (p. ej. un error al guardar): progreso y texto.
@@ -339,14 +348,19 @@ pub struct UpdatePanelContent {
 
 /// Render target de `hwnd` (al tamaño actual de su área cliente) y la brocha única,
 /// que depende de él. Se llama al crear el `Renderer` y cada vez que se pierde el dispositivo.
-unsafe fn create_target(d2d: &ID2D1Factory, hwnd: HWND, dpi: u32) -> Result<(ID2D1HwndRenderTarget, ID2D1SolidColorBrush)> {
+/// Con `software`, Direct2D pinta por CPU: se crea en ~20 ms en vez de los ~300 ms que
+/// tarda en cargar el driver de la GPU la primera vez (ver `Renderer::new_software`).
+unsafe fn create_target(d2d: &ID2D1Factory, hwnd: HWND, dpi: u32, software: bool) -> Result<(ID2D1HwndRenderTarget, ID2D1SolidColorBrush)> {
     unsafe {
         let mut client = windows::Win32::Foundation::RECT::default();
         let _ = windows::Win32::UI::WindowsAndMessaging::GetClientRect(hwnd, &mut client);
         let width = (client.right - client.left).max(1) as u32;
         let height = (client.bottom - client.top).max(1) as u32;
         let target = d2d.CreateHwndRenderTarget(
-            &D2D1_RENDER_TARGET_PROPERTIES::default(),
+            &D2D1_RENDER_TARGET_PROPERTIES {
+                r#type: if software { D2D1_RENDER_TARGET_TYPE_SOFTWARE } else { D2D1_RENDER_TARGET_TYPE_DEFAULT },
+                ..Default::default()
+            },
             &D2D1_HWND_RENDER_TARGET_PROPERTIES { hwnd, pixelSize: D2D_SIZE_U { width, height }, ..Default::default() },
         )?;
         target.SetDpi(dpi as f32, dpi as f32);
@@ -360,9 +374,43 @@ unsafe fn create_target(d2d: &ID2D1Factory, hwnd: HWND, dpi: u32) -> Result<(ID2
 
 impl Renderer {
     pub fn new(hwnd: HWND, dpi: u32) -> Result<Self> {
+        Self::new_with(hwnd, dpi, false)
+    }
+
+    /// Como `new`, pero pintando por CPU hasta que se llame a `upgrade_to_gpu`: la
+    /// ventana principal arranca así para no esperar a que cargue el driver de la GPU
+    /// (~300 ms la primera vez) antes de enseñar nada: pasa a la GPU justo después del
+    /// primer pintado.
+    pub fn new_software(hwnd: HWND, dpi: u32) -> Result<Self> {
+        Self::new_with(hwnd, dpi, true)
+    }
+
+    /// Pasa a pintar con la GPU si se creó con `new_software`. `false` si ya lo hacía o
+    /// si no se pudo (entonces sigue por CPU, que también funciona).
+    pub fn is_software(&self) -> bool {
+        self.software
+    }
+
+    pub fn upgrade_to_gpu(&mut self) -> bool {
+        if !self.software {
+            return false;
+        }
+        let ok = match unsafe { create_target(&self._d2d, self.hwnd, self.dpi, false) } {
+            Ok((target, brush)) => {
+                self.target = target;
+                self.brush = brush;
+                self.software = false;
+                true
+            }
+            Err(_) => false,
+        };
+        ok
+    }
+
+    fn new_with(hwnd: HWND, dpi: u32, software: bool) -> Result<Self> {
         unsafe {
             let d2d: ID2D1Factory = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
-            let (target, brush) = create_target(&d2d, hwnd, dpi)?;
+            let (target, brush) = create_target(&d2d, hwnd, dpi, software)?;
 
             let dwrite: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
             let sys_fonts: IDWriteFontCollection = {
@@ -404,6 +452,7 @@ impl Renderer {
                 hwnd,
                 target,
                 device_lost: std::cell::Cell::new(false),
+                software,
                 dwrite,
                 brush,
                 fonts: Fonts {
@@ -442,6 +491,7 @@ impl Renderer {
                 tab_anim: Default::default(),
                 tab_scroll_targets: (None, None),
                 about: None,
+                whats_new: None,
                 path_copied: None,
                 notice: None,
                 menu_keys: Vec::new(),
@@ -633,7 +683,7 @@ impl Renderer {
         if !self.device_lost.get() {
             return false;
         }
-        match unsafe { create_target(&self._d2d, self.hwnd, self.dpi) } {
+        match unsafe { create_target(&self._d2d, self.hwnd, self.dpi, self.software) } {
             Ok((target, brush)) => {
                 self.target = target;
                 self.brush = brush;
@@ -1020,7 +1070,10 @@ impl Renderer {
     /// vez de dividir `y` entre `line_height()` hay que acumular el alto real de cada
     /// línea desde `first_line` hasta dar con la que contiene el clic (igual que hace
     /// `paint` al dibujar).
-    pub fn char_index_at(&self, state: &EditorState, body: Rect, gutter_w: f32, x: f32, y: f32, wrap: bool) -> usize {
+    pub fn char_index_at(&self, state: &EditorState, body: Rect, gutter_w: f32, x: f32, y: f32, wrap: bool, md_inline: bool) -> usize {
+        if state.md_preview {
+            return self.md_char_index_at(state, body, body.left + layout::TEXT_PAD_L, md_inline, x, y);
+        }
         let buf = state.doc.buffer();
         let total = buf.len_lines();
         let text_pad = body.left + gutter_w + layout::TEXT_PAD_L;
@@ -1149,11 +1202,11 @@ impl Renderer {
         let state = ws.active();
         let is_raw = state.raw.is_some();
 
-        let (search_matches, search_current): (Vec<std::ops::Range<usize>>, Option<usize>) = match &ws.prompt {
+        let (search_matches, search_current): (std::rc::Rc<Vec<std::ops::Range<usize>>>, Option<usize>) = match &ws.prompt {
             crate::Prompt::Find(s) | crate::Prompt::Replace(s) => {
                 (s.matches(&state.doc).unwrap_or_default(), Some(s.current))
             }
-            _ => (Vec::new(), None),
+            _ => (Default::default(), None),
         };
 
         let (w, h) = self.size_dips();
@@ -1225,8 +1278,8 @@ impl Renderer {
             let head = if focused { sel.head } else { usize::MAX };
             let cursor_line = state.doc.line_col().0;
             let (search_matches, search_current) =
-                if focused { (&search_matches[..], search_current) } else { (&[][..], None) };
-            let gutter_w = if ui.line_numbers && !is_raw { layout::gutter_width(total_lines, self.digit_width()) } else { 0.0 };
+                if focused { (search_matches.as_slice(), search_current) } else { (&[][..], None) };
+            let gutter_w = if ui.line_numbers && !is_raw && !state.md_preview { layout::gutter_width(total_lines, self.digit_width()) } else { 0.0 };
             let text_pad = frame.body.left + gutter_w + layout::TEXT_PAD_L;
             if split {
                 self.push_clip(pane);
@@ -1236,6 +1289,9 @@ impl Renderer {
                 if let Some(raw) = &state.raw {
                     self.draw_hex(raw, state.raw_cursor, state.raw_pending_nibble, state.viewport.first_line, pal, frame);
                 }
+            } else if state.md_preview {
+                let inline_mode = ui.md_preview_style == notty_config::MdPreviewStyle::Inline;
+                self.paint_md(state, pal, frame.body, text_pad, head, inline_mode, search_matches, search_current);
             } else {
             let spans = if ui.syntax_highlight {
                 state.syntax.line_spans(&state.doc, state.path.as_deref(), range.clone(), &self.syntax_disabled)
@@ -1449,7 +1505,7 @@ impl Renderer {
                 full.hints = Rect::new(0.0, frame.hints.top, w, frame.hints.top + layout::HINTS_H);
                 self.push_clip(frame.hints);
                 self.set_fade(k);
-                self.draw_hints(state, ws, pal, full);
+                self.draw_hints(state, ws, pal, full, ui.md_preview_style);
                 self.set_fade(1.0);
                 self.pop_clip();
             }
@@ -1462,6 +1518,7 @@ impl Renderer {
                     hints_bar: ui.hints_bar,
                     vim: state.vim.is_some(),
                     raw: is_raw,
+                    md_preview: state.md_preview,
                 };
                 self.draw_dropdown(crate::menu::MENUS[i].items, x, top, checks, view, pal, lang);
             }
@@ -1474,6 +1531,7 @@ impl Renderer {
             }
             self.draw_update_panel(pal, frame.status.top, w, view);
             self.draw_about(pal, frame.body, view);
+            self.draw_whats_new(pal, frame.body, view);
 
             if let Some(menu) = self.context_menu.take() {
                 let rows: Vec<MenuRow> = menu
@@ -1997,7 +2055,7 @@ impl Renderer {
 
     /// Barra de atajos (`.hints`): fondo `surface_2`, línea superior, pares tecla/acción.
     #[allow(unused_unsafe)]
-    unsafe fn draw_hints(&self, state: &EditorState, ws: &Workspace, pal: &theme::Palette, frame: layout::Frame) {
+    unsafe fn draw_hints(&self, state: &EditorState, ws: &Workspace, pal: &theme::Palette, frame: layout::Frame, md_preview_style: notty_config::MdPreviewStyle) {
         unsafe {
             self.fill(frame.hints, pal.surface_2);
             self.stroke_line(0.0, frame.hints.top, frame.hints.width(), frame.hints.top, 1.0, pal.line);
@@ -2012,6 +2070,8 @@ impl Renderer {
                 }
             } else if state.raw.is_some() {
                 crate::HintsCtx::Raw
+            } else if state.md_preview {
+                if md_preview_style == notty_config::MdPreviewStyle::ReadOnly { crate::HintsCtx::MdPreviewReadOnly } else { crate::HintsCtx::MdPreviewInline }
             } else if let Some(vim) = &state.vim {
                 if vim.mode == crate::VimMode::Insert { crate::HintsCtx::VimInsert } else { crate::HintsCtx::VimNormal }
             } else {

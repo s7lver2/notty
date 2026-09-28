@@ -1212,6 +1212,17 @@ fn ventana(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
         icon::CHEVRON,
     ) + 4.0;
     blk_end(ui);
+
+    blk(ui, d, 5);
+    y = group(ui, x, y, w, "Animaciones");
+    y = seg_row(ui, x, y, w, cfg, SettingKey::AnimHz, "Frecuencia de las animaciones") + 4.0;
+    y = toggle_row(
+        ui, x, y, w, cfg,
+        SettingKey::ReducedMotion,
+        "Animaciones reducidas",
+        "Más cortas y a 30 Hz: menos trabajo para equipos con pocos recursos.",
+    ) + 4.0;
+    blk_end(ui);
     y - 4.0
 }
 
@@ -1427,7 +1438,7 @@ fn teclado(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     let (a, b) = if cfg.hotkey.mechanism == HotkeyMechanism::Daemon {
         ("Win+Alt+N", "Win+Alt+Shift+N")
     } else {
-        ("Ctrl+Alt+letra", "Ctrl+Alt+letra")
+        ("Ctrl+Alt+N", "Ctrl+Alt+Shift+N")
     };
     y = static_bind(ui, x, y, w, 200, "Nuevo temporal", a) + 4.0;
     y = static_bind(ui, x, y, w, 201, "Nuevo permanente", b) + 8.0;
@@ -1554,6 +1565,16 @@ fn archivos(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     ui.end_enter();
     item(ui, d, rows.len() + 1);
     y = seg_row(ui, x, y, w, cfg, SettingKey::SaveDir, "Guardar por defecto en") + 4.0;
+    ui.end_enter();
+    blk_end(ui);
+
+    blk(ui, d, 4);
+    y = label(ui, x, y, w, "Previsualización de Markdown") + 8.0;
+    item(ui, d, 0);
+    y = seg_row(ui, x, y, w, cfg, SettingKey::MdOpenMode, "Abrir .md en") + 4.0;
+    ui.end_enter();
+    item(ui, d, 1);
+    y = seg_row(ui, x, y, w, cfg, SettingKey::MdPreviewStyle, "Estilo") + 4.0;
     ui.end_enter();
     blk_end(ui);
     y - 4.0
@@ -2030,7 +2051,7 @@ fn acerca(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     y = link_row(ui, x, y, w, Hit::Link(LinkAction::OpenIssues), "Informar de un problema", "Abre una incidencia en GitHub", false, icon::EXTERNO) + 4.0;
     ui.end_enter();
     item(ui, d, 2);
-    y = link_row(ui, x, y, w, Hit::Link(LinkAction::OpenChangelog), "Novedades", "Historial de cambios de cada versión", false, icon::CHEVRON) + 4.0;
+    y = link_row(ui, x, y, w, Hit::Link(LinkAction::OpenChangelog), "Novedades", "Lo nuevo de esta versión", false, icon::CHEVRON) + 4.0;
     ui.end_enter();
     item(ui, d, 3);
     y = link_row(ui, x, y, w, Hit::Link(LinkAction::OpenConfigFolder), "Carpeta de configuración", "%APPDATA%\\notty\\config.toml", true, icon::CHEVRON);

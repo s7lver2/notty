@@ -48,8 +48,8 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
 use windows::Win32::UI::WindowsAndMessaging::{
     CS_DROPSHADOW, CreateWindowExW, DefWindowProcW, GWLP_USERDATA, GetWindowLongPtrW, GetWindowRect, HTCAPTION,
-    HTCLIENT, IDC_ARROW, KillTimer, LoadCursorW, PostMessageW, RegisterClassExW, SW_SHOW, SWP_FRAMECHANGED,
-    SWP_NOZORDER, SetTimer, SetWindowLongPtrW, SetWindowPos, ShowWindow, WM_CLOSE, WM_DESTROY, WM_DPICHANGED,
+    HTCLIENT, IDC_ARROW, LoadCursorW, PostMessageW, RegisterClassExW, SW_SHOW, SWP_FRAMECHANGED,
+    SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos, ShowWindow, WM_CLOSE, WM_DESTROY, WM_DPICHANGED,
     WM_GETMINMAXINFO, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCCALCSIZE, WM_NCHITTEST, WM_PAINT,
     WM_SIZE, WM_TIMER, WNDCLASSEXW, WS_CAPTION, WS_CLIPSIBLINGS, WS_MAXIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU,
     WS_THICKFRAME,
@@ -175,9 +175,7 @@ fn to_wide(s: &str) -> Vec<u16> {
 
 fn ensure_anim_timer(st: &mut State, hwnd: HWND) {
     if !st.anim_timer_running {
-        unsafe {
-            let _ = SetTimer(Some(hwnd), ID_ANIM_TIMER, 16, None);
-        }
+        crate::anim::start_frame_timer(hwnd, ID_ANIM_TIMER);
         st.anim_timer_running = true;
     }
 }
@@ -443,7 +441,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             || st.choice_at.is_some_and(|t0| !anim_done(now, t0, Duration::from_millis(CHOICE_POP_MS)))
                             || vim_looping;
                         if !still_animating {
-                            let _ = KillTimer(Some(hwnd), ID_ANIM_TIMER);
+                            crate::anim::stop_frame_timer(hwnd, ID_ANIM_TIMER);
                             st.anim_timer_running = false;
                         }
                         let _ = InvalidateRect(Some(hwnd), None, false);
@@ -453,7 +451,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 DefWindowProcW(hwnd, msg, wparam, lparam)
             }
             WM_DESTROY => {
-                let _ = KillTimer(Some(hwnd), ID_ANIM_TIMER);
+                crate::anim::stop_frame_timer(hwnd, ID_ANIM_TIMER);
                 if !ptr.is_null() {
                     drop(Box::from_raw(ptr));
                     SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);

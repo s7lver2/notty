@@ -41,9 +41,23 @@ pub fn open(path: &Path) -> io::Result<Opened> {
         Detected::Raw => open_raw(path),
         Detected::Text(encoding) => {
             let bytes = fs::read(path)?;
-            let (text, lossy) = match decode(&bytes, encoding) {
-                Ok(text) => (text, false),
-                Err(_) => (decode_lossy(&bytes, encoding), true),
+            let (text, lossy) = match encoding {
+                // UTF-8: se valida y se reutiliza el mismo buffer, sin copiar el archivo
+                // otra vez (en uno de 50 MB eran 50 MB más y ~20 ms).
+                TextEncoding::Utf8 | TextEncoding::Utf8Bom => {
+                    let mut bytes = bytes;
+                    if encoding == TextEncoding::Utf8Bom {
+                        bytes.drain(..3);
+                    }
+                    match String::from_utf8(bytes) {
+                        Ok(text) => (text, false),
+                        Err(e) => (decode_lossy(e.as_bytes(), TextEncoding::Utf8), true),
+                    }
+                }
+                _ => match decode(&bytes, encoding) {
+                    Ok(text) => (text, false),
+                    Err(_) => (decode_lossy(&bytes, encoding), true),
+                },
             };
             let eol = detect_eol(&text);
             let writable = !lossy && can_write(path);

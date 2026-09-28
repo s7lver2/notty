@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.0.0
+
+- Previsualización de Markdown al estilo GitHub: bloques de código con resaltado, citas y avisos, tablas, listas de tareas, enlaces.
+- Rendimiento (detalles y cifras en `docs/rendimiento.md`): arranca 4-8 veces más rápido (primer pintado en ~70 ms en vez de ~360 ms), abrir archivos grandes ya no se bloquea con el resaltado de sintaxis, escribir en archivos de código grandes no se traba, en reposo ya no repinta ni se despierta cada 150 ms, y un archivo de 50 MB ocupa ~50 MB menos de RAM.
+- `tools/bench.ps1` y `cargo run --release -p notty-ui --example bench` para medir todo esto.
+- Ajustes → Ventana → Animaciones: frecuencia de 30, 60 (por defecto) o 120 Hz, y "Animaciones reducidas" (más cortas y a 30 Hz) para equipos con pocos recursos.
+- Popup de Novedades la primera vez que se abre notty tras actualizarse, con una miniatura animada por novedad; se puede volver a ver en Ayuda → Novedades o en Ajustes → Acerca de → Novedades.
+- Modo vim: más comandos. `:q!` (cerrar sin guardar), `:qa`, `:qa!`, `:wa`, `:wqa`/`:xa`, `:w ruta`, `:e ruta`, `:e!` (recargar del disco), `:enew`/`:tabnew`, `:bn`/`:bp`, `:12` y `:$` (ir a línea), `:set nu`/`:set nonu`. Un comando desconocido ahora avisa en vez de no hacer nada.
+- Fix: el atajo global no funcionaba. En modo "Segundo plano" nadie arrancaba `notty --daemon`: ahora lo arranca notty al abrirse o al elegir ese modo, y "Iniciar con Windows" lo añade al inicio de sesión (`HKCU...Run`). En modo "Acceso directo" los `.lnk` se crean en el menú Inicio con Ctrl+Alt+N / Ctrl+Alt+Shift+N ya asignados y avisando a Explorer, que antes no se enteraba hasta reiniciar.
+- Fix: la ventana de Ajustes ya no muestra un marco gris claro a su alrededor al perder el foco.
+
 ## v0.5.0
 
 - Ajustes → Ventana recuerda el ancho/alto/maximizado al cerrar notty, con un botón para restablecer el tamaño de siempre.

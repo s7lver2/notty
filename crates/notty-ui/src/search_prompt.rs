@@ -1,4 +1,6 @@
+use std::cell::RefCell;
 use std::ops::Range;
+use std::rc::Rc;
 
 use notty_core::{Document, SearchError, SearchOptions};
 
@@ -12,6 +14,10 @@ pub struct SearchState {
     /// campo «por» (`replacement`) en vez de al de búsqueda (`query`). `Tab` o un
     /// clic en `Hit::SearchField` lo alternan.
     pub editing_replacement: bool,
+    /// Última búsqueda hecha (revisión del documento, texto, opciones) y su resultado:
+    /// se pinta a cada frame con el buscador abierto, y en un archivo grande buscar de
+    /// nuevo cada vez costaba cientos de ms.
+    cache: RefCell<Option<(u64, String, SearchOptions, Rc<Vec<Range<usize>>>)>>,
 }
 
 impl SearchState {
@@ -47,11 +53,18 @@ impl SearchState {
         self.editing_replacement = !self.editing_replacement;
     }
 
-    pub fn matches(&self, doc: &Document) -> Result<Vec<Range<usize>>, SearchError> {
+    pub fn matches(&self, doc: &Document) -> Result<Rc<Vec<Range<usize>>>, SearchError> {
         if self.query.is_empty() {
-            return Ok(Vec::new());
+            return Ok(Rc::default());
         }
-        doc.find_all(&self.query, self.opts)
+        if let Some((rev, q, opts, m)) = self.cache.borrow().as_ref() {
+            if *rev == doc.revision() && *q == self.query && *opts == self.opts {
+                return Ok(m.clone());
+            }
+        }
+        let m = Rc::new(doc.find_all(&self.query, self.opts)?);
+        *self.cache.borrow_mut() = Some((doc.revision(), self.query.clone(), self.opts, m.clone()));
+        Ok(m)
     }
 
     pub fn count_label(&self, doc: &Document) -> String {

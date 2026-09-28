@@ -42,6 +42,7 @@ fn eased(now: Instant, start: Instant, dur: Duration, enabled: bool) -> f32 {
     if !enabled {
         return 1.0;
     }
+    let dur = crate::anim::scaled(dur);
     let p = (now.saturating_duration_since(start).as_secs_f32() / dur.as_secs_f32()).clamp(0.0, 1.0);
     crate::ease_out_cubic(p)
 }

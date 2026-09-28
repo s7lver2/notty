@@ -1,0 +1,68 @@
+﻿{
+    "exe":  "C:\\Users\\NICKE\\AppData\\Local\\Temp\\claude\\E--notty\\cd17b40d-8469-4bee-af9c-20441839206d\\scratchpad\\notty-after.exe",
+    "runs":  5,
+    "idle_seconds":  10,
+    "date":  "2026-09-28T08:54:05",
+    "results":  {
+                    "vacio":  {
+                                  "startup_ms":  67,
+                                  "first_paint_ms":  6.6,
+                                  "private_mb":  63.2,
+                                  "working_set_mb":  50.9,
+                                  "idle_cpu_mcycles":  36,
+                                  "idle_paints":  0,
+                                  "scroll_cpu_mcycles":  608,
+                                  "scroll_frames":  120,
+                                  "frame_ms_avg":  1.07,
+                                  "frame_ms_p95":  1.58
+                              },
+                    "rust_1MB":  {
+                                     "startup_ms":  94,
+                                     "first_paint_ms":  35,
+                                     "private_mb":  122.4,
+                                     "working_set_mb":  109.5,
+                                     "idle_cpu_mcycles":  36,
+                                     "idle_paints":  0,
+                                     "scroll_cpu_mcycles":  1041,
+                                     "scroll_frames":  120,
+                                     "frame_ms_avg":  2.13,
+                                     "frame_ms_p95":  2.69
+                                 },
+                    "log_10MB":  {
+                                     "startup_ms":  74,
+                                     "first_paint_ms":  8,
+                                     "private_mb":  78.6,
+                                     "working_set_mb":  66,
+                                     "idle_cpu_mcycles":  36,
+                                     "idle_paints":  0,
+                                     "scroll_cpu_mcycles":  777,
+                                     "scroll_frames":  120,
+                                     "frame_ms_avg":  1.46,
+                                     "frame_ms_p95":  1.96
+                                 },
+                    "log_50MB":  {
+                                     "startup_ms":  122,
+                                     "first_paint_ms":  9.7,
+                                     "private_mb":  125.2,
+                                     "working_set_mb":  112.4,
+                                     "idle_cpu_mcycles":  35,
+                                     "idle_paints":  0,
+                                     "scroll_cpu_mcycles":  784,
+                                     "scroll_frames":  120,
+                                     "frame_ms_avg":  1.46,
+                                     "frame_ms_p95":  1.88
+                                 },
+                    "md_1MB":  {
+                                   "startup_ms":  162,
+                                   "first_paint_ms":  101.3,
+                                   "private_mb":  84.7,
+                                   "working_set_mb":  73.8,
+                                   "idle_cpu_mcycles":  34,
+                                   "idle_paints":  0,
+                                   "scroll_cpu_mcycles":  859,
+                                   "scroll_frames":  120,
+                                   "frame_ms_avg":  1.7,
+                                   "frame_ms_p95":  2.41
+                               }
+                }
+}

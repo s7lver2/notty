@@ -37,6 +37,12 @@ pub struct EditorState {
     pub autosave_failed_rev: Option<u64>,
     /// Autoguardado en pausa hasta el próximo guardado a mano (se canceló un conflicto).
     pub autosave_paused: bool,
+    /// Previsualización de Markdown activa (Ajustes → Archivos → "Vista previa de
+    /// Markdown"): a diferencia de `raw`, no cambia el documento en sí, solo cómo se
+    /// dibuja (ver `render.rs`) y, con el estilo "Solo lectura", bloquea la edición.
+    pub md_preview: bool,
+    /// Análisis de Markdown de la última revisión dibujada en Previsualización.
+    pub md_cache: std::cell::RefCell<Option<(u64, std::rc::Rc<crate::markdown::MdDoc>)>>,
 }
 
 impl EditorState {
@@ -58,6 +64,8 @@ impl EditorState {
             lossy_source: None,
             autosave_failed_rev: None,
             autosave_paused: false,
+            md_preview: false,
+            md_cache: Default::default(),
         }
     }
 
