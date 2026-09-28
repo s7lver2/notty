@@ -76,7 +76,7 @@ impl UpdateState {
             (Some(r), _) => {
                 Some(if lang == notty_config::Lang::En { format!("Update {} available", r.version) } else { format!("Actualización {} disponible", r.version) })
             }
-            (None, Some(err)) => Some(format!("{}: {}", crate::strings::tr(lang, "Actualizaciones"), crate::strings::tr(lang, err))),
+            (None, Some(err)) => Some(format!("{}: {}", crate::strings::tr(lang, "Actualizaciones"), crate::strings::tr_msg(lang, err))),
             (None, None) => None,
         }
     }

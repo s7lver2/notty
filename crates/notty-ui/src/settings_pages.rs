@@ -1786,7 +1786,7 @@ fn actualizaciones(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
         UpdatePhase::Downloading(..) => (format!("{} {newv}", ui.tr("Descargando")), ui.tr("Se verifica la firma al terminar.").to_string()),
         UpdatePhase::Error(e) => (
             if up.new_version.is_some() { ui.tr("No se pudo actualizar").to_string() } else { ui.tr("No se pudo comprobar").to_string() },
-            ui.tr(e).to_string(),
+            crate::strings::tr_msg(ui.lang, e),
         ),
     };
     let has_new = matches!(up.phase, UpdatePhase::Found | UpdatePhase::Downloading(..));
@@ -1897,7 +1897,7 @@ fn actualizaciones(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
 
     if has_new {
         blk(ui, d, 2);
-        let bullets = model::release_bullets(&up.notes, 6);
+        let bullets = model::release_bullets(&up.notes, 6, ui.lang);
         let mut bh = 0.0;
         for b in &bullets {
             bh += ui.r.measure_wrapped(b, &ui.font(12.0, false), w - 44.0 - 12.0, Some(18.0)).max(18.0) + 4.0;

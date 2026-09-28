@@ -1,5 +1,15 @@
 # Changelog
 
+## Sin publicar
+
+- El aviso de versión nueva y la página Ajustes → Actualizaciones salen completamente en inglés con la app en inglés: título, botones, errores y también las notas de la versión.
+- Las notas de cada versión pueden llevar su versión en inglés debajo de un encabezado `#### English`.
+
+#### English
+
+- The new-version popup and Settings → Updates are now fully in English when the app is: title, buttons, errors and the release notes too.
+- Each version's notes can carry an English version under an `#### English` heading.
+
 ## v1.0.0
 
 - Previsualización de Markdown al estilo GitHub: bloques de código con resaltado, citas y avisos, tablas, listas de tareas, enlaces.
@@ -10,6 +20,16 @@
 - Modo vim: más comandos. `:q!` (cerrar sin guardar), `:qa`, `:qa!`, `:wa`, `:wqa`/`:xa`, `:w ruta`, `:e ruta`, `:e!` (recargar del disco), `:enew`/`:tabnew`, `:bn`/`:bp`, `:12` y `:$` (ir a línea), `:set nu`/`:set nonu`. Un comando desconocido ahora avisa en vez de no hacer nada.
 - Fix: el atajo global no funcionaba. En modo "Segundo plano" nadie arrancaba `notty --daemon`: ahora lo arranca notty al abrirse o al elegir ese modo, y "Iniciar con Windows" lo añade al inicio de sesión (`HKCU...Run`). En modo "Acceso directo" los `.lnk` se crean en el menú Inicio con Ctrl+Alt+N / Ctrl+Alt+Shift+N ya asignados y avisando a Explorer, que antes no se enteraba hasta reiniciar.
 - Fix: la ventana de Ajustes ya no muestra un marco gris claro a su alrededor al perder el foco.
+
+#### English
+
+- GitHub-style Markdown preview: highlighted code blocks, quotes and alerts, tables, task lists, links.
+- Performance (details in `docs/rendimiento.md`): starts 4-8× faster, large files no longer freeze on syntax highlighting, typing in big code files stays smooth, no work while idle, and a 50 MB file uses ~50 MB less RAM.
+- Settings → Window → Animations: 30, 60 (default) or 120 Hz, plus "Reduced animations" for low-end machines.
+- What's new popup the first time notty opens after an update, with an animated thumbnail per item; also in Settings → About → What's new.
+- Vim mode: more commands. `:q!`, `:qa`, `:qa!`, `:wa`, `:wqa`/`:xa`, `:w path`, `:e path`, `:e!`, `:enew`/`:tabnew`, `:bn`/`:bp`, `:12` and `:$`, `:set nu`/`:set nonu`. Unknown commands now show a message.
+- Fix: the global hotkey didn't work, in both "Background" and "Shortcut" modes.
+- Fix: the Settings window no longer shows a light grey frame when it loses focus.
 
 ## v0.5.0
 

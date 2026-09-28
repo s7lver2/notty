@@ -472,6 +472,10 @@ const TABLE: &[(&str, &str)] = &[
     ("Tus pestañas y borradores se restaurarán al terminar.", "Your tabs and drafts will be restored when it's done."),
     ("Actualizar", "Update"),
     ("Más tarde", "Later"),
+    ("Hay una versión nueva de notty", "A new version of notty is available"),
+    ("sin red o error HTTP", "no connection or HTTP error"),
+    ("JSON inválido", "invalid JSON"),
+    ("faltan los assets notty-setup.exe / notty-setup.exe.sig", "the release is missing notty-setup.exe / notty-setup.exe.sig"),
     ("Actualizando", "Updating"),
     ("Este notty-setup se compiló sin el paquete MSI dentro (falta installer\\notty.msi al compilar). Construye el MSI con tools/release.ps1 y vuelve a compilar notty-setup.", "This notty-setup was built without the MSI package inside (installer\\notty.msi was missing at build time). Build the MSI with tools/release.ps1 and rebuild notty-setup."),
     ("No se pudo extraer el paquete a la carpeta temporal", "Couldn't extract the package to the temp folder"),
@@ -486,6 +490,19 @@ pub fn tr<'a>(lang: Lang, es: &'a str) -> &'a str {
         return es;
     }
     TABLE.iter().find(|(s, _)| *s == es).map(|(_, e)| *e).unwrap_or(es)
+}
+
+/// Como `tr`, para mensajes con detalle detrás (`"sin red o error HTTP: 12029"`): si el
+/// texto entero no está en la tabla, traduce la parte anterior al primer `": "`.
+pub fn tr_msg(lang: Lang, es: &str) -> String {
+    let whole = tr(lang, es);
+    if whole != es {
+        return whole.to_string();
+    }
+    match es.split_once(": ") {
+        Some((head, rest)) => format!("{}: {rest}", tr(lang, head)),
+        None => es.to_string(),
+    }
 }
 
 #[cfg(test)]

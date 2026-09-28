@@ -606,9 +606,26 @@ pub fn relative_time(now: u64, then: u64, lang: notty_config::Lang) -> String {
 
 /// Viñetas de las notas de una release (el `body` de GitHub, en Markdown): las
 /// líneas de lista sin su marcador, sin encabezados ni líneas vacías.
-pub fn release_bullets(body: &str, max: usize) -> Vec<String> {
-    body.lines()
-        .map(str::trim)
+/// Las notas de una release vienen del CHANGELOG, en español. Una versión puede traer
+/// también su versión en inglés debajo de un encabezado `English` (p.ej. `#### English`):
+/// en inglés se usa ese bloque (hasta el siguiente `## `), y en español lo que va antes.
+/// Sin ese encabezado, las mismas notas para los dos idiomas.
+pub fn release_bullets(body: &str, max: usize, lang: Lang) -> Vec<String> {
+    let is_marker = |l: &str| l.starts_with('#') && l.trim_start_matches('#').trim().eq_ignore_ascii_case("english");
+    let lines: Vec<&str> = body.lines().map(str::trim).collect();
+    // Solo cuenta el encabezado de la primera versión, no el de una anterior.
+    let first = lines.iter().position(|l| l.starts_with("## ")).map_or(0, |i| i + 1);
+    let section_end = lines[first..].iter().position(|l| l.starts_with("## ")).map_or(lines.len(), |i| first + i);
+    let lines: &[&str] = match lines[..section_end].iter().position(|l| is_marker(l)) {
+        Some(m) if lang == Lang::En => {
+            let rest = &lines[m + 1..];
+            &rest[..rest.iter().position(|l| l.starts_with("## ")).unwrap_or(rest.len())]
+        }
+        Some(m) => &lines[..m],
+        None => &lines,
+    };
+    lines
+        .iter()
         .filter(|l| !l.is_empty() && !l.starts_with('#'))
         .map(|l| l.trim_start_matches(['-', '*', '+']).trim().replace("**", "").replace('`', ""))
         .filter(|l| !l.is_empty())
@@ -807,11 +824,36 @@ mod tests {
 - Paneles lado a lado
 * **Ligaduras** en el editor
 Arreglos varios
-", 5);
+", 5, Lang::Es);
         assert_eq!(b, vec!["Paneles lado a lado", "Ligaduras en el editor", "Arreglos varios"]);
         assert_eq!(release_bullets("- a
 - b
-- c", 2).len(), 2);
+- c", 2, Lang::Es).len(), 2);
+    }
+
+    #[test]
+    fn release_bullets_pick_the_english_block() {
+        let body = "# Changelog
+
+## v2.0.0
+
+- Hola
+
+#### English
+
+- Hello
+
+## v1.0.0
+
+- Viejo
+";
+        assert_eq!(release_bullets(body, 5, Lang::Es), vec!["Hola"]);
+        assert_eq!(release_bullets(body, 5, Lang::En), vec!["Hello"]);
+        assert_eq!(release_bullets("- Solo
+", 5, Lang::En), vec!["Solo"], "sin bloque en inglés, el español");
+        let old_en = "## v3.0.0\n- Nuevo\n## v2.0.0\n- Hola\n#### English\n- Hello\n";
+        assert_eq!(release_bullets(old_en, 1, Lang::En), vec!["Nuevo"], "el inglés de una versión anterior no cuenta");
+        assert_eq!(crate::strings::tr_msg(Lang::En, "sin red o error HTTP: 12029"), "no connection or HTTP error: 12029");
     }
 
     #[test]

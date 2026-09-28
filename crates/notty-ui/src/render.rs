@@ -2299,7 +2299,7 @@ impl Renderer {
         let text_w = panel_w - text_x_off - pad;
         let body_f = self.create_format(None, 12.0, false).unwrap_or_else(|| self.fonts.ui_12.clone());
         let title_f = self.create_format(None, 15.0, true).unwrap_or_else(|| self.fonts.ui_13_semibold.clone());
-        let bullets = crate::settings_model::release_bullets(&content.body, 5);
+        let bullets = crate::settings_model::release_bullets(&content.body, 5, self.lang());
         let mut bullets_h = 0.0;
         for b in &bullets {
             bullets_h += self.measure_wrapped(b, &body_f, text_w - 16.0, Some(20.0)).max(20.0);
@@ -2324,7 +2324,7 @@ impl Renderer {
         // Título y versiones, centrados en el alto del icono.
         let tx = r.left + text_x_off;
         let ty = r.top + pad;
-        self.text("Hay una versión nueva de notty", &title_f, Rect::new(tx, ty, tx + text_w, ty + 20.0), pal.text);
+        self.text(self.tr("Hay una versión nueva de notty"), &title_f, Rect::new(tx, ty, tx + text_w, ty + 20.0), pal.text);
         let versions = format!("{} → {}", crate::app_version(), content.version);
         self.text(&versions, &self.fonts.mono_12, Rect::new(tx, ty + 24.0, tx + text_w, ty + 40.0), pal.text_2);
         let mut y = ty + head_h + 14.0;
@@ -2345,20 +2345,20 @@ impl Renderer {
         let btn_top = r.bottom - 16.0 - 32.0;
         let semi = self.create_format(None, 13.0, true).unwrap_or_else(|| self.fonts.ui_13_semibold.clone());
         let normal = self.fonts.ui_13.clone();
-        let upd_w = (self.measure("Actualizar", &semi) + 28.0).max(96.0);
-        let later_w = (self.measure("Más tarde", &normal) + 28.0).max(96.0);
+        let upd_w = (self.measure(self.tr("Actualizar"), &semi) + 28.0).max(96.0);
+        let later_w = (self.measure(self.tr("Más tarde"), &normal) + 28.0).max(96.0);
         let upd = Rect::new(r.right - pad - upd_w, btn_top, r.right - pad, btn_top + 32.0);
         let later_right = if content.show_actualizar { upd.left - 8.0 } else { r.right - pad };
         let later = Rect::new(later_right - later_w, btn_top, later_right, btn_top + 32.0);
         if content.show_actualizar {
             let bg = if view.hover == Hit::UpdatePanelActualizar { pal.accent.mix(pal.text, 0.15) } else { pal.accent };
             self.fill_round(upd, 6.0, bg);
-            self.text_center("Actualizar", &semi, upd, pal.on_accent);
+            self.text_center(self.tr("Actualizar"), &semi, upd, pal.on_accent);
             self.hits.push((upd, Hit::UpdatePanelActualizar));
         }
         let bg = if view.hover == Hit::UpdatePanelCerrar { pal.line } else { pal.chrome };
         self.fill_round(later, 6.0, bg);
-        self.text_center("Más tarde", &normal, later, pal.text);
+        self.text_center(self.tr("Más tarde"), &normal, later, pal.text);
         self.hits.push((later, Hit::UpdatePanelCerrar));
         self.pop_clip();
     }

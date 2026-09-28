@@ -1355,7 +1355,7 @@ fn update_panel_content(update: &crate::UpdateState, lang: notty_config::Lang) -
         return None;
     }
     let release = update.available.as_ref()?;
-    let status_line = update.error.as_ref().map(|e| crate::strings::tr(lang, e).to_string()).or_else(|| {
+    let status_line = update.error.as_ref().map(|e| crate::strings::tr_msg(lang, e)).or_else(|| {
         update.progress.map(|(done, total)| {
             let downloading = crate::strings::tr(lang, "Descargando...");
             if total > 0 {
