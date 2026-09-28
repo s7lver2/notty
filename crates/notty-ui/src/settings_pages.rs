@@ -1556,6 +1556,16 @@ fn archivos(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     y = seg_row(ui, x, y, w, cfg, SettingKey::SaveDir, "Guardar por defecto en") + 4.0;
     ui.end_enter();
     blk_end(ui);
+
+    blk(ui, d, 4);
+    y = label(ui, x, y, w, "Previsualización de Markdown") + 8.0;
+    item(ui, d, 0);
+    y = seg_row(ui, x, y, w, cfg, SettingKey::MdOpenMode, "Abrir .md en") + 4.0;
+    ui.end_enter();
+    item(ui, d, 1);
+    y = seg_row(ui, x, y, w, cfg, SettingKey::MdPreviewStyle, "Estilo") + 4.0;
+    ui.end_enter();
+    blk_end(ui);
     y - 4.0
 }
 

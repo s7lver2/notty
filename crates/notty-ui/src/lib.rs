@@ -11,6 +11,7 @@ pub mod editor;
 mod keyboard_widget;
 mod hex;
 pub mod lang;
+pub mod markdown;
 pub mod layout;
 mod keymap;
 pub mod ligature;

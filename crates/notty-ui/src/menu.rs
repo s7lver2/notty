@@ -17,6 +17,7 @@ pub enum MenuCmd {
     FindPrev,
     ToggleVim,
     ToggleRaw,
+    ToggleMdPreview,
     ToggleLineNumbers,
     ToggleHintsBar,
     NewTemp,
@@ -67,6 +68,7 @@ const VER: &[MenuItem] = &[
     MenuItem::Sep,
     MenuItem::Entry { label: "Modo vim", shortcut: "^Alt+V", cmd: MenuCmd::ToggleVim },
     MenuItem::Entry { label: "Ver como raw", shortcut: "^⇧H", cmd: MenuCmd::ToggleRaw },
+    MenuItem::Entry { label: "Previsualización de Markdown", shortcut: "^⇧M", cmd: MenuCmd::ToggleMdPreview },
 ];
 
 const AYUDA: &[MenuItem] = &[
@@ -85,6 +87,7 @@ impl MenuCmd {
             MenuCmd::CloseTab => Some(Command::CloseTab),
             MenuCmd::ToggleVim => Some(Command::ToggleVim),
             MenuCmd::ToggleRaw => Some(Command::ToggleRaw),
+            MenuCmd::ToggleMdPreview => Some(Command::ToggleMdPreview),
             _ => None,
         }
     }
@@ -116,6 +119,7 @@ pub struct MenuChecks {
     pub hints_bar: bool,
     pub vim: bool,
     pub raw: bool,
+    pub md_preview: bool,
 }
 
 impl MenuChecks {
@@ -126,6 +130,7 @@ impl MenuChecks {
             MenuCmd::ToggleHintsBar => Some(self.hints_bar),
             MenuCmd::ToggleVim => Some(self.vim),
             MenuCmd::ToggleRaw => Some(self.raw),
+            MenuCmd::ToggleMdPreview => Some(self.md_preview),
             _ => None,
         }
     }
@@ -169,7 +174,7 @@ mod tests {
 
     #[test]
     fn toggles_report_their_state_and_actions_do_not() {
-        let c = MenuChecks { line_numbers: true, hints_bar: false, vim: true, raw: false };
+        let c = MenuChecks { line_numbers: true, hints_bar: false, vim: true, raw: false, md_preview: false };
         assert_eq!(c.state_of(MenuCmd::ToggleLineNumbers), Some(true));
         assert_eq!(c.state_of(MenuCmd::ToggleHintsBar), Some(false));
         assert_eq!(c.state_of(MenuCmd::ToggleVim), Some(true));

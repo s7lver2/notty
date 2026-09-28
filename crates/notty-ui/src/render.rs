@@ -32,6 +32,7 @@ use crate::theme::{self, Rgba};
 use crate::{EditorState, Viewport, Workspace};
 
 mod extra;
+mod md;
 
 /// Convierte un desplazamiento en chars (relativo al inicio de `text`) a un
 /// desplazamiento en unidades UTF-16, que es lo que espera `IDWriteTextLayout`.
@@ -1020,7 +1021,10 @@ impl Renderer {
     /// vez de dividir `y` entre `line_height()` hay que acumular el alto real de cada
     /// línea desde `first_line` hasta dar con la que contiene el clic (igual que hace
     /// `paint` al dibujar).
-    pub fn char_index_at(&self, state: &EditorState, body: Rect, gutter_w: f32, x: f32, y: f32, wrap: bool) -> usize {
+    pub fn char_index_at(&self, state: &EditorState, body: Rect, gutter_w: f32, x: f32, y: f32, wrap: bool, md_inline: bool) -> usize {
+        if state.md_preview {
+            return self.md_char_index_at(state, body, body.left + layout::TEXT_PAD_L, md_inline, x, y);
+        }
         let buf = state.doc.buffer();
         let total = buf.len_lines();
         let text_pad = body.left + gutter_w + layout::TEXT_PAD_L;
@@ -1226,7 +1230,7 @@ impl Renderer {
             let cursor_line = state.doc.line_col().0;
             let (search_matches, search_current) =
                 if focused { (&search_matches[..], search_current) } else { (&[][..], None) };
-            let gutter_w = if ui.line_numbers && !is_raw { layout::gutter_width(total_lines, self.digit_width()) } else { 0.0 };
+            let gutter_w = if ui.line_numbers && !is_raw && !state.md_preview { layout::gutter_width(total_lines, self.digit_width()) } else { 0.0 };
             let text_pad = frame.body.left + gutter_w + layout::TEXT_PAD_L;
             if split {
                 self.push_clip(pane);
@@ -1236,6 +1240,9 @@ impl Renderer {
                 if let Some(raw) = &state.raw {
                     self.draw_hex(raw, state.raw_cursor, state.raw_pending_nibble, state.viewport.first_line, pal, frame);
                 }
+            } else if state.md_preview {
+                let inline_mode = ui.md_preview_style == notty_config::MdPreviewStyle::Inline;
+                self.paint_md(state, pal, frame.body, text_pad, head, inline_mode, search_matches, search_current);
             } else {
             let spans = if ui.syntax_highlight {
                 state.syntax.line_spans(&state.doc, state.path.as_deref(), range.clone(), &self.syntax_disabled)
@@ -1449,7 +1456,7 @@ impl Renderer {
                 full.hints = Rect::new(0.0, frame.hints.top, w, frame.hints.top + layout::HINTS_H);
                 self.push_clip(frame.hints);
                 self.set_fade(k);
-                self.draw_hints(state, ws, pal, full);
+                self.draw_hints(state, ws, pal, full, ui.md_preview_style);
                 self.set_fade(1.0);
                 self.pop_clip();
             }
@@ -1462,6 +1469,7 @@ impl Renderer {
                     hints_bar: ui.hints_bar,
                     vim: state.vim.is_some(),
                     raw: is_raw,
+                    md_preview: state.md_preview,
                 };
                 self.draw_dropdown(crate::menu::MENUS[i].items, x, top, checks, view, pal, lang);
             }
@@ -1997,7 +2005,7 @@ impl Renderer {
 
     /// Barra de atajos (`.hints`): fondo `surface_2`, línea superior, pares tecla/acción.
     #[allow(unused_unsafe)]
-    unsafe fn draw_hints(&self, state: &EditorState, ws: &Workspace, pal: &theme::Palette, frame: layout::Frame) {
+    unsafe fn draw_hints(&self, state: &EditorState, ws: &Workspace, pal: &theme::Palette, frame: layout::Frame, md_preview_style: notty_config::MdPreviewStyle) {
         unsafe {
             self.fill(frame.hints, pal.surface_2);
             self.stroke_line(0.0, frame.hints.top, frame.hints.width(), frame.hints.top, 1.0, pal.line);
@@ -2012,6 +2020,8 @@ impl Renderer {
                 }
             } else if state.raw.is_some() {
                 crate::HintsCtx::Raw
+            } else if state.md_preview {
+                if md_preview_style == notty_config::MdPreviewStyle::ReadOnly { crate::HintsCtx::MdPreviewReadOnly } else { crate::HintsCtx::MdPreviewInline }
             } else if let Some(vim) = &state.vim {
                 if vim.mode == crate::VimMode::Insert { crate::HintsCtx::VimInsert } else { crate::HintsCtx::VimNormal }
             } else {

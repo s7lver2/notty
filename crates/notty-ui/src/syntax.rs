@@ -366,6 +366,38 @@ fn spans(p: &Parsed, g: &Grammar, doc: &Document, lines: Range<usize>) -> Vec<Ve
         .collect()
 }
 
+/// Lenguaje de la etiqueta de un bloque ```lang de Markdown ("rust", "rs", "py", "c++"…).
+pub fn lang_for_fence(tag: &str) -> Option<Lang> {
+    let t = tag.trim().to_ascii_lowercase();
+    let t = match t.as_str() {
+        "" => return None,
+        "tsx" => return Some(Lang::Tsx),
+        "js" | "node" => "javascript",
+        "ts" => "typescript",
+        "sh" | "shell" | "zsh" | "console" | "shellsession" => "bash",
+        "c++" => "cpp",
+        "c#" => "csharp",
+        "py" | "python3" => "python",
+        "golang" => "go",
+        _ => t.as_str(),
+    };
+    LANGS.iter().find(|l| l.id == t || l.name.eq_ignore_ascii_case(t) || l.exts.contains(&t)).map(|l| l.lang)
+}
+
+/// Tramos de color de un texto suelto (un bloque de código de Markdown), una entrada por
+/// línea (`\n`). Sin caché: el llamador guarda el resultado.
+pub fn highlight_snippet(lang: Lang, text: &str) -> Vec<Vec<Span>> {
+    let Some(g) = grammar(lang) else { return Vec::new() };
+    let mut parser = Parser::new();
+    if parser.set_language(&g.language).is_err() {
+        return Vec::new();
+    }
+    let Some(tree) = parser.parse(text, None) else { return Vec::new() };
+    let doc = Document::new(text, "\n");
+    let p = Parsed { lang, revision: doc.revision(), parser, tree, text: text.to_string() };
+    spans(&p, g, &doc, 0..doc.buffer().len_lines())
+}
+
 fn utf16_len(s: &str) -> u32 {
     s.chars().map(char::len_utf16).sum::<usize>() as u32
 }

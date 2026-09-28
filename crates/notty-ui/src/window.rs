@@ -208,7 +208,7 @@ impl WindowState {
         let ui = self.cfg.borrow().ui;
         let total = self.ws.active().doc.buffer().len_lines();
         let (body, gutter_w) =
-            self.renderer.body_and_gutter(&ui, self.ws.len(), self.menu_bar_visible(), total, self.ws.active().raw.is_some());
+            self.renderer.body_and_gutter(&ui, self.ws.len(), self.menu_bar_visible(), total, self.ws.active().raw.is_some() || self.ws.active().md_preview);
         let body = self.pane_rects(body).get(self.layouts.focus()).copied().unwrap_or(body);
         (body, gutter_w)
     }
@@ -1457,13 +1457,21 @@ fn state_for_path(path: &std::path::Path) -> EditorState {
     }
 }
 
-/// Crea el documento con el `EditorState` que toque, y si `cfg.ui.vim_always` está
-/// activo, lo arranca ya en modo vim.
+/// Crea el documento con el `EditorState` que toque: si `cfg.ui.vim_always` está
+/// activo, lo arranca ya en modo vim; si es un `.md`/`.markdown` y Ajustes → Archivos
+/// dice que se abran en Previsualización, arranca también con ella puesta.
 fn maybe_vim(mut st: EditorState, cfg: &notty_config::Config) -> EditorState {
     if cfg.ui.vim_always {
         st.vim = Some(crate::VimState::default());
     }
+    if cfg.ui.md_open_mode == notty_config::MdOpenMode::Preview && is_markdown_path(st.path.as_deref()) {
+        st.md_preview = true;
+    }
     st
+}
+
+fn is_markdown_path(path: Option<&std::path::Path>) -> bool {
+    path.and_then(|p| p.extension()).and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("md") || e.eq_ignore_ascii_case("markdown"))
 }
 
 /// Nombre legible para un documento en el volcado de recuperación: el nombre de
@@ -2328,6 +2336,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                                 st.vim = if st.vim.is_some() { None } else { Some(crate::VimState::default()) };
                             }
                             notty_input::Command::ToggleRaw => toggle_raw(w, hwnd),
+                            notty_input::Command::ToggleMdPreview => toggle_md_preview(w),
                             notty_input::Command::ZoomIn => {
                                 let target = w.cfg.borrow().ui.font_scale + ZOOM_STEP;
                                 set_font_scale(w, hwnd, target);
@@ -2454,9 +2463,11 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                         crate::EditorAction::Paste => {
-                            clipboard_paste(w, hwnd);
-                            update_title(hwnd, w.ws.active(), lang_of(w));
-                            let _ = InvalidateRect(Some(hwnd), None, false);
+                            if !md_preview_readonly_blocks_edits(w) {
+                                clipboard_paste(w, hwnd);
+                                update_title(hwnd, w.ws.active(), lang_of(w));
+                                let _ = InvalidateRect(Some(hwnd), None, false);
+                            }
                         }
                         crate::EditorAction::OpenPathPrompt => {
                             let initial = w.ws.active().path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
@@ -2489,10 +2500,20 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                         other => {
-                            w.ws.active_mut().apply(other, std::time::Instant::now());
-                            update_title(hwnd, w.ws.active(), lang_of(w));
-                            refresh_recovery(w);
-                            let _ = InvalidateRect(Some(hwnd), None, false);
+                            let edits = matches!(
+                                other,
+                                crate::EditorAction::Backspace
+                                    | crate::EditorAction::DeleteForward
+                                    | crate::EditorAction::InsertNewline
+                                    | crate::EditorAction::Undo
+                                    | crate::EditorAction::Redo
+                            );
+                            if !edits || !md_preview_readonly_blocks_edits(w) {
+                                w.ws.active_mut().apply(other, std::time::Instant::now());
+                                update_title(hwnd, w.ws.active(), lang_of(w));
+                                refresh_recovery(w);
+                                let _ = InvalidateRect(Some(hwnd), None, false);
+                            }
                         }
                     }
                 }
@@ -2520,6 +2541,9 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             update_title(hwnd, w.ws.active(), lang_of(w));
                             refresh_recovery(w);
                             let _ = InvalidateRect(Some(hwnd), None, false);
+                            return LRESULT(0);
+                        }
+                        if md_preview_readonly_blocks_edits(w) {
                             return LRESULT(0);
                         }
                         w.ws.active_mut().insert_char(ch, std::time::Instant::now());
@@ -2706,7 +2730,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         crate::Hit::Body if w.ws.active().raw.is_none() => {
                             w.open_menu = None;
                             let (body, gutter_w) = w.body_and_gutter();
-                            let idx = w.renderer.char_index_at(w.ws.active(), body, gutter_w, x, y, w.cfg.borrow().ui.wrap);
+                            let idx = w.renderer.char_index_at(w.ws.active(), body, gutter_w, x, y, w.cfg.borrow().ui.wrap, w.cfg.borrow().ui.md_preview_style == notty_config::MdPreviewStyle::Inline);
                             w.ws.active_mut().doc.set_cursor(idx);
                             w.selection_anchor = idx;
                             w.mouse_down = true;
@@ -2758,7 +2782,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     }
                     if w.mouse_down {
                         let (body, gutter_w) = w.body_and_gutter();
-                        let idx = w.renderer.char_index_at(w.ws.active(), body, gutter_w, x, y, w.cfg.borrow().ui.wrap);
+                        let idx = w.renderer.char_index_at(w.ws.active(), body, gutter_w, x, y, w.cfg.borrow().ui.wrap, w.cfg.borrow().ui.md_preview_style == notty_config::MdPreviewStyle::Inline);
                         w.ws.active_mut().doc.set_selection(w.selection_anchor, idx);
                         let _ = InvalidateRect(Some(hwnd), None, false);
                     }
@@ -2835,7 +2859,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     }
                     if hit == Hit::Body && w.ws.active().raw.is_none() {
                         let (body, gutter_w) = w.body_and_gutter();
-                        let idx = w.renderer.char_index_at(w.ws.active(), body, gutter_w, x, y, w.cfg.borrow().ui.wrap);
+                        let idx = w.renderer.char_index_at(w.ws.active(), body, gutter_w, x, y, w.cfg.borrow().ui.wrap, w.cfg.borrow().ui.md_preview_style == notty_config::MdPreviewStyle::Inline);
                         let sel = w.ws.active().doc.selection();
                         let r = sel.range();
                         if sel.is_empty() || idx < r.start || idx > r.end {
@@ -3119,6 +3143,7 @@ fn run_menu_item(w: &mut WindowState, hwnd: HWND, menu_idx: usize, item_idx: usi
             st.vim = if st.vim.is_some() { None } else { Some(crate::VimState::default()) };
         }
         MenuCmd::ToggleRaw => toggle_raw(w, hwnd),
+        MenuCmd::ToggleMdPreview => toggle_md_preview(w),
         MenuCmd::ToggleLineNumbers => {
             let mut cfg = w.cfg.borrow_mut();
             cfg.ui.line_numbers = !cfg.ui.line_numbers;
@@ -3181,6 +3206,21 @@ fn toggle_raw(w: &mut WindowState, hwnd: HWND) {
             st.viewport.first_line = 0;
         }
     }
+}
+
+/// A diferencia de `toggle_raw`, Previsualización no lee/escribe nada del disco: es el
+/// mismo `Document` de siempre, solo cambia cómo se dibuja (`render.rs`) y, con el
+/// estilo "Solo lectura" (Ajustes → Archivos), si se puede escribir en él o no.
+fn toggle_md_preview(w: &mut WindowState) {
+    let st = w.ws.active_mut();
+    st.md_preview = !st.md_preview;
+}
+
+/// Si Previsualización (estilo "Solo lectura") bloquea la edición del documento activo
+/// ahora mismo: se deja escribir con normalidad en el estilo "En línea" (siempre, la
+/// línea con el cursor se ve y edita en markdown crudo) y fuera de Previsualización.
+fn md_preview_readonly_blocks_edits(w: &WindowState) -> bool {
+    w.ws.active().md_preview && w.cfg.borrow().ui.md_preview_style == notty_config::MdPreviewStyle::ReadOnly
 }
 
 /// Flechas (mueven el byte seleccionado) y `Ctrl+S` (guarda) mientras hay un `RawDoc` activo.
