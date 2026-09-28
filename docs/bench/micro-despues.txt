@@ -1,0 +1,18 @@
+== Abrir (leer + decodificar + rope)
+open_as_document rust 1MB                         2.16 ms
+open_as_document log 10MB                        16.90 ms
+open_as_document log 50MB                        60.86 ms
+== Sintaxis (rust 1MB)
+primer resaltado: bloqueo del hilo de la UI       1.21 ms
+primer resaltado: hasta tener colores           360.31 ms
+resaltado ya parseado (60 líneas, un frame)       0.52 ms
+tras teclear 1 carácter: bloqueo de la UI         1.38 ms
+== Markdown (1MB)
+markdown::analyze                                50.08 ms
+extraer líneas del documento                     16.28 ms
+== Búsqueda (log 50MB, "status=200")
+find_all (buscar de cero)                       133.77 ms
+un pintado con el buscador abierto                0.00 ms
+== Recuperación / copias (log 50MB)
+doc.text() (copia completa)                      35.34 ms
+snapshot de recuperación (cada segundo)           0.00 ms

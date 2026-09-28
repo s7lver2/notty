@@ -6,7 +6,6 @@
 //! (ver `markdown.rs`): las marcas se encogen a ancho ~0 en vez de quitarse, así que
 //! cursor, selección y búsqueda siguen calculando sobre las mismas posiciones.
 
-use std::collections::HashMap;
 use std::rc::Rc;
 
 use windows::Win32::Graphics::Direct2D::{D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT, ID2D1SolidColorBrush};
@@ -91,9 +90,7 @@ impl Renderer {
                 return d.clone();
             }
         }
-        let buf = state.doc.buffer();
-        let total = buf.len_lines();
-        let texts: Vec<String> = (0..total).map(|l| line_text(&buf, l, total)).collect();
+        let texts = state.doc.buffer().line_strings();
         let d = Rc::new(crate::markdown::analyze(&texts));
         *state.md_cache.borrow_mut() = Some((rev, d.clone()));
         d
@@ -168,7 +165,7 @@ impl Renderer {
 
     /// Layout de una línea en Previsualización (sin `b`, solo con las medidas: para el
     /// hit-test del ratón). `rendered = false` es la línea en crudo del modo "En línea".
-    unsafe fn md_line_layout(&self, text: &str, info: Option<&Line>, rendered: bool, g: &Geom, width: f32, b: Option<&Brushes>) -> Option<IDWriteTextLayout> {
+    unsafe fn md_line_layout(&self, text: &str, info: Option<&Line>, rendered: bool, g: &Geom, width: f32, b: Option<&Brushes>, code: &[crate::syntax::Span]) -> Option<IDWriteTextLayout> {
         if text.is_empty() {
             return None;
         }
@@ -196,7 +193,7 @@ impl Renderer {
                     }
                 }
                 if let Some(b) = b {
-                    for s in &info.code {
+                    for s in code {
                         let Some(br) = b.syntax.get(s.highlight).and_then(Option::as_ref) else { continue };
                         let _ = l.SetDrawingEffect(br, DWRITE_TEXT_RANGE { startPosition: s.start, length: s.len });
                     }
@@ -304,7 +301,6 @@ impl Renderer {
             alert: [Alert::Note, Alert::Tip, Alert::Important, Alert::Warning, Alert::Caution].map(|a| brush(alert_color(pal, a))),
             syntax: (0..crate::syntax::NAMES.len()).map(|h| crate::syntax::color(pal, h).and_then(brush)).collect(),
         };
-        let mut col_widths: HashMap<usize, Vec<f32>> = HashMap::new();
         let mut y = body.top + layout::TEXT_PAD_T;
 
         for line in state.viewport.first_line..total {
@@ -322,7 +318,8 @@ impl Renderer {
             unsafe {
                 // --- Fila de tabla: una celda por layout ---
                 if let (true, Some(info @ Line { block: BlockKind::TableRow { table, row }, .. })) = (rendered, info) {
-                    let widths = col_widths.entry(*table).or_insert_with(|| self.md_col_widths(&md, &buf, *table));
+                    let key = (*table, self.font_scale.to_bits(), self.mono_family.clone());
+                    let widths = md.table_widths.borrow_mut().entry(key).or_insert_with(|| self.md_col_widths(&md, &buf, *table)).clone();
                     let aligns = &md.tables[*table].aligns;
                     let row_h = self.md_table_row_h();
                     let mut x = g.x;
@@ -357,7 +354,7 @@ impl Renderer {
                     continue;
                 }
 
-                let l = self.md_line_layout(&text, info, rendered, &g, right - g.x, Some(&b));
+                let l = self.md_line_layout(&text, info, rendered, &g, right - g.x, Some(&b), md.code_spans(line));
                 let row_h = self.md_row_h(l.as_ref(), info, rendered, &g);
                 if row_h <= 0.0 {
                     continue;
@@ -514,7 +511,7 @@ impl Renderer {
                 row_top += h;
                 continue;
             }
-            let l = unsafe { self.md_line_layout(&text, info, rendered, &g, right - g.x, None) };
+            let l = unsafe { self.md_line_layout(&text, info, rendered, &g, right - g.x, None, &[]) };
             let h = self.md_row_h(l.as_ref(), info, rendered, &g);
             if (h > 0.0 && y < row_top + h) || line + 1 >= total {
                 let Some(l) = l else { return start };

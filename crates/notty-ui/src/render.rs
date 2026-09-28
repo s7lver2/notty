@@ -11,7 +11,7 @@ use windows::Win32::Graphics::Direct2D::{
     D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_BRUSH_PROPERTIES, D2D1_CAP_STYLE_ROUND, D2D1_COMBINE_MODE_EXCLUDE,
     D2D1_DASH_STYLE_SOLID, D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT, D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_ELLIPSE,
     D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_HWND_RENDER_TARGET_PROPERTIES, D2D1_LINE_JOIN_ROUND,
-    D2D1_RENDER_TARGET_PROPERTIES, D2D1_ROUNDED_RECT, D2D1_STROKE_STYLE_PROPERTIES, D2D1CreateFactory, ID2D1Factory,
+    D2D1_RENDER_TARGET_PROPERTIES, D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1_RENDER_TARGET_TYPE_SOFTWARE, D2D1_ROUNDED_RECT, D2D1_STROKE_STYLE_PROPERTIES, D2D1CreateFactory, ID2D1Factory,
     ID2D1HwndRenderTarget, ID2D1PathGeometry, ID2D1SolidColorBrush,
 };
 use windows::Win32::Graphics::DirectWrite::{
@@ -265,6 +265,8 @@ pub struct Renderer {
     /// El último `EndDraw` dijo que el dispositivo se perdió (driver reiniciado,
     /// escritorio remoto...): `recover_device` recrea el target antes de pintar.
     device_lost: std::cell::Cell<bool>,
+    /// Pintando por CPU (ver `new_software`).
+    software: bool,
     dwrite: IDWriteFactory,
     brush: ID2D1SolidColorBrush,
     fonts: Fonts,
@@ -340,14 +342,19 @@ pub struct UpdatePanelContent {
 
 /// Render target de `hwnd` (al tamaño actual de su área cliente) y la brocha única,
 /// que depende de él. Se llama al crear el `Renderer` y cada vez que se pierde el dispositivo.
-unsafe fn create_target(d2d: &ID2D1Factory, hwnd: HWND, dpi: u32) -> Result<(ID2D1HwndRenderTarget, ID2D1SolidColorBrush)> {
+/// Con `software`, Direct2D pinta por CPU: se crea en ~20 ms en vez de los ~300 ms que
+/// tarda en cargar el driver de la GPU la primera vez (ver `Renderer::new_software`).
+unsafe fn create_target(d2d: &ID2D1Factory, hwnd: HWND, dpi: u32, software: bool) -> Result<(ID2D1HwndRenderTarget, ID2D1SolidColorBrush)> {
     unsafe {
         let mut client = windows::Win32::Foundation::RECT::default();
         let _ = windows::Win32::UI::WindowsAndMessaging::GetClientRect(hwnd, &mut client);
         let width = (client.right - client.left).max(1) as u32;
         let height = (client.bottom - client.top).max(1) as u32;
         let target = d2d.CreateHwndRenderTarget(
-            &D2D1_RENDER_TARGET_PROPERTIES::default(),
+            &D2D1_RENDER_TARGET_PROPERTIES {
+                r#type: if software { D2D1_RENDER_TARGET_TYPE_SOFTWARE } else { D2D1_RENDER_TARGET_TYPE_DEFAULT },
+                ..Default::default()
+            },
             &D2D1_HWND_RENDER_TARGET_PROPERTIES { hwnd, pixelSize: D2D_SIZE_U { width, height }, ..Default::default() },
         )?;
         target.SetDpi(dpi as f32, dpi as f32);
@@ -361,9 +368,43 @@ unsafe fn create_target(d2d: &ID2D1Factory, hwnd: HWND, dpi: u32) -> Result<(ID2
 
 impl Renderer {
     pub fn new(hwnd: HWND, dpi: u32) -> Result<Self> {
+        Self::new_with(hwnd, dpi, false)
+    }
+
+    /// Como `new`, pero pintando por CPU hasta que se llame a `upgrade_to_gpu`: la
+    /// ventana principal arranca así para no esperar a que cargue el driver de la GPU
+    /// (~300 ms la primera vez) antes de enseñar nada: pasa a la GPU justo después del
+    /// primer pintado.
+    pub fn new_software(hwnd: HWND, dpi: u32) -> Result<Self> {
+        Self::new_with(hwnd, dpi, true)
+    }
+
+    /// Pasa a pintar con la GPU si se creó con `new_software`. `false` si ya lo hacía o
+    /// si no se pudo (entonces sigue por CPU, que también funciona).
+    pub fn is_software(&self) -> bool {
+        self.software
+    }
+
+    pub fn upgrade_to_gpu(&mut self) -> bool {
+        if !self.software {
+            return false;
+        }
+        let ok = match unsafe { create_target(&self._d2d, self.hwnd, self.dpi, false) } {
+            Ok((target, brush)) => {
+                self.target = target;
+                self.brush = brush;
+                self.software = false;
+                true
+            }
+            Err(_) => false,
+        };
+        ok
+    }
+
+    fn new_with(hwnd: HWND, dpi: u32, software: bool) -> Result<Self> {
         unsafe {
             let d2d: ID2D1Factory = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
-            let (target, brush) = create_target(&d2d, hwnd, dpi)?;
+            let (target, brush) = create_target(&d2d, hwnd, dpi, software)?;
 
             let dwrite: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
             let sys_fonts: IDWriteFontCollection = {
@@ -405,6 +446,7 @@ impl Renderer {
                 hwnd,
                 target,
                 device_lost: std::cell::Cell::new(false),
+                software,
                 dwrite,
                 brush,
                 fonts: Fonts {
@@ -634,7 +676,7 @@ impl Renderer {
         if !self.device_lost.get() {
             return false;
         }
-        match unsafe { create_target(&self._d2d, self.hwnd, self.dpi) } {
+        match unsafe { create_target(&self._d2d, self.hwnd, self.dpi, self.software) } {
             Ok((target, brush)) => {
                 self.target = target;
                 self.brush = brush;
@@ -1153,11 +1195,11 @@ impl Renderer {
         let state = ws.active();
         let is_raw = state.raw.is_some();
 
-        let (search_matches, search_current): (Vec<std::ops::Range<usize>>, Option<usize>) = match &ws.prompt {
+        let (search_matches, search_current): (std::rc::Rc<Vec<std::ops::Range<usize>>>, Option<usize>) = match &ws.prompt {
             crate::Prompt::Find(s) | crate::Prompt::Replace(s) => {
                 (s.matches(&state.doc).unwrap_or_default(), Some(s.current))
             }
-            _ => (Vec::new(), None),
+            _ => (Default::default(), None),
         };
 
         let (w, h) = self.size_dips();
@@ -1229,7 +1271,7 @@ impl Renderer {
             let head = if focused { sel.head } else { usize::MAX };
             let cursor_line = state.doc.line_col().0;
             let (search_matches, search_current) =
-                if focused { (&search_matches[..], search_current) } else { (&[][..], None) };
+                if focused { (search_matches.as_slice(), search_current) } else { (&[][..], None) };
             let gutter_w = if ui.line_numbers && !is_raw && !state.md_preview { layout::gutter_width(total_lines, self.digit_width()) } else { 0.0 };
             let text_pad = frame.body.left + gutter_w + layout::TEXT_PAD_L;
             if split {

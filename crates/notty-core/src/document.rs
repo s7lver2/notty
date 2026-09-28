@@ -177,10 +177,18 @@ impl Document {
     /// Coincidencias como rangos de **chars**, listos para seleccionar o resaltar.
     pub fn find_all(&self, query: &str, opts: crate::SearchOptions) -> Result<Vec<Range<usize>>, crate::SearchError> {
         let text = self.text();
-        Ok(crate::find_all(&text, query, opts)?
-            .into_iter()
-            .map(|r| self.buffer.byte_to_char(r.start)..self.buffer.byte_to_char(r.end))
-            .collect())
+        // Bytes → chars en una sola pasada (las coincidencias vienen en orden y sin
+        // solaparse), en vez de preguntarle al rope por cada una: con cientos de miles
+        // de coincidencias era lo que más tardaba.
+        let mut out = Vec::new();
+        let (mut byte, mut ch) = (0usize, 0usize);
+        for r in crate::find_all(&text, query, opts)? {
+            ch += text[byte..r.start].chars().count();
+            let end = ch + text[r.start..r.end].chars().count();
+            out.push(ch..end);
+            (byte, ch) = (r.end, end);
+        }
+        Ok(out)
     }
 
     /// Reemplaza todas las coincidencias como un único paso de deshacer.

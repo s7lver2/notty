@@ -93,8 +93,8 @@ pub struct Line {
     pub spans: Vec<StyledRange>,
     /// Filas de tabla: rango en chars del contenido de cada celda.
     pub cells: Vec<(usize, usize)>,
-    /// Líneas de código: colores de sintaxis (en UTF-16 desde el inicio de la línea).
-    pub code: Vec<Span>,
+    /// Líneas de un bloque ```lang: índice en `MdDoc::blocks` (colores con `MdDoc::code_spans`).
+    pub code_block: Option<u32>,
     /// Primera/última fila de la caja de un bloque de código.
     pub box_first: bool,
     pub box_last: bool,
@@ -110,7 +110,7 @@ impl Line {
             number: None,
             spans: Vec::new(),
             cells: Vec::new(),
-            code: Vec::new(),
+            code_block: None,
             box_first: false,
             box_last: false,
         }
@@ -126,9 +126,42 @@ pub struct Table {
     pub aligns: Vec<Align>,
 }
 
+/// Un bloque ```lang: se colorea la primera vez que se pinta (con muchos bloques,
+/// colorearlos todos al abrir el archivo era lo que más tardaba).
+struct CodeBlock {
+    first: usize,
+    lang: syntax::Lang,
+    /// Sus líneas sin la sangría de la valla, unidas con saltos de línea.
+    text: String,
+    /// Cuánto se quitó (en UTF-16) al principio de cada línea.
+    shifts: Vec<u32>,
+    spans: std::cell::OnceCell<Vec<Vec<Span>>>,
+}
+
 pub struct MdDoc {
     pub lines: Vec<Line>,
     pub tables: Vec<Table>,
+    blocks: Vec<CodeBlock>,
+    /// Anchos de columna ya medidos por el renderizador, por (tabla, zoom, fuente):
+    /// medirlos recorre todas las filas de la tabla, no solo las que se ven.
+    pub table_widths: std::cell::RefCell<std::collections::HashMap<(usize, u32, String), Vec<f32>>>,
+}
+
+impl MdDoc {
+    /// Colores de sintaxis de la línea `line` (en UTF-16 desde su inicio), si es código.
+    pub fn code_spans(&self, line: usize) -> &[Span] {
+        let Some(b) = self.lines.get(line).and_then(|l| l.code_block).and_then(|id| self.blocks.get(id as usize)) else {
+            return &[];
+        };
+        let spans = b.spans.get_or_init(|| {
+            syntax::highlight_snippet(b.lang, &b.text)
+                .into_iter()
+                .zip(&b.shifts)
+                .map(|(s, &shift)| s.into_iter().map(|s| Span { start: s.start + shift, ..s }).collect())
+                .collect()
+        });
+        spans.get(line - b.first).map(Vec::as_slice).unwrap_or(&[])
+    }
 }
 
 /// Cuánto más grande se dibuja un encabezado respecto al texto normal (como GitHub:
@@ -350,6 +383,7 @@ pub fn analyze(texts: &[String]) -> MdDoc {
     let n = docs.len();
     let mut lines: Vec<Line> = Vec::with_capacity(n);
     let mut tables: Vec<Table> = Vec::new();
+    let mut blocks: Vec<CodeBlock> = Vec::new();
     // (carácter, longitud, lenguaje, primera línea de código, sangría a quitar, niveles de lista)
     let mut fence: Option<(char, usize, String, usize, usize, u8)> = None;
     // (sangría de la marca, columna del contenido) por cada lista abierta.
@@ -370,7 +404,7 @@ pub fn analyze(texts: &[String]) -> MdDoc {
                 l.indent = indent;
                 hide(&mut l.spans, 0, chars.len());
                 lines.push(l);
-                highlight_block(&docs, &mut lines, first, i, lang, strip);
+                highlight_block(&docs, &mut lines, &mut blocks, first, i, lang, strip);
                 fence = None;
             } else {
                 let mut l = Line::new(BlockKind::Code);
@@ -605,7 +639,7 @@ pub fn analyze(texts: &[String]) -> MdDoc {
     }
 
     if let Some((_, _, ref lang, first, strip, _)) = fence {
-        highlight_block(&docs, &mut lines, first, n, lang, strip);
+        highlight_block(&docs, &mut lines, &mut blocks, first, n, lang, strip);
     }
 
     // Esquinas redondeadas de las cajas de código.
@@ -621,11 +655,11 @@ pub fn analyze(texts: &[String]) -> MdDoc {
         lines[k].box_last = b == BlockKind::FenceClose || next.is_none_or(|(bx, nb)| !bx || nb == BlockKind::FenceOpen);
     }
 
-    MdDoc { lines, tables }
+    MdDoc { lines, tables, blocks, table_widths: Default::default() }
 }
 
-/// Resalta las líneas `first..end` (un bloque ```lang) con la gramática de `lang`.
-fn highlight_block(docs: &[Vec<char>], lines: &mut [Line], first: usize, end: usize, lang: &str, strip: usize) {
+/// Apunta las líneas `first..end` (un bloque ```lang) para colorearlas cuando se vean.
+fn highlight_block(docs: &[Vec<char>], lines: &mut [Line], blocks: &mut Vec<CodeBlock>, first: usize, end: usize, lang: &str, strip: usize) {
     let Some(lang) = syntax::lang_for_fence(lang) else { return };
     if first >= end {
         return;
@@ -636,12 +670,13 @@ fn highlight_block(docs: &[Vec<char>], lines: &mut [Line], first: usize, end: us
             (docs[k][..cut].iter().map(|c| c.len_utf16()).sum::<usize>(), docs[k][cut..].iter().collect())
         })
         .collect();
-    let joined = stripped.iter().map(|(_, s)| s.as_str()).collect::<Vec<_>>().join("\n");
-    for (k, spans) in syntax::highlight_snippet(lang, &joined).into_iter().enumerate() {
-        let Some(line) = lines.get_mut(first + k) else { break };
-        let shift = stripped[k].0 as u32;
-        line.code = spans.into_iter().map(|s| Span { start: s.start + shift, ..s }).collect();
+    let text = stripped.iter().map(|(_, s)| s.as_str()).collect::<Vec<_>>().join("\n");
+    let id = blocks.len() as u32;
+    for line in &mut lines[first..end] {
+        line.code_block = Some(id);
     }
+    let shifts = stripped.iter().map(|(s, _)| *s as u32).collect();
+    blocks.push(CodeBlock { first, lang, text, shifts, spans: Default::default() });
 }
 
 /// Busca el cierre de un delimitador de énfasis de longitud exacta `len`.
@@ -924,7 +959,7 @@ mod tests {
         assert_eq!(d.lines[1].block, BlockKind::Code);
         assert_eq!(d.lines[2].block, BlockKind::FenceClose);
         assert!(d.lines[0].box_first && d.lines[2].box_last);
-        assert!(!d.lines[1].code.is_empty(), "resaltado de rust");
+        assert!(!d.code_spans(1).is_empty(), "resaltado de rust");
     }
 
     #[test]

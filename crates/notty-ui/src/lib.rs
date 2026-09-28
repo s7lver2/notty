@@ -1,6 +1,7 @@
 //! notty-ui: ventana Win32, render Direct2D/DirectWrite y lógica de edición en pantalla.
 
 mod anim;
+pub mod bench_log;
 pub mod chrome_text;
 pub mod clipboard;
 mod closing;

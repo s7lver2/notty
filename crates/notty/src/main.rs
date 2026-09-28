@@ -91,6 +91,7 @@ pub(crate) fn spawn_pipe_server(sender: std::sync::mpsc::Sender<notty_ipc::Messa
                 if unsafe { windows::Win32::Storage::FileSystem::ReadFile(current, Some(&mut buf), Some(&mut read), None) }.is_ok() {
                     if let Some(msg) = notty_ipc::decode(&buf[..read as usize]) {
                         let _ = sender.send(msg);
+                        notty_ui::window::wake_for_ipc();
                     }
                 }
             }
@@ -119,6 +120,7 @@ pub(crate) fn strip_ifeo_arg(args: &mut Vec<String>) {
 }
 
 fn main() -> windows::core::Result<()> {
+    notty_ui::bench_log::mark("main");
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     strip_ifeo_arg(&mut args);
     notty_ui::set_app_version(env!("CARGO_PKG_VERSION"));
@@ -144,6 +146,7 @@ fn main() -> windows::core::Result<()> {
 
     let path = if new_temp || is_new_permanent { None } else { args.first().cloned() };
     let load = notty_config::load(&notty_config::default_path());
+    notty_ui::bench_log::mark("config_loaded");
     let cfg_for_check = match &load {
         notty_config::LoadResult::Loaded(c) | notty_config::LoadResult::Missing(c) | notty_config::LoadResult::Defaulted(c, _) => c.clone(),
     };
@@ -158,6 +161,7 @@ fn main() -> windows::core::Result<()> {
 
     // Cada usuario tiene su propio HKCU y el instalador solo corrió como uno de ellos.
     notty_update::notepad::sync();
+    notty_ui::bench_log::mark("notepad_sync");
 
     // Esta instancia también escucha en el pipe mientras viva, además de abrir su
     // propia ventana con normalidad.
@@ -252,6 +256,7 @@ fn spawn_update_check(cfg: notty_config::Config, tx: std::sync::mpsc::Sender<not
                     sig_url: release.sig_url,
                 });
                 let _ = tx.send(msg);
+                notty_ui::window::wake_for_ipc();
             }
         }
         // Se persiste `last_check` pase lo que pase (éxito, sin red, JSON roto...):

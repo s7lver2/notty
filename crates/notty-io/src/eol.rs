@@ -23,8 +23,16 @@ impl LineEnding {
 }
 
 pub fn detect_eol(text: &str) -> LineEnding {
-    let crlf = text.matches("\r\n").count();
-    let lf = text.matches('\n').count() - crlf;
+    // Cada `\n` con SIMD (memchr) y mirando el byte anterior: antes eran dos búsquedas
+    // de subcadena, ~40 ms en un archivo de 50 MB.
+    let b = text.as_bytes();
+    let mut all = 0usize;
+    let mut crlf = 0usize;
+    for i in memchr::memchr_iter(b'\n', b) {
+        all += 1;
+        crlf += (i > 0 && b[i - 1] == b'\r') as usize;
+    }
+    let lf = all - crlf;
     if lf > crlf { LineEnding::Lf } else { LineEnding::Crlf }
 }
 

@@ -225,15 +225,84 @@ pub struct Span {
 struct Parsed {
     lang: Lang,
     revision: u64,
-    parser: Parser,
     tree: Tree,
     text: String,
+    /// Byte donde empieza cada línea de `text` (mismo criterio que el `Buffer`/ropey:
+    /// `\n`, `\r\n`, `\r` suelto, VT, FF, NEL, U+2028, U+2029). Así los tramos salen de `text` y no del documento,
+    /// que puede ir por delante mientras se reparsea en otro hilo.
+    line_starts: Vec<usize>,
 }
 
-/// El árbol de la última vez que se pintó la pestaña. `RefCell` porque se rellena
-/// al pintar, que solo tiene `&EditorState`.
+fn line_starts(text: &str) -> Vec<usize> {
+    let b = text.as_bytes();
+    let mut v = vec![0];
+    for (i, &c) in b.iter().enumerate() {
+        let end = match c {
+            b'\n' | 0x0B | 0x0C => Some(i + 1),
+            b'\r' if b.get(i + 1) != Some(&b'\n') => Some(i + 1),
+            // NEL (U+0085) y los separadores U+2028/U+2029, en UTF-8.
+            0xC2 if b.get(i + 1) == Some(&0x85) => Some(i + 2),
+            0xE2 if b.get(i + 1) == Some(&0x80) && matches!(b.get(i + 2), Some(0xA8 | 0xA9)) => Some(i + 3),
+            _ => None,
+        };
+        if let Some(e) = end {
+            v.push(e);
+        }
+    }
+    v
+}
+
+/// Parsea `text` (incrementalmente a partir de `prev`, si lo hay y es del mismo lenguaje).
+fn parse(lang: Lang, g: &Grammar, revision: u64, text: String, prev: Option<(&Tree, &str)>) -> Option<Parsed> {
+    let mut parser = Parser::new();
+    parser.set_language(&g.language).ok()?;
+    let tree = match prev {
+        Some((old_tree, old_text)) => {
+            let mut t = old_tree.clone();
+            t.edit(&diff_edit(old_text, &text));
+            parser.parse(&text, Some(&t))?
+        }
+        None => parser.parse(&text, None)?,
+    };
+    Some(Parsed { lang, revision, tree, line_starts: line_starts(&text), text })
+}
+
+/// Por encima de esto se parsea en otro hilo: con 1 MB de código, tree-sitter tarda
+/// ~350 ms la primera vez y ~20 ms en cada tecla, lo que se notaba al abrir y al
+/// escribir. Mientras tanto se sigue pintando con el último árbol que hubiera.
+const ASYNC_BYTES: usize = 128 * 1024;
+
+/// Ventana a la que avisar (`WM_SYNTAX_READY`) cuando termina un parseo en otro hilo.
+static NOTIFY: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static NOTIFY_MSG: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// Registra la ventana que repinta cuando llega un resaltado hecho en segundo plano.
+pub fn set_repaint_target(hwnd: windows::Win32::Foundation::HWND, msg: u32) {
+    NOTIFY.store(hwnd.0 as usize, std::sync::atomic::Ordering::Relaxed);
+    NOTIFY_MSG.store(msg, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn notify_ready() {
+    let h = NOTIFY.load(std::sync::atomic::Ordering::Relaxed);
+    if h != 0 {
+        let _ = unsafe {
+            windows::Win32::UI::WindowsAndMessaging::PostMessageW(
+                Some(windows::Win32::Foundation::HWND(h as *mut _)),
+                NOTIFY_MSG.load(std::sync::atomic::Ordering::Relaxed),
+                windows::Win32::Foundation::WPARAM(0),
+                windows::Win32::Foundation::LPARAM(0),
+            )
+        };
+    }
+}
+
+/// El árbol de la última vez que se pintó la pestaña, y el parseo en curso en otro
+/// hilo (si hay). `RefCell` porque se rellena al pintar, que solo tiene `&EditorState`.
 #[derive(Default)]
-pub struct SyntaxCache(RefCell<Option<Parsed>>);
+pub struct SyntaxCache {
+    slot: RefCell<Option<Parsed>>,
+    job: RefCell<Option<std::sync::mpsc::Receiver<Option<Parsed>>>>,
+}
 
 impl SyntaxCache {
     /// Tramos de color de cada línea de `lines` (vacío si no hay gramática para
@@ -247,43 +316,71 @@ impl SyntaxCache {
 
     /// Como `line_spans`, pero con el lenguaje ya elegido (vista previa de Ajustes).
     pub fn spans_for(&self, doc: &Document, lang: Option<Lang>, lines: Range<usize>) -> Vec<Vec<Span>> {
-        let mut slot = self.0.borrow_mut();
+        let mut slot = self.slot.borrow_mut();
         let Some((lang, g)) = lang.and_then(|l| Some((l, grammar(l)?))) else {
             *slot = None;
             return Vec::new();
         };
-        let Some(p) = refresh(&mut slot, lang, g, doc) else {
-            return Vec::new();
-        };
-        spans(p, g, doc, lines)
-    }
-}
-
-fn refresh<'a>(slot: &'a mut Option<Parsed>, lang: Lang, g: &Grammar, doc: &Document) -> Option<&'a Parsed> {
-    let fresh = slot.as_ref().is_some_and(|p| p.lang == lang && p.revision == doc.revision());
-    if !fresh {
-        let prev = slot.take().filter(|p| p.lang == lang);
-        let text = doc.text();
-        if text.len() > MAX_BYTES {
-            return None;
+        self.refresh(&mut slot, lang, g, doc);
+        match slot.as_ref() {
+            Some(p) if p.lang == lang => spans(p, g, lines),
+            _ => Vec::new(),
         }
-        *slot = Some(match prev {
-            Some(mut p) => {
-                p.tree.edit(&diff_edit(&p.text, &text));
-                p.tree = p.parser.parse(&text, Some(&p.tree))?;
-                p.text = text;
-                p.revision = doc.revision();
-                p
-            }
-            None => {
-                let mut parser = Parser::new();
-                parser.set_language(&g.language).ok()?;
-                let tree = parser.parse(&text, None)?;
-                Parsed { lang, revision: doc.revision(), parser, tree, text }
-            }
-        });
     }
-    slot.as_ref()
+
+    /// Si hay un parseo en otro hilo en curso (para esperar a que acabe en los tests).
+    pub fn is_parsing(&self) -> bool {
+        self.job.borrow().is_some()
+    }
+
+    fn refresh(&self, slot: &mut Option<Parsed>, lang: Lang, g: &'static Grammar, doc: &Document) {
+        let mut job = self.job.borrow_mut();
+        if let Some(rx) = job.as_ref() {
+            match rx.try_recv() {
+                Ok(Some(p)) if p.lang == lang => {
+                    *slot = Some(p);
+                    *job = None;
+                }
+                Ok(_) | Err(std::sync::mpsc::TryRecvError::Disconnected) => *job = None,
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            }
+        }
+        if slot.as_ref().is_some_and(|p| p.lang == lang && p.revision == doc.revision()) {
+            return;
+        }
+        let buf = doc.buffer();
+        let bytes = buf.char_to_byte(buf.len_chars());
+        if bytes > MAX_BYTES {
+            *slot = None;
+            return;
+        }
+        if slot.as_ref().is_some_and(|p| p.lang != lang) {
+            *slot = None;
+        }
+        if bytes < ASYNC_BYTES {
+            let text = doc.text();
+            let prev = slot.as_ref().map(|p| (&p.tree, p.text.as_str()));
+            if let Some(p) = parse(lang, g, doc.revision(), text, prev) {
+                *slot = Some(p);
+            }
+            return;
+        }
+        // Grande: al hilo. Solo un parseo a la vez; cuando acabe, si el texto siguió
+        // cambiando, el siguiente pintado lanza otro desde ese árbol.
+        if job.is_some() {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let text = doc.text();
+        let revision = doc.revision();
+        let prev = slot.as_ref().map(|p| (p.tree.clone(), p.text.clone()));
+        std::thread::spawn(move || {
+            let parsed = parse(lang, g, revision, text, prev.as_ref().map(|(t, s)| (t, s.as_str())));
+            let _ = tx.send(parsed);
+            notify_ready();
+        });
+        *job = Some(rx);
+    }
 }
 
 /// El cambio entre `old` y `new` como un solo reemplazo (prefijo y sufijo comunes
@@ -317,15 +414,14 @@ fn point(text: &[u8], byte: usize) -> Point {
     Point { row, column }
 }
 
-fn spans(p: &Parsed, g: &Grammar, doc: &Document, lines: Range<usize>) -> Vec<Vec<Span>> {
-    let buf = doc.buffer();
-    let total = buf.len_lines();
+fn spans(p: &Parsed, g: &Grammar, lines: Range<usize>) -> Vec<Vec<Span>> {
+    let total = p.line_starts.len();
     // Mismo recorte que `render.rs`: la línea sin su salto final.
     let line_bytes: Vec<Range<usize>> = lines
         .filter(|&l| l < total)
         .map(|l| {
-            let s = buf.char_to_byte(buf.line_start(l));
-            let full_end = if l + 1 < total { buf.char_to_byte(buf.line_start(l + 1)) } else { p.text.len() };
+            let s = p.line_starts[l];
+            let full_end = p.line_starts.get(l + 1).copied().unwrap_or(p.text.len());
             s..s + p.text[s..full_end].trim_end_matches(['\r', '\n']).len()
         })
         .collect();
@@ -388,14 +484,9 @@ pub fn lang_for_fence(tag: &str) -> Option<Lang> {
 /// línea (`\n`). Sin caché: el llamador guarda el resultado.
 pub fn highlight_snippet(lang: Lang, text: &str) -> Vec<Vec<Span>> {
     let Some(g) = grammar(lang) else { return Vec::new() };
-    let mut parser = Parser::new();
-    if parser.set_language(&g.language).is_err() {
-        return Vec::new();
-    }
-    let Some(tree) = parser.parse(text, None) else { return Vec::new() };
-    let doc = Document::new(text, "\n");
-    let p = Parsed { lang, revision: doc.revision(), parser, tree, text: text.to_string() };
-    spans(&p, g, &doc, 0..doc.buffer().len_lines())
+    let Some(p) = parse(lang, g, 0, text.to_string(), None) else { return Vec::new() };
+    let n = p.line_starts.len();
+    spans(&p, g, 0..n)
 }
 
 fn utf16_len(s: &str) -> u32 {
@@ -554,5 +645,60 @@ mod tests {
         assert_eq!(e.start_position, Point { row: 1, column: 0 });
         let e = diff_edit("aña", "aa");
         assert_eq!((e.start_byte, e.old_end_byte, e.new_end_byte), (1, 3, 1));
+    }
+}
+
+#[cfg(test)]
+mod async_tests {
+    use super::*;
+
+    fn wait(cache: &SyntaxCache, doc: &Document, lines: Range<usize>) -> Vec<Vec<Span>> {
+        for _ in 0..500 {
+            let s = cache.spans_for(doc, Some(Lang::Rust), lines.clone());
+            if !cache.is_parsing() && !s.iter().all(Vec::is_empty) {
+                return s;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        panic!("el parseo en segundo plano no terminó");
+    }
+
+    #[test]
+    fn big_file_highlights_in_background_like_small_one() {
+        let chunk = "fn f(x: u32) -> u32 { x + 1 } // c\n";
+        let big = chunk.repeat(ASYNC_BYTES / chunk.len() + 10);
+        let doc = Document::new(&big, "\n");
+        let cache = SyntaxCache::default();
+        // Primer pintado: no bloquea y todavía no hay colores.
+        assert!(cache.spans_for(&doc, Some(Lang::Rust), 0..3).iter().all(Vec::is_empty));
+        assert!(cache.is_parsing());
+        let async_spans = wait(&cache, &doc, 0..3);
+        let small = Document::new(&chunk.repeat(3), "\n");
+        assert_eq!(async_spans, SyntaxCache::default().spans_for(&small, Some(Lang::Rust), 0..3));
+    }
+
+    #[test]
+    fn stale_tree_keeps_colors_while_reparsing() {
+        let chunk = "fn f(x: u32) -> u32 { x + 1 } // c\n";
+        let mut doc = Document::new(&chunk.repeat(ASYNC_BYTES / chunk.len() + 10), "\n");
+        let cache = SyntaxCache::default();
+        wait(&cache, &doc, 0..3);
+        doc.set_cursor(0);
+        doc.insert("// nuevo\n", std::time::Instant::now());
+        // Mientras el hilo reparsea se siguen viendo los colores del árbol anterior.
+        assert!(!cache.spans_for(&doc, Some(Lang::Rust), 0..3).iter().all(Vec::is_empty));
+        let fresh = wait(&cache, &doc, 0..1);
+        assert!(fresh[0].iter().all(|s| NAMES[s.highlight] == "comment"));
+    }
+
+    #[test]
+    fn line_starts_match_the_buffer() {
+        let text = "a\nb\r\nc\rd\u{2028}e";
+        let b = notty_core::Buffer::new(text);
+        let starts = line_starts(text);
+        assert_eq!(starts.len(), b.len_lines());
+        for (l, &s) in starts.iter().enumerate() {
+            assert_eq!(s, b.char_to_byte(b.line_start(l)));
+        }
     }
 }

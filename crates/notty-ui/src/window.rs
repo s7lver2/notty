@@ -38,20 +38,39 @@ use crate::{EditorState, Hit, Modifiers, Renderer, Viewport};
 /// Id del `SetTimer` de autoguardado (dispara cada segundo; el manejador de `WM_TIMER`
 /// decide si de verdad hay algo que guardar).
 const ID_AUTOSAVE_TIMER: usize = 1;
-/// Id del `SetTimer` de sondeo del pipe de instancia única (Task 8): más corto que el
-/// de autoguardado para que abrir un archivo desde una segunda invocación de `notty`
-/// se note casi al instante.
-const ID_IPC_TIMER: usize = 2;
+/// Llega cuando el hilo del pipe de instancia única (o el chequeo de actualizaciones)
+/// deja algo en `ipc_rx` (ver `wake_for_ipc`). Antes se sondeaba con un temporizador
+/// cada 150 ms, que despertaba la ventana 7 veces por segundo sin hacer nada.
+const WM_IPC: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 9;
+/// Ventana principal de este proceso, para `wake_for_ipc` (0 si aún no hay).
+static IPC_HWND: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Avisa a la ventana de que hay mensajes nuevos en su `ipc_rx`. Se puede llamar desde
+/// cualquier hilo; si la ventana aún no existe no hace nada (al crearse lee lo pendiente).
+pub fn wake_for_ipc() {
+    let h = IPC_HWND.load(std::sync::atomic::Ordering::Acquire);
+    if h != 0 {
+        let _ = unsafe { windows::Win32::UI::WindowsAndMessaging::PostMessageW(Some(HWND(h as *mut _)), WM_IPC, WPARAM(0), LPARAM(0)) };
+    }
+}
 /// Id del `SetTimer` de animación (60Hz): repinta mientras haya alguna animación en
 /// curso (menú/sugerencias al abrir, cambio de pestaña...) y se para en cuanto la
 /// última termina.
 const ID_ANIM_TIMER: usize = 3;
+/// Se lo manda la ventana a sí misma tras el primer pintado: arranca pintando por CPU
+/// (`Renderer::new_software`, se ve al instante) y aquí pasa a la GPU. Probado también
+/// a cargar el driver en otro hilo mientras tanto: acababa a la vez y gastaba ~12 MB más.
+const WM_GPU_READY: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 7;
+/// Lo manda `syntax` al terminar un resaltado hecho en otro hilo (archivos grandes).
+const WM_SYNTAX_READY: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 8;
 
 /// Snapshot de documentos sucios (nombre, texto, sucio) leído por el `panic hook` para
 /// volcar a `notty_io::recovery_dir()`. Vive en memoria estática (`Box::leak`) para que
 /// el hook, que se instala una única vez para todo el proceso, tenga una dirección
 /// válida sin depender de que el hilo que entra en pánico coopere activamente.
-type RecoverySnapshot = Mutex<Vec<(String, String, bool, Option<std::path::PathBuf>)>>;
+/// El texto va como `Buffer` (un rope): clonarlo cada segundo es O(1) y comparte la
+/// memoria con el documento, en vez de copiar el archivo entero.
+type RecoverySnapshot = Mutex<Vec<(String, notty_core::Buffer, bool, Option<std::path::PathBuf>)>>;
 
 /// Estado ligado a una ventana concreta: se guarda en `GWLP_USERDATA` mientras vive.
 struct WindowState {
@@ -111,6 +130,8 @@ struct WindowState {
     accent_anim: Option<(notty_config::AccentColor, crate::Anim)>,
     /// Si el `SetTimer` de animación (`ID_ANIM_TIMER`) está corriendo.
     anim_timer_running: bool,
+    /// Si ya se pidió pasar a la GPU tras el primer pintado (ver `WM_GPU_READY`).
+    gpu_requested: bool,
     /// Aviso/panel de actualización disponible (Task 4 del plan del actualizador):
     /// qué release se encontró (si alguna), si el panel de notas está abierto, y el
     /// progreso de la descarga en curso. Ver `crate::update_panel::UpdateState`.
@@ -1037,12 +1058,14 @@ fn save_now(w: &mut WindowState, hwnd: HWND) -> bool {
 /// tecla, y mucho más simple — ver Task 7 Step 3 del plan). Solo se autoguarda el
 /// documento activo, solo si tiene ruta real, no es temporal volátil, y no hay ya un
 /// conflicto sin resolver.
-fn autosave_tick(w: &mut WindowState, hwnd: HWND) {
+/// Devuelve `true` si cambió algo visible (se guardó, o hay aviso nuevo).
+fn autosave_tick(w: &mut WindowState, hwnd: HWND) -> bool {
+    refresh_recovery(w);
     if !w.cfg.borrow().files.autosave {
-        return;
+        return false;
     }
     if matches!(w.ws.prompt, crate::Prompt::Conflict(_)) {
-        return;
+        return false;
     }
     let st = w.ws.active();
     let has_real_path = st.path.is_some() && !matches!(st.temp, Some(notty_config::TempMode::Volatile));
@@ -1060,8 +1083,9 @@ fn autosave_tick(w: &mut WindowState, hwnd: HWND) {
             SaveOutcome::Conflict => claim_attention(w, hwnd),
             SaveOutcome::Saved => {}
         }
+        return true;
     }
-    refresh_recovery(w);
+    false
 }
 
 /// Sondea `w.ipc_rx` (si lo hay) por mensajes del pipe de instancia única y los
@@ -1169,6 +1193,7 @@ fn check_updates_now(w: &mut WindowState, hwnd: HWND) {
             Err(e) => ManualCheckEvent::Error(e.to_string()),
         };
         let _ = tx.send(event);
+        wake_for_ipc();
     });
     let _ = unsafe { InvalidateRect(Some(hwnd), None, false) };
 }
@@ -1230,21 +1255,31 @@ fn start_update_download(w: &mut WindowState, hwnd: HWND) {
         let dir = std::env::temp_dir().join("notty-update");
         if std::fs::create_dir_all(&dir).is_err() {
             let _ = tx.send(DownloadEvent::DownloadError("no se pudo crear el directorio temporal".to_string()));
+            wake_for_ipc();
             return;
         }
         let setup_path = dir.join("notty-setup.exe");
         let sig_path = dir.join("notty-setup.exe.sig");
 
         let progress_tx = tx.clone();
+        // La barra de progreso se repinta como mucho ~30 veces por segundo, no una por
+        // cada trozo descargado.
+        let mut last_wake: Option<std::time::Instant> = None;
         if let Err(e) = notty_update::http::download(&release.setup_url, &setup_path, |done, total| {
             let _ = progress_tx.send(DownloadEvent::Progress(done, total));
+            if last_wake.is_none_or(|t| t.elapsed() >= std::time::Duration::from_millis(33)) || done == total {
+                last_wake = Some(std::time::Instant::now());
+                wake_for_ipc();
+            }
         }) {
             let _ = tx.send(DownloadEvent::DownloadError(e.to_string()));
+            wake_for_ipc();
             return;
         }
         if let Err(e) = notty_update::http::download(&release.sig_url, &sig_path, |_, _| {}) {
             let _ = std::fs::remove_file(&setup_path);
             let _ = tx.send(DownloadEvent::DownloadError(e.to_string()));
+            wake_for_ipc();
             return;
         }
 
@@ -1252,12 +1287,14 @@ fn start_update_download(w: &mut WindowState, hwnd: HWND) {
             let _ = std::fs::remove_file(&setup_path);
             let _ = std::fs::remove_file(&sig_path);
             let _ = tx.send(DownloadEvent::DownloadError("no se pudo leer lo descargado".to_string()));
+            wake_for_ipc();
             return;
         };
         let Ok(sig): std::result::Result<[u8; 64], _> = sig_bytes.try_into() else {
             let _ = std::fs::remove_file(&setup_path);
             let _ = std::fs::remove_file(&sig_path);
             let _ = tx.send(DownloadEvent::VerifyFailed);
+            wake_for_ipc();
             return;
         };
 
@@ -1265,11 +1302,13 @@ fn start_update_download(w: &mut WindowState, hwnd: HWND) {
             let _ = std::fs::remove_file(&setup_path);
             let _ = std::fs::remove_file(&sig_path);
             let _ = tx.send(DownloadEvent::VerifyFailed);
+            wake_for_ipc();
             return;
         }
 
         let _ = hwnd_usize; // Reservado por si una relanzada futura necesita notificar a esta ventana.
         let _ = tx.send(DownloadEvent::ReadyToRelaunch(setup_path));
+        wake_for_ipc();
     });
 }
 
@@ -1492,8 +1531,7 @@ fn refresh_recovery(w: &WindowState) {
         .iter()
         .enumerate()
         .map(|(i, st)| {
-            let text = st.doc.buffer().slice(0..st.doc.buffer().len_chars());
-            (recovery_name(st, i), text, st.doc.is_dirty(), st.path.clone())
+            (recovery_name(st, i), st.doc.buffer().clone(), st.doc.is_dirty(), st.path.clone())
         })
         .collect();
     let mut guard = w.recovery.lock().unwrap_or_else(|e| e.into_inner());
@@ -1567,7 +1605,7 @@ fn dump_recovery_snapshot(snapshot: &RecoverySnapshot) -> std::io::Result<()> {
             .enumerate()
             .map(|(i, (name, text, _, path))| notty_io::RecoveryEntry {
                 name: format!("{i}_{name}"),
-                text: text.clone(),
+                text: text.to_string(),
                 path: path.clone(),
             })
             .collect()
@@ -1640,6 +1678,7 @@ fn run_inner(
 ) -> Result<()> {
     // Snapshot de recuperación: vive el resto del proceso (`Box::leak`) para que el
     // `panic hook`, instalado una sola vez, tenga una dirección `'static` válida.
+    crate::bench_log::mark("run_inner");
     let recovery: &'static RecoverySnapshot = Box::leak(Box::new(Mutex::new(Vec::new())));
     install_recovery_hook(recovery);
 
@@ -1681,9 +1720,14 @@ fn run_inner(
             ..Default::default()
         };
         RegisterClassExW(&wc);
+        crate::bench_log::mark("class_registered");
 
         let (win_w, win_h) = (cfg.ui.win_w.max(layout::MIN_WINDOW_W), cfg.ui.win_h.max(layout::MIN_WINDOW_H));
         let title_wide = to_wide(&title);
+        crate::bench_log::mark("before_create_window");
+        // Se crea ya al tamaño final con el DPI del sistema (el del monitor principal,
+        // donde casi siempre aparece): redimensionarla después costaba ~25 ms de arranque.
+        let sys_scale = windows::Win32::UI::HiDpi::GetDpiForSystem() as f32 / 96.0;
         let hwnd = CreateWindowExW(
             WS_EX_APPWINDOW,
             class_name,
@@ -1691,27 +1735,28 @@ fn run_inner(
             WS_OVERLAPPEDWINDOW,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
-            win_w.round() as i32,
-            win_h.round() as i32,
+            (win_w * sys_scale).round() as i32,
+            (win_h * sys_scale).round() as i32,
             None,
             None,
             Some(instance.into()),
             None,
         )?;
+        crate::bench_log::mark("window_created");
 
-        // La ventana se creó con un tamaño nominal en píxeles; ahora que existe, se
-        // conoce su DPI real y se ajusta a `win_w`x`win_h` DIPs exactos.
-        let dpi0 = GetDpiForWindow(hwnd);
-        let scale0 = dpi0 as f32 / 96.0;
-        let _ = SetWindowPos(
-            hwnd,
-            None,
-            0,
-            0,
-            (win_w * scale0).round() as i32,
-            (win_h * scale0).round() as i32,
-            SWP_NOMOVE | SWP_NOZORDER,
-        );
+        // Si acabó en un monitor con otro DPI, se ajusta a `win_w`x`win_h` DIPs exactos.
+        let scale0 = GetDpiForWindow(hwnd) as f32 / 96.0;
+        if scale0 != sys_scale {
+            let _ = SetWindowPos(
+                hwnd,
+                None,
+                0,
+                0,
+                (win_w * scale0).round() as i32,
+                (win_h * scale0).round() as i32,
+                SWP_NOMOVE | SWP_NOZORDER,
+            );
+        }
 
         let dark = crate::is_dark(cfg.ui.theme, system_uses_dark_mode());
         setup_chrome(hwnd, dark);
@@ -1752,8 +1797,11 @@ fn run_inner(
             let _ = notty_io::clear_recovery(&notty_io::recovery_dir());
         }
 
+        crate::bench_log::mark("docs_loaded");
         let dpi = GetDpiForWindow(hwnd);
-        let mut renderer = Renderer::new(hwnd, dpi)?;
+        let mut renderer = Renderer::new_software(hwnd, dpi)?;
+        crate::syntax::set_repaint_target(hwnd, WM_SYNTAX_READY);
+        crate::bench_log::mark("renderer_new");
         let _ = renderer.set_mono_family(cfg.ui.font_family.primary_name());
         let _ = renderer.set_font_scale(cfg.ui.font_scale);
 
@@ -1790,6 +1838,7 @@ fn run_inner(
             last_accent: None,
             accent_anim: None,
             anim_timer_running: false,
+            gpu_requested: false,
             update: crate::UpdateState::default(),
             download_rx: None,
             manual_check_rx: None,
@@ -1814,10 +1863,13 @@ fn run_inner(
             refresh_recovery(w);
         }
 
+        crate::bench_log::mark("state_ready");
         let start_maximized = ptr.as_ref().is_some_and(|w| w.cfg.borrow().ui.win_maximized);
         let _ = ShowWindow(hwnd, if start_maximized { SW_MAXIMIZE } else { SW_SHOW });
         let _ = SetTimer(Some(hwnd), ID_AUTOSAVE_TIMER, 1000, None);
-        let _ = SetTimer(Some(hwnd), ID_IPC_TIMER, 150, None);
+        IPC_HWND.store(hwnd.0 as usize, std::sync::atomic::Ordering::Release);
+        // Lo que llegase antes de registrar la ventana.
+        wake_for_ipc();
 
         // Primer arranque: la ventana de bienvenida (no la del recorrido directamente,
         // ver Task 4 Step 5 del plan de tutorial) — no modal, flota sobre esta ventana
@@ -2073,6 +2125,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         w.renderer.set_syntax_disabled(&cfg.syntax_disabled);
                         crate::ligature::resolve(&cfg.ligature_overrides, &cfg.ligature_disabled)
                     };
+                    let paint_start = std::time::Instant::now();
                     w.renderer.paint(&w.ws, &ui, &view, &ligature_table);
                     if w.tour.is_some() {
                         // Se pinta último (capa por encima de todo lo demás), en una
@@ -2082,6 +2135,11 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         let frame = w.renderer.current_frame(&ui, w.ws.len(), w.menu_bar_visible());
                         let tour = w.tour.as_mut().expect("comprobado con is_some justo arriba");
                         tour.draw(&w.renderer, &frame, view.dark, ui.accent, std::time::Instant::now());
+                    }
+                    crate::bench_log::record_paint(paint_start.elapsed());
+                    if w.renderer.is_software() && !w.gpu_requested {
+                        w.gpu_requested = true;
+                        let _ = windows::Win32::UI::WindowsAndMessaging::PostMessageW(Some(hwnd), WM_GPU_READY, WPARAM(0), LPARAM(0));
                     }
                 }
                 let _ = ValidateRect(Some(hwnd), None);
@@ -2966,18 +3024,33 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 }
                 DefWindowProcW(hwnd, msg, wparam, lparam)
             }
+            WM_IPC => {
+                if let Some(w) = ptr.as_mut() {
+                    if ipc_tick(w, hwnd) {
+                        update_title(hwnd, w.ws.active(), lang_of(w));
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                    }
+                }
+                LRESULT(0)
+            }
+            WM_SYNTAX_READY => {
+                let _ = InvalidateRect(Some(hwnd), None, false);
+                LRESULT(0)
+            }
+            WM_GPU_READY => {
+                if let Some(w) = ptr.as_mut() {
+                    if w.renderer.upgrade_to_gpu() {
+                        crate::bench_log::mark("gpu");
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                    }
+                }
+                LRESULT(0)
+            }
             WM_TIMER => {
                 if wparam.0 == ID_AUTOSAVE_TIMER {
                     if let Some(w) = ptr.as_mut() {
-                        autosave_tick(w, hwnd);
-                        let _ = InvalidateRect(Some(hwnd), None, false);
-                    }
-                    return LRESULT(0);
-                }
-                if wparam.0 == ID_IPC_TIMER {
-                    if let Some(w) = ptr.as_mut() {
-                        if ipc_tick(w, hwnd) {
-                            update_title(hwnd, w.ws.active(), lang_of(w));
+                        // Sin repintar si no cambió nada: en reposo, la ventana no se despierta a dibujar.
+                        if autosave_tick(w, hwnd) {
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
                     }
@@ -3050,7 +3123,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     save_window_geometry(hwnd, w);
                 }
                 let _ = KillTimer(Some(hwnd), ID_AUTOSAVE_TIMER);
-                let _ = KillTimer(Some(hwnd), ID_IPC_TIMER);
+                IPC_HWND.store(0, std::sync::atomic::Ordering::Release);
                 let _ = KillTimer(Some(hwnd), ID_ANIM_TIMER);
                 PostQuitMessage(0);
                 LRESULT(0)
