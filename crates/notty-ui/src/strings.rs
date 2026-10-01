@@ -49,6 +49,10 @@ const TABLE: &[(&str, &str)] = &[
     ("Elige 30, 60 o 120 Hz, o animaciones reducidas, en Ajustes → Ventana.", "Pick 30, 60 or 120 Hz, or reduced animations, in Settings → Window."),
     ("Más comandos de vim", "More vim commands"),
     (":q!, :qa, :wa, :e archivo, :e!, :tabnew, :bn/:bp, :12 para ir a una línea y más.", ":q!, :qa, :wa, :e file, :e!, :tabnew, :bn/:bp, :12 to jump to a line and more."),
+    ("Actualizaciones desde essentials", "Updates from essentials"),
+    ("Si tienes essentials, notty se actualiza desde la tienda. Lo verás en Ajustes → Actualizaciones.", "If you have essentials, notty updates from the store. You'll see it in Settings → Updates."),
+    ("El mismo tema que essentials", "The same theme as essentials"),
+    ("notty sigue el tema y el color de acento de essentials al momento. Se apaga en Ajustes → Apariencia.", "notty follows the essentials theme and accent color instantly. Turn it off in Settings → Appearance."),
     // --- settings_model.rs: Page::name ---
     ("Apariencia", "Appearance"),
     ("Fuentes", "Fonts"),

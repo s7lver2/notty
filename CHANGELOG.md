@@ -1,12 +1,18 @@
 # Changelog
 
-## Sin publicar
+## v1.1.0
 
+- notty se puede dejar en manos de essentials: si la tienda lo gestiona (`[updates] managed_by = "essentials"` en `config.toml`, lo pone essentials), notty no busca ni descarga versiones nuevas y Ajustes → Actualizaciones lo dice, con «Abrir en essentials». Novedades sigue en Ajustes → Acerca de.
+- Tema compartido con essentials: si existe `%APPDATA%\essentials\appearance.toml` con `shared = true`, notty usa su tema y su color de acento y los cambia en caliente, con el mismo fundido de siempre. Ajustes → Apariencia → «Seguir el tema de essentials» lo apaga; encendido, elegir tema o acento en notty también lo cambia en essentials.
+- Cada release publica también `notty.msi` con su firma `notty.msi.sig`, y el MSI registra la carpeta de instalación para que essentials la encuentre.
 - El aviso de versión nueva y la página Ajustes → Actualizaciones salen completamente en inglés con la app en inglés: título, botones, errores y también las notas de la versión.
 - Las notas de cada versión pueden llevar su versión en inglés debajo de un encabezado `#### English`.
 
 #### English
 
+- notty can be managed by essentials: when the store manages it (`[updates] managed_by = "essentials"` in `config.toml`), notty doesn't check for or download new versions and Settings → Updates says so, with "Open in essentials". What's new is still in Settings → About.
+- Theme shared with essentials: with `%APPDATA%\essentials\appearance.toml` and `shared = true`, notty uses its theme and accent color and follows changes live. Settings → Appearance → "Follow the essentials theme" turns it off; while on, picking a theme or accent in notty changes it in essentials too.
+- Every release also ships `notty.msi` with its `notty.msi.sig` signature, and the MSI records the install folder so essentials can find it.
 - The new-version popup and Settings → Updates are now fully in English when the app is: title, buttons, errors and the release notes too.
 - Each version's notes can carry an English version under an `#### English` heading.
 

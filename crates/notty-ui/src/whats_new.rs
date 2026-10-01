@@ -33,31 +33,48 @@ pub struct Release {
 }
 
 /// La más nueva primero.
-pub const RELEASES: &[Release] = &[Release {
-    version: "1.0.0",
-    items: &[
-        Item {
-            icon: Icon::Markdown,
-            title: "Previsualización de Markdown",
-            desc: "Los .md se ven como en GitHub: código con colores, tablas, citas y tareas. Ctrl+Shift+M.",
-        },
-        Item {
-            icon: Icon::Speed,
-            title: "Hasta 8 veces más rápida al abrir",
-            desc: "Los archivos grandes se abren al momento y notty ya no gasta CPU en reposo.",
-        },
-        Item {
-            icon: Icon::Animations,
-            title: "Animaciones a tu medida",
-            desc: "Elige 30, 60 o 120 Hz, o animaciones reducidas, en Ajustes → Ventana.",
-        },
-        Item {
-            icon: Icon::Vim,
-            title: "Más comandos de vim",
-            desc: ":q!, :qa, :wa, :e archivo, :e!, :tabnew, :bn/:bp, :12 para ir a una línea y más.",
-        },
-    ],
-}];
+pub const RELEASES: &[Release] = &[
+    Release {
+        version: "1.1.0",
+        items: &[
+            Item {
+                icon: Icon::Sparkle,
+                title: "Actualizaciones desde essentials",
+                desc: "Si tienes essentials, notty se actualiza desde la tienda. Lo verás en Ajustes → Actualizaciones.",
+            },
+            Item {
+                icon: Icon::Sparkle,
+                title: "El mismo tema que essentials",
+                desc: "notty sigue el tema y el color de acento de essentials al momento. Se apaga en Ajustes → Apariencia.",
+            },
+        ],
+    },
+    Release {
+        version: "1.0.0",
+        items: &[
+            Item {
+                icon: Icon::Markdown,
+                title: "Previsualización de Markdown",
+                desc: "Los .md se ven como en GitHub: código con colores, tablas, citas y tareas. Ctrl+Shift+M.",
+            },
+            Item {
+                icon: Icon::Speed,
+                title: "Hasta 8 veces más rápida al abrir",
+                desc: "Los archivos grandes se abren al momento y notty ya no gasta CPU en reposo.",
+            },
+            Item {
+                icon: Icon::Animations,
+                title: "Animaciones a tu medida",
+                desc: "Elige 30, 60 o 120 Hz, o animaciones reducidas, en Ajustes → Ventana.",
+            },
+            Item {
+                icon: Icon::Vim,
+                title: "Más comandos de vim",
+                desc: ":q!, :qa, :wa, :e archivo, :e!, :tabnew, :bn/:bp, :12 para ir a una línea y más.",
+            },
+        ],
+    },
+];
 
 /// Las novedades de `version`, o las de la última versión con novedades si esa no tiene
 /// (para Ayuda → Novedades en una versión sin entrada propia).
