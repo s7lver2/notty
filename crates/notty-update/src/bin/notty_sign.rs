@@ -1,4 +1,5 @@
-//! notty-sign: genera el par de claves Ed25519 de release y firma archivos con él.
+//! notty-sign: genera el par de claves Ed25519 de release, firma archivos con él y
+//! comprueba firmas contra la clave pública compilada (`notty_update::PUBKEY`).
 //! Solo se compila detrás de la feature `sign` — nunca va en el `notty` que se
 //! distribuye, solo lo usa quien construye una release (ver `tools/release.ps1`).
 
@@ -37,6 +38,14 @@ fn cmd_sign(file: &str, key: Option<&str>, out: &str) {
     println!("Firma escrita en {out}");
 }
 
+/// La firma de `file` (64 bytes crudos en `sig`) contra la clave pública compilada.
+fn cmd_verify(file: &str, sig: &str) -> bool {
+    let data = std::fs::read(file).expect("no se pudo leer el archivo a comprobar");
+    let sig = std::fs::read(sig).expect("no se pudo leer la firma");
+    let Ok(sig) = <[u8; 64]>::try_from(sig.as_slice()) else { return false };
+    notty_update::verify(&data, &sig, &notty_update::PUBKEY)
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
@@ -54,6 +63,18 @@ fn main() {
             let key = args.iter().position(|a| a == "--key").and_then(|i| args.get(i + 1)).map(String::as_str);
             cmd_sign(file, key, out);
         }
-        _ => eprintln!("uso: notty-sign --keygen [--key <path>] | notty-sign --pubkey [--key <path>] | notty-sign --sign <file> --out <file>.sig [--key <path>]"),
+        Some("--verify") => {
+            let file = args.get(1).expect("uso: notty-sign --verify <file> --sig <file>.sig");
+            let sig = args.iter().position(|a| a == "--sig").and_then(|i| args.get(i + 1)).expect("falta --sig");
+            if cmd_verify(file, sig) {
+                println!("firma válida");
+            } else {
+                println!("firma NO válida");
+                std::process::exit(1);
+            }
+        }
+        _ => eprintln!(
+            "uso: notty-sign --keygen [--key <path>] | notty-sign --pubkey [--key <path>] | notty-sign --sign <file> --out <file>.sig [--key <path>] | notty-sign --verify <file> --sig <file>.sig"
+        ),
     }
 }

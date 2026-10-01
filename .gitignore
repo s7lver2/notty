@@ -4,3 +4,4 @@
 /installer/notty.msi
 /installer/*.wixpdb
 /.claude/worktrees/
+/.cache/

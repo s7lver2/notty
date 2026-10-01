@@ -6,6 +6,8 @@
     <MediaTemplate EmbedCab="yes" />
     <Property Id="ARPPRODUCTICON" Value="notty.exe" />
     <Property Id="INSTALLFOLDER" Secure="yes" />
+    <!-- Para que MsiGetProductInfoW(INSTALLLOCATION) devuelva la carpeta (la usa essentials). -->
+    <SetProperty Id="ARPINSTALLLOCATION" Value="[INSTALLFOLDER]" After="CostFinalize" />
 
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="notty">
