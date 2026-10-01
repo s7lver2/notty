@@ -142,6 +142,7 @@ pub enum SettingKey {
     MdPreviewStyle,
     AnimHz,
     ReducedMotion,
+    FollowEssentials,
 }
 
 /// El valor elegido; `apply` decide qué campo de `Config` toca según `SettingKey`.
@@ -488,6 +489,10 @@ pub fn apply(cfg: &mut Config, key: SettingKey, value: SettingValue) {
             cfg.ui.reduced_motion = b;
             return;
         }
+        (SettingKey::FollowEssentials, SettingValue::Bool(b)) => {
+            cfg.ui.follow_essentials = b;
+            return;
+        }
         _ => {}
     }
     match (key, value) {
@@ -525,6 +530,7 @@ pub fn current_bool(cfg: &Config, key: SettingKey) -> bool {
         SettingKey::UpdatesCheck => cfg.updates.check,
         SettingKey::Wrap => cfg.ui.wrap,
         SettingKey::ReducedMotion => cfg.ui.reduced_motion,
+        SettingKey::FollowEssentials => cfg.ui.follow_essentials,
         _ => false,
     }
 }
@@ -534,7 +540,7 @@ pub fn current_bool(cfg: &Config, key: SettingKey) -> bool {
 pub fn selected_index(cfg: &Config, key: SettingKey, options: Options) -> Option<usize> {
     let current: SettingValue = match key {
         SettingKey::Preset => SettingValue::Preset(cfg.ui.preset),
-        SettingKey::Theme => SettingValue::Theme(cfg.ui.theme),
+        SettingKey::Theme => SettingValue::Theme(crate::shared_theme::effective(&cfg.ui).0),
         SettingKey::Files => SettingValue::Files(cfg.ui.files),
         SettingKey::TabsPosition => SettingValue::TabsPosition(cfg.ui.tabs_position),
         SettingKey::MenuBar => SettingValue::MenuBar(cfg.ui.menubar),
@@ -542,7 +548,7 @@ pub fn selected_index(cfg: &Config, key: SettingKey, options: Options) -> Option
         SettingKey::OnCloseUnsaved => SettingValue::OnCloseUnsaved(cfg.files.on_close_unsaved),
         SettingKey::HotkeyMechanism => SettingValue::HotkeyMechanism(cfg.hotkey.mechanism),
         SettingKey::FontFamily => SettingValue::FontFamily(cfg.ui.font_family),
-        SettingKey::AccentColor => SettingValue::AccentColor(cfg.ui.accent),
+        SettingKey::AccentColor => SettingValue::AccentColor(crate::shared_theme::effective(&cfg.ui).1),
         SettingKey::Lang => SettingValue::Lang(cfg.ui.lang),
         SettingKey::SaveDir => {
             let current = cfg.files.default_save_dir.as_deref();

@@ -238,7 +238,7 @@ pub fn open(
             None,
         )?;
 
-        let dark = is_dark(cfg.borrow().ui.theme, crate::window::system_uses_dark_mode());
+        let dark = is_dark(crate::shared_theme::effective(&cfg.borrow().ui).0, crate::window::system_uses_dark_mode());
         let prefer_round = DWMWCP_ROUND;
         let _ = DwmSetWindowAttribute(
             hwnd,
@@ -397,7 +397,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 // Cambio de tema de Windows con Ajustes abierto: sin esto el marco de DWM
                 // (y su borde) se quedaba con el tema anterior.
                 if let Some(st) = ptr.as_ref() {
-                    let dark = is_dark(st.cfg.borrow().ui.theme, crate::window::system_uses_dark_mode());
+                    let dark = is_dark(crate::shared_theme::effective(&st.cfg.borrow().ui).0, crate::window::system_uses_dark_mode());
                     crate::window::apply_dark_mode(hwnd, dark);
                     invalidate(hwnd);
                 }
@@ -863,9 +863,9 @@ fn handle_click(hwnd: HWND, st: &mut State, x: f32, y: f32) {
         Hit::EditConfig => (st.on_open_path)(notty_config::default_path()),
         Hit::Link(action) => run_link(st, hwnd, action),
         Hit::Toggle(key) => {
+            // Por `set_value`: «Seguir el tema de essentials» también cambia el tema.
             let v = !model::current_bool(&st.cfg.borrow(), key);
-            model::apply(&mut st.cfg.borrow_mut(), key, SettingValue::Bool(v));
-            save_and_notify(st);
+            set_value(st, hwnd, key, SettingValue::Bool(v));
         }
         Hit::Choice(key, j) => {
             if let Some((_, v)) = model::options_for(key).get(j as usize) {
@@ -1016,21 +1016,31 @@ fn run_link(st: &mut State, hwnd: HWND, action: LinkAction) {
     }
 }
 
-/// Aplica un valor elegido (selector, tarjeta, fuente) y, si cambió el tema, arranca
-/// el fundido y avisa a DWM para que el marco nativo lo siga.
+/// Aplica un valor elegido (selector, tarjeta, fuente, interruptor) y, si cambió el tema
+/// o el acento que se ve, arranca el fundido y avisa a DWM para que el marco lo siga.
+/// Siguiendo a essentials, el tema o el acento elegidos se le escriben también a él.
 fn set_value(st: &mut State, hwnd: HWND, key: SettingKey, value: SettingValue) {
-    let system_dark = crate::window::system_uses_dark_mode();
-    let was_dark = is_dark(st.cfg.borrow().ui.theme, system_dark);
-    let was_accent = st.cfg.borrow().ui.accent;
+    let (was_theme, was_accent) = crate::shared_theme::effective(&st.cfg.borrow().ui);
+    let was_dark = is_dark(was_theme, crate::window::system_uses_dark_mode());
     model::apply(&mut st.cfg.borrow_mut(), key, value);
+    match value {
+        SettingValue::Theme(t) => crate::shared_theme::push(&st.cfg.borrow().ui, Some(t), None),
+        SettingValue::AccentColor(c) => crate::shared_theme::push(&st.cfg.borrow().ui, None, Some(c)),
+        _ => {}
+    }
     save_and_notify(st);
-    let now_dark = is_dark(st.cfg.borrow().ui.theme, system_dark);
+    start_theme_fade(st, hwnd, was_dark, was_accent);
+}
+
+/// Fundido de 350 ms desde lo que se veía (`was_*`) hasta el tema/acento efectivos.
+fn start_theme_fade(st: &mut State, hwnd: HWND, was_dark: bool, was_accent: notty_config::AccentColor) {
+    let (theme, accent) = crate::shared_theme::effective(&st.cfg.borrow().ui);
+    let now_dark = is_dark(theme, crate::window::system_uses_dark_mode());
     if now_dark != was_dark {
         st.theme_from = Some((was_dark, Instant::now()));
         unsafe { crate::window::apply_dark_mode(hwnd, now_dark) };
     }
-    let now_accent = st.cfg.borrow().ui.accent;
-    if now_accent != was_accent {
+    if accent != was_accent {
         st.accent_from = Some((was_accent, Instant::now()));
     }
 }
@@ -1166,8 +1176,8 @@ fn paint(st: &mut State) {
     let now = Instant::now();
     st.hits.clear();
     let system_dark = crate::window::system_uses_dark_mode();
-    let accent = st.cfg.borrow().ui.accent;
-    let dark = is_dark(st.cfg.borrow().ui.theme, system_dark);
+    let (theme_now, accent) = crate::shared_theme::effective(&st.cfg.borrow().ui);
+    let dark = is_dark(theme_now, system_dark);
     let (from_dark, t_theme) = match st.theme_from {
         Some((from_dark, t0)) if st.animations_enabled => {
             (from_dark, crate::ease_out_cubic((now.saturating_duration_since(t0).as_secs_f32() / (THEME_MS as f32 / 1000.0)).clamp(0.0, 1.0)))

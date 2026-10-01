@@ -203,6 +203,10 @@ pub struct UiConfig {
     pub md_open_mode: MdOpenMode,
     /// Ajustes → Archivos → qué mecanismo de Previsualización usa un `.md`.
     pub md_preview_style: MdPreviewStyle,
+    /// Ajustes → Apariencia → «Seguir el tema de essentials»: con
+    /// `%APPDATA%\essentials\appearance.toml` (`shared = true`), su tema y su acento
+    /// mandan sobre `theme`/`accent` (que no se tocan). Ver `notty_ui::shared_theme`.
+    pub follow_essentials: bool,
 }
 
 /// Tamaño de ventana con el que arranca notty la primera vez, y al que vuelve
@@ -241,6 +245,7 @@ impl Default for UiConfig {
             reduced_motion: false,
             md_open_mode: MdOpenMode::default(),
             md_preview_style: MdPreviewStyle::default(),
+            follow_essentials: true,
         };
         let preset = ui.preset;
         crate::apply_preset(&mut ui, preset);

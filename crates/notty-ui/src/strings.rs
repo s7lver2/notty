@@ -485,6 +485,9 @@ const TABLE: &[(&str, &str)] = &[
     ("Abrir en essentials", "Open in essentials"),
     ("essentials no está instalado", "essentials isn't installed"),
     ("Volver a gestionar yo las actualizaciones", "Manage updates myself again"),
+    // --- settings_pages.rs: Apariencia, tema compartido con essentials ---
+    ("Seguir el tema de essentials", "Follow the essentials theme"),
+    ("Usa el tema y el color de acento de essentials; cambiarlos aquí también los cambia allí.", "Uses the essentials theme and accent color; changing them here changes them there too."),
 ];
 
 /// Traduce `es` a `lang`. Si `lang` es `Es`, o no hay traducción en la tabla,

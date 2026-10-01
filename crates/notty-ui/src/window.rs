@@ -187,6 +187,8 @@ impl WindowState {
     /// `Visible`/`Hidden` según `menu_visible` sin tocar la config en disco.
     fn render_ui(&self) -> notty_config::UiConfig {
         let mut ui = self.cfg.borrow().ui;
+        // Siguiendo a essentials, su tema y su acento en vez de los propios.
+        (ui.theme, ui.accent) = crate::shared_theme::effective(&ui);
         if ui.menubar == notty_config::MenuBar::Alt {
             ui.menubar =
                 if self.menu_visible { notty_config::MenuBar::Visible } else { notty_config::MenuBar::Hidden };
@@ -196,7 +198,7 @@ impl WindowState {
 
     /// Contexto de dibujo que no vive en `Workspace`/`UiConfig`.
     fn view_state(&self, hwnd: HWND) -> crate::ViewState {
-        let dark = crate::is_dark(self.cfg.borrow().ui.theme, system_uses_dark_mode());
+        let dark = crate::is_dark(self.render_ui().theme, system_uses_dark_mode());
         let maximized = unsafe { IsZoomed(hwnd).as_bool() };
         crate::ViewState {
             dark,
@@ -902,7 +904,7 @@ fn open_settings_at(w: &WindowState, hwnd: HWND, section: &str) {
         hwnd,
         cfg_for_settings,
         Box::new(move || unsafe {
-            let dark = crate::is_dark(cfg_for_theme.borrow().ui.theme, system_uses_dark_mode());
+            let dark = crate::is_dark(crate::shared_theme::effective(&cfg_for_theme.borrow().ui).0, system_uses_dark_mode());
             apply_dark_mode(hwnd, dark);
             // Por si el cambio fue la fuente del editor (Ajustes → Apariencia): se
             // reaplica siempre, es barato comparado con abrir Ajustes en sí, y así no
@@ -1730,6 +1732,7 @@ fn run_inner(
     };
 
     crate::anim::configure(&cfg.ui);
+    crate::shared_theme::reload();
     let run_lang = crate::lang::resolve(cfg.ui.lang);
     let broken_label = crate::strings::tr(run_lang, "config.toml roto");
     let title = match (path, &broken_msg) {
@@ -1801,7 +1804,7 @@ fn run_inner(
             );
         }
 
-        let dark = crate::is_dark(cfg.ui.theme, system_uses_dark_mode());
+        let dark = crate::is_dark(crate::shared_theme::effective(&cfg.ui).0, system_uses_dark_mode());
         setup_chrome(hwnd, dark);
 
         let mut ws = crate::Workspace::new();
@@ -1931,7 +1934,7 @@ fn run_inner(
                     hwnd,
                     cfg_for_welcome,
                     Box::new(move || {
-                        let dark = crate::is_dark(cfg_for_theme.borrow().ui.theme, system_uses_dark_mode());
+                        let dark = crate::is_dark(crate::shared_theme::effective(&cfg_for_theme.borrow().ui).0, system_uses_dark_mode());
                         apply_dark_mode(hwnd, dark);
                         let _ = InvalidateRect(Some(hwnd), None, false);
                     }),
@@ -2115,7 +2118,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         w.resize_mode = false;
                         w.renderer.set_panes(crate::PaneView::default());
                     }
-                    let dark =crate::is_dark(w.cfg.borrow().ui.theme, system_uses_dark_mode());
+                    let dark = crate::is_dark(ui.theme, system_uses_dark_mode());
                     if let Some(prev) = w.last_dark {
                         if prev != dark {
                             let from = match w.theme_anim {
@@ -2135,7 +2138,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         }
                     }
                     w.last_dark = Some(dark);
-                    let accent = w.cfg.borrow().ui.accent;
+                    let accent = ui.accent;
                     if let Some(prev) = w.last_accent {
                         if prev != accent {
                             let from = match w.accent_anim {
@@ -2372,7 +2375,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 // "ImmersiveColorSet": el usuario cambió el tema claro/oscuro de Windows
                 // mientras notty (en `Theme::System`) seguía abierto.
                 if let Some(w) = ptr.as_mut() {
-                    let dark = crate::is_dark(w.cfg.borrow().ui.theme, system_uses_dark_mode());
+                    let dark = crate::is_dark(w.render_ui().theme, system_uses_dark_mode());
                     apply_dark_mode(hwnd, dark);
                     let _ = InvalidateRect(Some(hwnd), None, false);
                 }

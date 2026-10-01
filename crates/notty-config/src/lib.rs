@@ -1,8 +1,11 @@
 //! notty-config: config.toml, presets y guardado. Sin nada de Windows.
 
+mod appearance;
 mod model;
 mod preset;
 mod storage;
+
+pub use appearance::{appearance_path, read_appearance, write_appearance};
 
 pub use model::{
     AccentColor, Config, DEFAULT_WIN_H, DEFAULT_WIN_W, Files, FilesConfig, FontFamily, HotkeyConfig, HotkeyMechanism,

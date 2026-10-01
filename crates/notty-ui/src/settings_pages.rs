@@ -392,6 +392,10 @@ fn apariencia(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     y = label(ui, x, y, w, "Color de acento") + 8.0;
     let sel = model::selected_index(cfg, SettingKey::AccentColor, model::ACCENT_OPTS);
     y = cards(ui, x, y, w, SettingKey::AccentColor, sel, accent_thumb) + 16.0;
+    if crate::shared_theme::file_exists() {
+        let desc = "Usa el tema y el color de acento de essentials; cambiarlos aquí también los cambia allí.";
+        y = toggle_row(ui, x, y, w, cfg, SettingKey::FollowEssentials, "Seguir el tema de essentials", desc) + 16.0;
+    }
     blk_end(ui);
 
     blk(ui, d, 5);

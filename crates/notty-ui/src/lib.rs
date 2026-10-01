@@ -30,6 +30,7 @@ pub mod syntax;
 pub mod splits;
 pub mod settings_model;
 pub mod settings_window;
+mod shared_theme;
 mod settings_pages;
 mod settings_ui;
 pub mod step_rail;
