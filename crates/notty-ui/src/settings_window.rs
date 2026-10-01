@@ -121,7 +121,7 @@ struct State {
     preview: Preview,
     syn_pick: usize,
     syn_pick_at: Instant,
-    /// «Abrir en essentials» falló (no hay `essentials.exe` registrado).
+    /// essentials no está instalado (o «Abrir en essentials» falló).
     essentials_missing: bool,
 }
 
@@ -292,7 +292,7 @@ pub fn open(
             preview: Preview::default(),
             syn_pick: 0,
             syn_pick_at: Instant::now(),
-            essentials_missing: false,
+            essentials_missing: !crate::essentials_install::installed(),
         });
         if start_page == Page::Fuentes {
             state.fonts = state.renderer.monospace_families();
@@ -1016,15 +1016,8 @@ fn run_link(st: &mut State, hwnd: HWND, action: LinkAction) {
             save_and_notify(st);
         }
         LinkAction::OpenEssentials => st.essentials_missing = !open_essentials(hwnd),
-        LinkAction::UnmanageUpdates => {
-            st.cfg.borrow_mut().updates.managed_by = None;
-            let _ = notty_config::save_as_is(&st.cfg.borrow(), &notty_config::default_path());
-            st.essentials_missing = false;
-            // Vuelve a entrar la página normal de Actualizaciones.
-            st.page_enter = Instant::now();
-            ensure_anim_timer(st, hwnd);
-            (st.on_change)();
-        }
+        LinkAction::InstallEssentials => crate::essentials_install::start(),
+        LinkAction::CancelEssentials => crate::essentials_install::cancel(),
     }
 }
 
@@ -1256,7 +1249,6 @@ fn paint(st: &mut State) {
         inputs: &st.inputs,
         focus: st.focus,
         caret_on,
-        update: &update,
         preview: &st.preview,
         syn_pick: st.syn_pick,
         syn_pick_at: st.syn_pick_at,

@@ -92,13 +92,12 @@ pub(crate) struct PageData<'a> {
     pub inputs: &'a Inputs,
     pub focus: Option<InputId>,
     pub caret_on: bool,
-    pub update: &'a UpdateInfo,
     pub preview: &'a Preview,
     pub system_dark: bool,
     /// Lenguaje de la vista previa de Sintaxis (índice en `syntax::LANGS`) y cuándo se eligió.
     pub syn_pick: usize,
     pub syn_pick_at: Instant,
-    /// «Abrir en essentials» falló: la tarjeta gestionada enseña el aviso y la salida.
+    /// essentials no está instalado: Actualizaciones ofrece instalarlo.
     pub essentials_missing: bool,
 }
 
@@ -131,7 +130,7 @@ pub(crate) fn has_continuous_anim(d: &PageData) -> bool {
     match d.page {
         Page::Apariencia | Page::Archivos | Page::AtajoGlobal | Page::AcercaDe | Page::Ayuda => true,
         Page::Sintaxis => d.syn_pick_at.elapsed().as_millis() < 300,
-        Page::Actualizaciones => matches!(d.update.phase, UpdatePhase::Checking | UpdatePhase::Downloading(..) | UpdatePhase::Found),
+        Page::Actualizaciones => !matches!(crate::essentials_install::phase(), crate::essentials_install::Phase::Idle | crate::essentials_install::Phase::Error),
         _ => false,
     }
 }
@@ -343,13 +342,6 @@ fn link_row(ui: &mut Ui, x: f32, y: f32, w: f32, hit: Hit, title: &str, desc: &s
     ui.pop_xf();
     // El texto mono de una línea no cuenta en `row`: se garantiza el alto mínimo.
     if mono_desc { g.rect.bottom.max(y + 59.0) } else { g.rect.bottom }
-}
-
-fn bullets_dot(ui: &Ui, x: f32, y: f32, s: &str, w: f32, c: Rgba) -> f32 {
-    ui.text("•", 12.0, false, Rect::new(x, y, x + 10.0, y + 18.0), c);
-    let h = ui.r.measure_wrapped(s, &ui.font(12.0, false), w - 12.0, Some(18.0)).max(18.0);
-    ui.r.text_wrapped(s, &ui.font(12.0, false), Rect::new(x + 12.0, y, x + w, y + h), c, Some(18.0));
-    h
 }
 
 fn millis(d: &PageData, now: Instant) -> f32 {
@@ -1774,17 +1766,12 @@ fn atajo(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
 
 // --- Actualizaciones ------------------------------------------------------------------
 
-/// Actualizaciones cuando las gestiona essentials (`[updates] managed_by`): la misma
-/// tarjeta de estado que la de siempre (de abajo), con «Abrir en essentials» y, si
-/// essentials no está, el aviso en `danger` y «Volver a gestionar yo…».
+/// Actualizaciones con essentials instalado: la tarjeta de estado con «Abrir en essentials».
 fn managed_card(ui: &mut Ui, d: &PageData, x: f32, y: f32, w: f32) -> f32 {
     let pal = ui.pal;
     blk(ui, d, 1);
-    let (sub, sub_c, label, primary, hit) = if d.essentials_missing {
-        (ui.tr("essentials no está instalado"), pal.danger, ui.tr("Volver a gestionar yo las actualizaciones"), false, Hit::Link(LinkAction::UnmanageUpdates))
-    } else {
-        (ui.tr("Las actualizaciones de notty se instalan desde la tienda."), pal.text_2, ui.tr("Abrir en essentials"), true, Hit::Link(LinkAction::OpenEssentials))
-    };
+    let (sub, sub_c, label, primary, hit) =
+        (ui.tr("Las actualizaciones de notty se instalan desde la tienda."), pal.text_2, ui.tr("Abrir en essentials"), true, Hit::Link(LinkAction::OpenEssentials));
     let bw = ui.button_w(label, primary);
     let text_x = x + 22.0 + 56.0 + 18.0;
     let text_w = (x + w - 22.0 - bw - 18.0 - text_x).max(80.0);
@@ -1804,193 +1791,59 @@ fn managed_card(ui: &mut Ui, d: &PageData, x: f32, y: f32, w: f32) -> f32 {
 }
 
 fn actualizaciones(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
-    let cfg = d.cfg;
-    let pal = ui.pal;
-    let up = d.update;
-    let version = crate::app_version();
-    let newv = up.new_version.clone().unwrap_or_default();
     blk(ui, d, 0);
-    let mut y = header(ui, x, top, w, "Actualizaciones", "") + 14.0;
+    let y = header(ui, x, top, w, "Actualizaciones", "") + 14.0;
     blk_end(ui);
-    if cfg.updates.managed() {
-        return managed_card(ui, d, x, y, w);
-    }
+    // Desde la 1.1 las actualizaciones de notty las instala essentials.
+    if d.essentials_missing { install_card(ui, d, x, y, w) } else { managed_card(ui, d, x, y, w) }
+}
 
-    let (headline, sub): (String, String) = match &up.phase {
-        UpdatePhase::Idle if up.up_to_date => (ui.tr("notty está al día").to_string(), ui.tr("Tienes la última versión publicada.").to_string()),
-        UpdatePhase::Idle => (ui.tr("Sin comprobar en esta sesión").to_string(), ui.tr("Busca cuando quieras: se consultan las releases de GitHub.").to_string()),
-        UpdatePhase::Checking => (ui.tr("Buscando…").to_string(), ui.tr("Consultando las releases de GitHub.").to_string()),
-        UpdatePhase::Found => (format!("{}: {newv}", ui.tr("Hay una versión nueva")), format!("{version} → {newv}")),
-        UpdatePhase::Downloading(..) => (format!("{} {newv}", ui.tr("Descargando")), ui.tr("Se verifica la firma al terminar.").to_string()),
-        UpdatePhase::Error(e) => (
-            if up.new_version.is_some() { ui.tr("No se pudo actualizar").to_string() } else { ui.tr("No se pudo comprobar").to_string() },
-            crate::strings::tr_msg(ui.lang, e),
-        ),
-    };
-    let has_new = matches!(up.phase, UpdatePhase::Found | UpdatePhase::Downloading(..));
-    let phase_id: u8 = match up.phase {
-        UpdatePhase::Idle => 0,
-        UpdatePhase::Checking => 1,
-        UpdatePhase::Found => 2,
-        UpdatePhase::Downloading(..) => 3,
-        UpdatePhase::Error(_) => 4,
-    };
-
+/// Actualizaciones sin essentials: «Instala essentials para recibir actualizaciones» y,
+/// mientras se descarga su instalador, la barra de progreso de la tarjeta de siempre.
+fn install_card(ui: &mut Ui, d: &PageData, x: f32, y: f32, w: f32) -> f32 {
+    use crate::essentials_install::Phase;
+    let pal = ui.pal;
+    let phase = crate::essentials_install::phase();
     blk(ui, d, 1);
-    // Botones a la derecha.
-    let (btn_label, primary, enabled, hit) = match up.phase {
-        UpdatePhase::Found => (ui.tr("Descargar e instalar"), true, true, Hit::Link(LinkAction::DownloadUpdate)),
-        UpdatePhase::Downloading(..) => ("", false, false, Hit::None),
-        UpdatePhase::Checking => (ui.tr("Buscar actualizaciones"), false, false, Hit::Link(LinkAction::CheckUpdatesNow)),
-        _ => (ui.tr("Buscar actualizaciones"), false, true, Hit::Link(LinkAction::CheckUpdatesNow)),
+    let (head, sub, sub_c, label, primary, hit) = match phase {
+        Phase::Downloading(..) => ("Descargando essentials", "Al terminar se abre su instalador.", pal.text_2, "Cancelar", false, LinkAction::CancelEssentials),
+        Phase::Opening(_) => ("Abriendo el instalador…", "Sigue los pasos de essentials.", pal.text_2, "", false, LinkAction::InstallEssentials),
+        Phase::Error => ("Instala essentials para recibir actualizaciones", "No se pudo descargar.", pal.danger, "Reintentar", true, LinkAction::InstallEssentials),
+        Phase::Idle => ("Instala essentials para recibir actualizaciones", "Mientras no la instales, notty no se actualiza.", pal.text_2, "Instalar essentials", true, LinkAction::InstallEssentials),
     };
-    let bw = if btn_label.is_empty() { 0.0 } else { ui.button_w(btn_label, primary) };
+    let label = if label.is_empty() { "" } else { ui.tr(label) };
+    let bw = if label.is_empty() { 0.0 } else { ui.button_w(label, primary) };
     let text_x = x + 22.0 + 56.0 + 18.0;
     let text_w = (x + w - 22.0 - bw - 18.0 - text_x).max(80.0);
-    let sub_h = ui.r.measure_wrapped(&sub, &ui.font(12.0, false), text_w, Some(DESC_LH)).max(DESC_LH);
-    let head_h = (22.0 + 3.0 + sub_h).max(56.0);
-    let bar_h = if matches!(up.phase, UpdatePhase::Downloading(..)) { 14.0 + 6.0 + 6.0 + 16.0 } else { 0.0 };
-    let card = Rect::new(x, y, x + w, y + 40.0 + head_h + bar_h);
+    let head_h = 56.0;
+    let bar = matches!(phase, Phase::Downloading(..));
+    let card = Rect::new(x, y, x + w, y + 40.0 + head_h + if bar { 42.0 } else { 0.0 });
     ui.r.fill_round(card, 10.0, ui.row_c(0.0));
-    let icy = card.top + 20.0 + head_h / 2.0;
     let icx = x + 22.0 + 28.0;
-    let (ibg, ifg) = match up.phase {
-        UpdatePhase::Idle if up.up_to_date => (pal.ok.faded(0.14), pal.ok),
-        UpdatePhase::Idle => (pal.hover, pal.text_2),
-        UpdatePhase::Error(_) => (pal.danger.faded(0.14), pal.danger),
-        _ => (pal.accent_soft, pal.accent),
-    };
-    if matches!(up.phase, UpdatePhase::Found) && ui.anim() {
-        let p = (millis(d, ui.now) % 1600.0) / 1600.0;
-        let rr = 28.0 + 16.0 * Curve::Out.apply(p);
-        ui.r.fill_circle(icx, icy, rr, pal.accent.faded(0.45 * (1.0 - p)));
+    let icy = card.top + 20.0 + head_h / 2.0;
+    let err = phase == Phase::Error;
+    ui.r.fill_circle(icx, icy, 28.0, if err { pal.danger.faded(0.14) } else { pal.accent_soft });
+    ui.icon(if bar { icon::DESCARGA } else { crate::render::ESSENTIALS_ICON }, icx, icy, 24.0, 2.0, if err { pal.danger } else { pal.accent });
+    let ty = card.top + 20.0 + (head_h - 22.0 - 3.0 - DESC_LH) / 2.0;
+    ui.text(ui.tr(head), 16.0, true, Rect::new(text_x, ty, text_x + text_w, ty + 22.0), pal.text);
+    ui.text(ui.tr(sub), 12.0, false, Rect::new(text_x, ty + 25.0, text_x + text_w, ty + 25.0 + DESC_LH), sub_c);
+    if !label.is_empty() {
+        ui.button(Rect::new(x + w - 22.0 - bw, icy - 16.0, x + w - 22.0, icy + 16.0), label, primary, true, Hit::Link(hit));
     }
-    ui.r.fill_circle(icx, icy, 28.0, ibg);
-    let pop = ui.tw.from_to(TK::Preview(70 + phase_id), 0.0, 1.0, 450, Curve::Spring, ui.now);
-    let c = Vector2 { X: icx, Y: icy };
-    match up.phase {
-        UpdatePhase::Checking => {
-            let ang = if ui.anim() { (millis(d, ui.now) % 900.0) / 900.0 * 360.0 } else { 0.0 };
-            ui.push_xf(Matrix3x2::rotation_around(ang, c));
-            ui.icon(icon::GIRO, icx, icy, 24.0, 2.0, ifg);
-            ui.pop_xf();
-        }
-        _ => {
-            let d_icon = match up.phase {
-                UpdatePhase::Idle if up.up_to_date => icon::CHECK,
-                UpdatePhase::Idle => icon::ACTUALIZAR,
-                UpdatePhase::Error(_) => icon::CRUZ,
-                _ => icon::DESCARGA,
-            };
-            let s = 0.4 + 0.6 * pop;
-            ui.push_xf(Matrix3x2::scale_around(s, s, c));
-            ui.push_fade(pop.clamp(0.0, 1.0));
-            ui.icon(d_icon, icx, icy, 24.0, 2.0, ifg);
-            ui.pop_fade();
-            ui.pop_xf();
-        }
-    }
-    let ty = card.top + 20.0 + (head_h - 22.0 - 3.0 - sub_h) / 2.0;
-    ui.text(&headline, 16.0, true, Rect::new(text_x, ty, text_x + text_w, ty + 22.0), pal.text);
-    ui.r.text_wrapped(&sub, &ui.font(12.0, false), Rect::new(text_x, ty + 25.0, text_x + text_w, ty + 25.0 + sub_h), pal.text_2, Some(DESC_LH));
-    if !btn_label.is_empty() {
-        let br = Rect::new(x + w - 22.0 - bw, icy - 16.0, x + w - 22.0, icy + 16.0);
-        let bp = ui.tw.from_to(TK::Preview(80 + phase_id), 0.0, 1.0, 450, Curve::Spring, ui.now);
-        let bc = Vector2 { X: br.left + bw / 2.0, Y: icy };
-        let s = 0.4 + 0.6 * bp;
-        ui.push_xf(Matrix3x2::scale_around(s, s, bc));
-        ui.push_fade(bp.clamp(0.0, 1.0));
-        ui.button(br, btn_label, primary, enabled, hit);
-        ui.pop_fade();
-        ui.pop_xf();
-    }
-    if let UpdatePhase::Downloading(done, total) = up.phase {
+    if let Phase::Downloading(done, total) = phase {
         let pct = if total > 0 { (done as f32 / total as f32).clamp(0.0, 1.0) } else { 0.0 };
-        let pv = ui.tween(TK::Preview(90), pct, 120, Curve::Linear);
+        let pv = ui.tween(TK::Preview(91), pct, 120, Curve::Linear);
         let by = card.top + 20.0 + head_h + 14.0;
         let track = Rect::new(text_x, by, x + w - 22.0, by + 6.0);
         ui.r.fill_round(track, 3.0, pal.cmd);
-        let fill = Rect::new(track.left, track.top, track.left + track.width() * pv, track.bottom);
-        ui.r.fill_round(fill, 3.0, pal.accent);
-        if ui.anim() && fill.width() > 2.0 {
-            // Brillo que recorre la barra.
-            ui.r.push_clip(fill);
-            let p = (millis(d, ui.now) % 1200.0) / 1200.0;
-            let sw = fill.width() * 0.4;
-            let sx = fill.left - sw + (fill.width() + sw) * p;
-            for k in 0..6 {
-                let a = 0.25 * (1.0 - (k as f32 - 2.5).abs() / 3.0);
-                let seg = sw / 6.0;
-                ui.r.fill(Rect::new(sx + seg * k as f32, fill.top, sx + seg * (k + 1) as f32, fill.bottom), Rgba(1.0, 1.0, 1.0, a));
-            }
-            ui.r.pop_clip();
-        }
+        ui.r.fill_round(Rect::new(track.left, track.top, track.left + track.width() * pv, track.bottom), 3.0, pal.accent);
         let fm = ui.mono(ui.r.mono_family(), 11.0);
-        ui.r.text("notty-setup.exe", &fm, Rect::new(track.left, by + 12.0, track.right, by + 28.0), pal.text_2);
-        let label = if total > 0 { format!("{} %", (pct * 100.0).round() as u32) } else { format!("{} KB", done / 1024) };
-        ui.r.text_right(&label, &fm, Rect::new(track.left, by + 12.0, track.right, by + 28.0), pal.text_2);
+        let row = Rect::new(track.left, by + 12.0, track.right, by + 28.0);
+        ui.r.text(&format!("github.com/{}", notty_update::ESSENTIALS_REPO), &fm, row, pal.text_2);
+        ui.r.text_right(&format!("{} %", (pct * 100.0).round() as u32), &fm, row, pal.text_2);
     }
-    y = card.bottom + 14.0;
     blk_end(ui);
-
-    if has_new {
-        blk(ui, d, 2);
-        let bullets = model::release_bullets(&up.notes, 6, ui.lang);
-        let mut bh = 0.0;
-        for b in &bullets {
-            bh += ui.r.measure_wrapped(b, &ui.font(12.0, false), w - 44.0 - 12.0, Some(18.0)).max(18.0) + 4.0;
-        }
-        let nc = Rect::new(x, y, x + w, y + 16.0 + 20.0 + 10.0 + bh + (if up.release_url.is_some() { 24.0 } else { 0.0 }) + 12.0);
-        ui.r.fill_round(nc, 10.0, pal.accent.faded(0.35));
-        ui.r.fill_round(Rect::new(nc.left + 1.0, nc.top + 1.0, nc.right - 1.0, nc.bottom - 1.0), 9.0, ui.row_c(0.0));
-        let mut ny = nc.top + 16.0;
-        ui.text(&format!("{} v{newv}", ui.tr("Novedades de")), 13.0, true, Rect::new(x + 22.0, ny, x + w - 22.0, ny + 20.0), pal.text);
-        ny += 30.0;
-        if bullets.is_empty() {
-            ui.text(ui.tr("Esta versión no trae notas."), 12.0, false, Rect::new(x + 22.0, ny, x + w - 22.0, ny + 18.0), pal.text_2);
-        }
-        for (j, b) in bullets.iter().enumerate() {
-            item(ui, d, j + 3);
-            ny += bullets_dot(ui, x + 22.0, ny, b, w - 44.0, ui.text_soft()) + 4.0;
-            ui.end_enter();
-        }
-        if up.release_url.is_some() {
-            ui.more(x + 22.0, ny + 10.0, ui.tr("Ver todas las notas en GitHub"), Hit::Link(LinkAction::ReleaseNotes));
-        }
-        y = nc.bottom + 14.0;
-        blk_end(ui);
-    }
-
-    blk(ui, d, 3);
-    item(ui, d, 0);
-    y = toggle_row(ui, x, y, w, cfg, SettingKey::UpdatesCheck, "Buscar al abrir notty", "Una vez al día contra GitHub Releases. Nunca se activa solo.") + 4.0;
-    ui.end_enter();
-    item(ui, d, 1);
-    let desc = "Cada instalador se comprueba con Ed25519 antes de ejecutarse.";
-    let siempre = ui.tr("Siempre");
-    let sw = ui.measure(siempre, 12.0, false) + 20.0;
-    let g = row(ui, x, y, w, Hit::None, 0.0, desc, sw, 18.0);
-    title_desc(ui, g.text_x, text_y(&g, desc, ui), g.text_w, "Firma verificada", desc);
-    let cy = g.ctrl.top + 9.0;
-    ui.icon(icon::ESCUDO, g.ctrl.left + 7.0, cy, 14.0, 2.0, pal.ok);
-    ui.text(siempre, 12.0, false, Rect::new(g.ctrl.left + 20.0, cy - 9.0, g.ctrl.right + 4.0, cy + 9.0), pal.ok);
-    y = g.rect.bottom + 14.0;
-    ui.end_enter();
-    blk_end(ui);
-
-    blk(ui, d, 4);
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    let a = ui.tr("Versión instalada ");
-    let aw = ui.measure(a, 12.0, false);
-    ui.text(a, 12.0, false, Rect::new(x, y, x + aw + 2.0, y + 18.0), pal.text_3);
-    let fm = ui.mono(ui.r.mono_family(), 12.0);
-    let vw = ui.r.measure(version, &fm);
-    ui.r.text(version, &fm, Rect::new(x + aw, y, x + aw + vw + 2.0, y + 18.0), pal.text_2);
-    let last = format!("{}: {}", ui.tr("Última comprobación"), model::relative_time(now, cfg.updates.last_check, ui.lang));
-    ui.text(&last, 12.0, false, Rect::new(x + aw + vw + 16.0, y, x + w, y + 18.0), pal.text_3);
-    y += 18.0;
-    blk_end(ui);
-    y
+    card.bottom
 }
 
 // --- Acerca de ----------------------------------------------------------------------
@@ -2033,13 +1886,8 @@ fn acerca(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     let vr = Rect::new(tx, card.top + 90.0, tx + vw, card.top + 110.0);
     ui.r.fill_round(vr, 10.0, pal.accent_soft);
     ui.r.text_center(&ver, &fm, vr, pal.accent);
-    let (st_txt, st_c) = match (&d.update.phase, d.update.up_to_date, &d.update.new_version) {
-        _ if d.cfg.updates.managed() => (ui.tr("Gestionado por essentials").to_string(), pal.text_2),
-        (UpdatePhase::Found, _, Some(v)) => (format!("{}: {v}", ui.tr("Hay una versión nueva")), pal.accent),
-        (UpdatePhase::Checking, _, _) => (ui.tr("Buscando actualizaciones…").to_string(), pal.text_2),
-        (_, true, _) => (ui.tr("Al día").to_string(), pal.ok),
-        _ => (ui.tr("Buscar actualizaciones").to_string(), pal.text_2),
-    };
+    let st_txt = ui.tr(if d.essentials_missing { "Instala essentials" } else { "Gestionado por essentials" }).to_string();
+    let st_c = pal.text_2;
     let sw = ui.measure(&st_txt, 11.5, false) + 22.0;
     let sr = Rect::new(vr.right + 8.0, vr.top, vr.right + 8.0 + sw, vr.bottom);
     let hit = Hit::Go(Page::Actualizaciones);

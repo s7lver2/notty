@@ -8,10 +8,12 @@
 #   & tools\shot-settings.ps1 -Out b.png -ProcId $id [-Main] [-KeepOpen] # otra captura de ese notty
 # Pasos (en orden, sobre la ventana de Ajustes): 'click:x,y' (DIPs), 'key:VK' (decimal), 'wait:ms'.
 # -MainKeys: teclas (sintaxis SendKeys) a la ventana principal antes de abrir Ajustes.
+# -MainSteps: pasos como -Steps, pero sobre la ventana principal (antes de abrir Ajustes).
 param(
   [Parameter(Mandatory)] [string]$Out,
   [string[]]$Steps = @(),
   [string[]]$MainKeys = @(),
+  [string[]]$MainSteps = @(),
   [switch]$Main,
   [switch]$KeepOpen,
   [int]$ProcId = 0
@@ -77,6 +79,27 @@ function Focus([IntPtr]$h) {
   }
   Write-Warning 'No se consiguió el foco de forma fiable; la captura puede salir tapada.'
 }
+function Run-Steps([IntPtr]$h, [string[]]$list) {
+  $scale = [NottySet]::GetDpiForWindow($h) / 96.0
+    foreach ($s in $list) {
+      $kind, $arg = $s -split ':', 2
+      switch ($kind) {
+        'click' {
+          $x, $y = $arg -split ',' | ForEach-Object { [double]$_ }
+          $l = [IntPtr](([int]($y * $scale) -shl 16) -bor [int]($x * $scale))
+          [NottySet]::PostMessageW($h, 0x201, [IntPtr]1, $l) | Out-Null  # WM_LBUTTONDOWN
+          [NottySet]::PostMessageW($h, 0x202, [IntPtr]0, $l) | Out-Null  # WM_LBUTTONUP
+        }
+        'key' {
+          [NottySet]::PostMessageW($h, 0x100, [IntPtr][int]$arg, [IntPtr]0) | Out-Null  # WM_KEYDOWN
+          [NottySet]::PostMessageW($h, 0x101, [IntPtr][int]$arg, [IntPtr]0) | Out-Null  # WM_KEYUP
+        }
+        'wait' { Start-Sleep -Milliseconds ([int]$arg) }
+        default { throw "Paso desconocido: $s" }
+      }
+      Start-Sleep -Milliseconds 500
+    }
+}
 function Find-Settings([int]$procId) { [NottySet]::FindOf([uint32]$procId, 'NottySettingsClass') }
 
 if ($ProcId -eq 0) {
@@ -100,6 +123,7 @@ try {
   $mainH = $p.MainWindowHandle
   if ($mainH -eq 0) { throw 'notty no abrió ninguna ventana' }
   Start-Sleep -Milliseconds 400
+  Run-Steps $mainH $MainSteps
   foreach ($k in $MainKeys) {
     Focus $mainH
     [System.Windows.Forms.SendKeys]::SendWait($k)
@@ -123,24 +147,7 @@ try {
     }
     $scale = [NottySet]::GetDpiForWindow($h) / 96.0
     Write-Host "escala $scale"
-    foreach ($s in $Steps) {
-      $kind, $arg = $s -split ':', 2
-      switch ($kind) {
-        'click' {
-          $x, $y = $arg -split ',' | ForEach-Object { [double]$_ }
-          $l = [IntPtr](([int]($y * $scale) -shl 16) -bor [int]($x * $scale))
-          [NottySet]::PostMessageW($h, 0x201, [IntPtr]1, $l) | Out-Null  # WM_LBUTTONDOWN
-          [NottySet]::PostMessageW($h, 0x202, [IntPtr]0, $l) | Out-Null  # WM_LBUTTONUP
-        }
-        'key' {
-          [NottySet]::PostMessageW($h, 0x100, [IntPtr][int]$arg, [IntPtr]0) | Out-Null  # WM_KEYDOWN
-          [NottySet]::PostMessageW($h, 0x101, [IntPtr][int]$arg, [IntPtr]0) | Out-Null  # WM_KEYUP
-        }
-        'wait' { Start-Sleep -Milliseconds ([int]$arg) }
-        default { throw "Paso desconocido: $s" }
-      }
-      Start-Sleep -Milliseconds 500
-    }
+    Run-Steps $h $Steps
     $target = $h
   }
   Start-Sleep -Milliseconds 900   # que terminen la entrada de página y los fundidos (350 ms)

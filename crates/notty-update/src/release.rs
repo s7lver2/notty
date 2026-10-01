@@ -28,14 +28,20 @@ struct GhRelease {
 pub enum ReleaseError {
     #[error("JSON inválido: {0}")]
     InvalidJson(String),
-    #[error("faltan los assets notty-setup.exe / notty-setup.exe.sig")]
+    #[error("faltan los assets del instalador y su .sig")]
     MissingAssets,
 }
 
 pub fn parse_release(json: &str) -> Result<Release, ReleaseError> {
+    parse_release_with(json, "notty-setup.exe")
+}
+
+/// Como `parse_release`, pero con el instalador `setup` (y `setup.sig`) de otra app.
+pub fn parse_release_with(json: &str, setup: &str) -> Result<Release, ReleaseError> {
     let gh: GhRelease = serde_json::from_str(json).map_err(|e| ReleaseError::InvalidJson(e.to_string()))?;
-    let setup_url = gh.assets.iter().find(|a| a.name == "notty-setup.exe").map(|a| a.browser_download_url.clone());
-    let sig_url = gh.assets.iter().find(|a| a.name == "notty-setup.exe.sig").map(|a| a.browser_download_url.clone());
+    let sig = format!("{setup}.sig");
+    let setup_url = gh.assets.iter().find(|a| a.name == setup).map(|a| a.browser_download_url.clone());
+    let sig_url = gh.assets.iter().find(|a| a.name == sig).map(|a| a.browser_download_url.clone());
     let (setup_url, sig_url) = match (setup_url, sig_url) {
         (Some(s), Some(g)) => (s, g),
         _ => return Err(ReleaseError::MissingAssets),

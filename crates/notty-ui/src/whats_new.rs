@@ -40,7 +40,7 @@ pub const RELEASES: &[Release] = &[
             Item {
                 icon: Icon::Sparkle,
                 title: "Actualizaciones desde essentials",
-                desc: "Si tienes essentials, notty se actualiza desde la tienda. Lo verás en Ajustes → Actualizaciones.",
+                desc: "notty ya no se actualiza solo: instala essentials, la tienda de tus apps, y las versiones nuevas llegarán desde allí.",
             },
             Item {
                 icon: Icon::Sparkle,

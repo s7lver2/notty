@@ -175,6 +175,8 @@ struct WindowState {
     about_open: bool,
     /// Popup de Novedades abierto desde este instante (ver `crate::whats_new`).
     whats_new_opened: Option<std::time::Instant>,
+    /// Aviso «Instalar essentials» abierto desde este instante (ver `crate::essentials_install`).
+    essentials_notice: Option<std::time::Instant>,
     /// Cuándo se copió la ruta por última vez (aviso de 1,8 s).
     path_copied_at: Option<std::time::Instant>,
     /// Aviso breve en la barra de estado (texto y cuándo apareció), ver `show_notice`.
@@ -1155,6 +1157,15 @@ fn ipc_tick(w: &mut WindowState, hwnd: HWND) -> bool {
     if download_tick(w) {
         changed = true;
     }
+    if crate::essentials_install::take_dirty() {
+        changed = true;
+        // Ajustes → Actualizaciones enseña la misma descarga.
+        if let Some(raw) = OPEN_SETTINGS_HWND.with(|c| c.get()) {
+            unsafe {
+                let _ = InvalidateRect(Some(HWND(raw as *mut _)), None, false);
+            }
+        }
+    }
     if manual_check_tick(w) {
         changed = true;
     }
@@ -1465,6 +1476,22 @@ fn maybe_show_whats_new(w: &mut WindowState, hwnd: HWND) {
     if show {
         open_whats_new(w, hwnd);
     }
+}
+
+/// Al arrancar sin essentials instalado (y no en el primer arranque, que es de la
+/// bienvenida): el aviso «Instalar essentials», en lugar de Novedades si coincidían.
+fn maybe_show_essentials_notice(w: &mut WindowState, hwnd: HWND) {
+    if !w.cfg.borrow().first_run_done || crate::essentials_install::installed() {
+        return;
+    }
+    w.whats_new_opened = None;
+    w.essentials_notice = Some(std::time::Instant::now());
+    ensure_anim_timer(w, hwnd);
+}
+
+/// Se puede cerrar el aviso (con «Ahora no», Esc o clic fuera) si no está descargando.
+fn essentials_notice_closable() -> bool {
+    matches!(crate::essentials_install::phase(), crate::essentials_install::Phase::Idle | crate::essentials_install::Phase::Error)
 }
 
 /// Contenido de "Acerca de notty": versión y enlace al repositorio (si `repo` no es
@@ -1907,6 +1934,7 @@ fn run_inner(
             tab_anims: Default::default(),
             about_open: false,
             whats_new_opened: None,
+            essentials_notice: None,
             path_copied_at: None,
             notice: None,
             swallow_char: false,
@@ -1933,6 +1961,7 @@ fn run_inner(
         // Recién actualizado: el popup de Novedades, una sola vez por versión.
         if let Some(w) = ptr.as_mut() {
             maybe_show_whats_new(w, hwnd);
+            maybe_show_essentials_notice(w, hwnd);
         }
 
         // Primer arranque: la ventana de bienvenida (no la del recorrido directamente,
@@ -2183,6 +2212,17 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         let r = crate::whats_new::release_for(crate::app_version())?;
                         Some(crate::WhatsNewView { version: r.version, items: r.items, opened, animate: w.animations_enabled })
                     }));
+                    if let crate::essentials_install::Phase::Opening(t) = crate::essentials_install::phase() {
+                        if t.elapsed() >= std::time::Duration::from_millis(2500) {
+                            crate::essentials_install::finish_opening();
+                            w.essentials_notice = None;
+                        }
+                    }
+                    w.renderer.set_essentials_notice(w.essentials_notice.map(|opened| crate::EssentialsNoticeView {
+                        opened,
+                        phase: crate::essentials_install::phase(),
+                        animate: w.animations_enabled,
+                    }));
                     w.renderer.set_path_copied(path_copied_progress(w));
                     w.renderer.set_notice(notice_progress(w));
                     if w.tour.is_some() {
@@ -2425,6 +2465,13 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     };
 
                     if handle_menu_key(w, hwnd, vk) {
+                        return LRESULT(0);
+                    }
+                    if w.essentials_notice.is_some() {
+                        if vk == 0x1B && essentials_notice_closable() {
+                            w.essentials_notice = None;
+                        }
+                        let _ = InvalidateRect(Some(hwnd), None, false);
                         return LRESULT(0);
                     }
                     if w.whats_new_opened.is_some() && (vk == 0x1B || vk == 0x0D) {
@@ -2718,6 +2765,18 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             Hit::CtxItem(j) => activate_menu_row(w, hwnd, j),
                             Hit::PopupBox => {}
                             _ => close_menus(w),
+                        }
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                        return LRESULT(0);
+                    }
+                    if w.essentials_notice.is_some() {
+                        match hit {
+                            Hit::EssentialsInstall | Hit::EssentialsRetry => crate::essentials_install::start(),
+                            Hit::EssentialsCancel => crate::essentials_install::cancel(),
+                            Hit::EssentialsLater => w.essentials_notice = None,
+                            Hit::PopupBox => {}
+                            _ if essentials_notice_closable() => w.essentials_notice = None,
+                            _ => {}
                         }
                         let _ = InvalidateRect(Some(hwnd), None, false);
                         return LRESULT(0);
@@ -3181,6 +3240,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             || w.accent_anim.is_some()
                             || tour_animating
                             || w.whats_new_opened.is_some()
+                            || w.essentials_notice.is_some()
                             || path_copied_progress(w).is_some()
                             || notice_progress(w).is_some();
                         if !still_animating {

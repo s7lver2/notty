@@ -36,8 +36,6 @@ pub(crate) mod icon {
     pub const FLECHA: &str = "M5 12h14M13 6l6 6-6 6";
     pub const EXTERNO: &str = "M14 4h6v6M20 4l-9 9M18 14v6H4V6h6";
     pub const DESCARGA: &str = "M12 4v11M7 10l5 5 5-5M5 20h14";
-    pub const GIRO: &str = "M21 12a9 9 0 1 1-9-9";
-    pub const ESCUDO: &str = "M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6zM9 12l2 2 4-4";
     pub const BORRADOR: &str = "M5 4h11l3 3v13H5zM8 4v5h7V4M8 20v-6h8v6";
     pub const GOTA: &str = "M12 3c3 4 6 7 6 11a6 6 0 0 1-12 0c0-4 3-7 6-11z";
     pub const CIRCULO: &str = "M3 12a9 9 0 1 0 18 0a9 9 0 1 0-18 0";

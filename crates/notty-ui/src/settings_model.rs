@@ -319,9 +319,10 @@ pub enum LinkAction {
     ResetWindowSize,
     /// Actualizaciones gestionadas → «Abrir en essentials» (`essentials.exe --app notty`).
     OpenEssentials,
-    /// Actualizaciones gestionadas sin essentials → «Volver a gestionar yo las
-    /// actualizaciones»: borra `[updates] managed_by`.
-    UnmanageUpdates,
+    /// Actualizaciones sin essentials → «Instalar essentials» / «Reintentar».
+    InstallEssentials,
+    /// Cancela la descarga del instalador de essentials.
+    CancelEssentials,
 }
 
 /// Tamaño de letra base del editor (`layout::FONT_MONO`), para traducir el

@@ -24,6 +24,12 @@ pub fn latest_release(owner_repo: &str, user_agent: &str) -> Result<crate::Relea
     Ok(crate::parse_release(&json)?)
 }
 
+/// La última release de `owner_repo` con el instalador `setup` (y su `.sig`).
+pub fn latest_release_with(owner_repo: &str, setup: &str, user_agent: &str) -> Result<crate::Release, HttpError> {
+    let json = get("api.github.com", &format!("/repos/{owner_repo}/releases/latest"), user_agent, "application/vnd.github+json")?;
+    Ok(crate::parse_release_with(&json, setup)?)
+}
+
 struct Handles {
     session: *mut core::ffi::c_void,
     connect: *mut core::ffi::c_void,

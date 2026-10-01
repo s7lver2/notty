@@ -33,7 +33,9 @@ use crate::{EditorState, Viewport, Workspace};
 
 mod extra;
 mod md;
+mod essentials_notice;
 mod whats_new;
+pub use essentials_notice::{BOLSA as ESSENTIALS_ICON, EssentialsNoticeView};
 pub use whats_new::WhatsNewView;
 
 /// Convierte un desplazamiento en chars (relativo al inicio de `text`) a un
@@ -106,6 +108,12 @@ pub enum Hit {
     /// Botones "✕" y "Entendido" del popup de Novedades.
     WhatsNewClose,
     WhatsNewOk,
+    /// Aviso «notty ahora se actualiza desde essentials»: Instalar, Ahora no,
+    /// Cancelar la descarga y Reintentar.
+    EssentialsInstall,
+    EssentialsLater,
+    EssentialsCancel,
+    EssentialsRetry,
     /// Tirador de la barra de scroll del editor (arrastrar desplaza el documento).
     ScrollThumb,
     /// Zona de la pista por encima/debajo del tirador: clic avanza una página.
@@ -310,6 +318,7 @@ pub struct Renderer {
     /// "Acerca de notty" abierto.
     about: Option<AboutContent>,
     whats_new: Option<WhatsNewView>,
+    essentials_notice: Option<EssentialsNoticeView>,
     /// Progreso (`0..1` en 1,8 s) del aviso "Ruta copiada", si hay uno en curso.
     path_copied: Option<f32>,
     /// Aviso breve de la barra de estado (p. ej. un error al guardar): progreso y texto.
@@ -492,6 +501,7 @@ impl Renderer {
                 tab_scroll_targets: (None, None),
                 about: None,
                 whats_new: None,
+                essentials_notice: None,
                 path_copied: None,
                 notice: None,
                 menu_keys: Vec::new(),
@@ -1532,6 +1542,7 @@ impl Renderer {
             self.draw_update_panel(pal, frame.status.top, w, view);
             self.draw_about(pal, frame.body, view);
             self.draw_whats_new(pal, frame.body, view);
+            self.draw_essentials_notice(pal, frame.body, view);
 
             if let Some(menu) = self.context_menu.take() {
                 let rows: Vec<MenuRow> = menu
