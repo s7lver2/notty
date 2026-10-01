@@ -316,6 +316,11 @@ pub enum LinkAction {
     /// maximizar, para la próxima vez que se abra notty (no mueve la ventana actual:
     /// Ajustes es su propia ventana, no puede redimensionar la principal desde aquí).
     ResetWindowSize,
+    /// Actualizaciones gestionadas → «Abrir en essentials» (`essentials.exe --app notty`).
+    OpenEssentials,
+    /// Actualizaciones gestionadas sin essentials → «Volver a gestionar yo las
+    /// actualizaciones»: borra `[updates] managed_by`.
+    UnmanageUpdates,
 }
 
 /// Tamaño de letra base del editor (`layout::FONT_MONO`), para traducir el

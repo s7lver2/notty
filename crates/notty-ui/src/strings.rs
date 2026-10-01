@@ -479,6 +479,12 @@ const TABLE: &[(&str, &str)] = &[
     ("Actualizando", "Updating"),
     ("Este notty-setup se compiló sin el paquete MSI dentro (falta installer\\notty.msi al compilar). Construye el MSI con tools/release.ps1 y vuelve a compilar notty-setup.", "This notty-setup was built without the MSI package inside (installer\\notty.msi was missing at build time). Build the MSI with tools/release.ps1 and rebuild notty-setup."),
     ("No se pudo extraer el paquete a la carpeta temporal", "Couldn't extract the package to the temp folder"),
+    // --- settings_pages.rs: actualizaciones gestionadas por essentials ---
+    ("Gestionado por essentials", "Managed by essentials"),
+    ("Las actualizaciones de notty se instalan desde la tienda.", "notty updates are installed from the store."),
+    ("Abrir en essentials", "Open in essentials"),
+    ("essentials no está instalado", "essentials isn't installed"),
+    ("Volver a gestionar yo las actualizaciones", "Manage updates myself again"),
 ];
 
 /// Traduce `es` a `lang`. Si `lang` es `Es`, o no hay traducción en la tabla,

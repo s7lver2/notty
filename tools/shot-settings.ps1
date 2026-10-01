@@ -37,6 +37,7 @@ public class NottySet {
   }
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
   [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, out RECT r);
+  [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags);
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
   [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
@@ -108,7 +109,6 @@ try {
   if (-not $Main) {
     $h = Find-Settings $p.Id
     if ($h -eq [IntPtr]::Zero) {
-      Focus $mainH
       # Engranaje de la barra de título (a 158 px del borde derecho del área cliente);
       # Ctrl+, no llega de forma fiable desde fuera.
       $cr = New-Object NottySet+RECT
@@ -143,18 +143,22 @@ try {
     }
     $target = $h
   }
-  Focus $target
   Start-Sleep -Milliseconds 900   # que terminen la entrada de página y los fundidos (350 ms)
   $r = New-Object NottySet+RECT
   [NottySet]::GetWindowRect($target, [ref]$r) | Out-Null
   $bmp = New-Object System.Drawing.Bitmap ($r.R - $r.L), ($r.B - $r.T)
   $g = [System.Drawing.Graphics]::FromImage($bmp)
-  $g.CopyFromScreen($r.L, $r.T, 0, 0, $bmp.Size)
+  # PrintWindow por HWND (PW_RENDERFULLCONTENT): solo esta ventana, aunque otra la tape;
+  # nunca se copia la pantalla.
+  $dc = $g.GetHdc()
+  $ok = [NottySet]::PrintWindow($target, $dc, 2)
+  $g.ReleaseHdc($dc)
+  if (-not $ok) { throw 'PrintWindow falló' }
   New-Item -ItemType Directory -Force (Split-Path -Parent $Out) | Out-Null
   $bmp.Save($Out, [System.Drawing.Imaging.ImageFormat]::Png)
   $g.Dispose(); $bmp.Dispose()
   Write-Host "$($r.R - $r.L)x$($r.B - $r.T) -> $Out"
 } finally {
   if ($KeepOpen) { Write-Output $p.Id }
-  elseif (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+  elseif (-not $p.HasExited) { Stop-Process -Id $p.Id -Force; $p.WaitForExit(5000) | Out-Null }
 }

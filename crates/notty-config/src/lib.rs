@@ -10,4 +10,4 @@ pub use model::{
     UpdatesConfig,
 };
 pub use preset::apply_preset;
-pub use storage::{LoadResult, default_path, load, save};
+pub use storage::{LoadResult, default_path, load, save, save_as_is};

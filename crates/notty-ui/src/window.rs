@@ -892,6 +892,10 @@ fn open_settings_at(w: &WindowState, hwnd: HWND, section: &str) {
             return;
         }
     }
+    // essentials pudo escribir `[updates] managed_by` con notty ya abierto.
+    if let notty_config::LoadResult::Loaded(disk) = notty_config::load(&notty_config::default_path()) {
+        w.cfg.borrow_mut().updates.managed_by = disk.updates.managed_by;
+    }
     let cfg_for_settings = w.cfg.clone();
     let cfg_for_theme = w.cfg.clone();
     let _ = crate::settings_window::open(
@@ -1184,8 +1188,8 @@ fn unix_now() -> u64 {
 /// no bloquear la UI ("síncrono" en el plan quiere decir "lo pidió el usuario", no
 /// "bloquea"). Siempre deja un resultado claro (nunca en silencio).
 fn check_updates_now(w: &mut WindowState, hwnd: HWND) {
-    if w.manual_check_rx.is_some() {
-        return; // ya hay una en marcha
+    if w.manual_check_rx.is_some() || w.cfg.borrow().updates.managed() {
+        return; // ya hay una en marcha, o las actualizaciones son cosa de essentials
     }
     w.update.start_check();
     let (tx, rx) = std::sync::mpsc::channel();
@@ -1251,6 +1255,9 @@ enum DownloadEvent {
 /// descarga, borra los archivos y dice por qué en el panel — nunca ejecuta un
 /// binario sin verificar (`Global Constraints` del plan).
 fn start_update_download(w: &mut WindowState, hwnd: HWND) {
+    if w.cfg.borrow().updates.managed() {
+        return;
+    }
     let Some(release) = w.update.available.clone() else { return };
     w.update.start_download();
     let (tx, rx) = std::sync::mpsc::channel();

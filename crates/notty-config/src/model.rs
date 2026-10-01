@@ -355,16 +355,28 @@ impl Default for HotkeyConfig {
 /// Si notty consulta (una vez al día, sin identificadores) si hay versión nueva
 /// en GitHub. Apagado por defecto: la única forma de encenderlo son el paso
 /// Privacidad de `welcome_window` o Ajustes → Acerca de.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct UpdatesConfig {
     pub check: bool,
     pub last_check: u64,
+    /// `"essentials"` cuando las actualizaciones las instala la tienda: lo escribe
+    /// essentials al migrar; notty solo lo lee (y lo borra con «Volver a gestionar yo
+    /// las actualizaciones»). Cualquier otro valor cuenta como si no estuviera.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub managed_by: Option<String>,
 }
 
 impl Default for UpdatesConfig {
     fn default() -> Self {
-        Self { check: false, last_check: 0 }
+        Self { check: false, last_check: 0, managed_by: None }
+    }
+}
+
+impl UpdatesConfig {
+    /// Las gestiona essentials: notty no comprueba ni descarga nada.
+    pub fn managed(&self) -> bool {
+        self.managed_by.as_deref() == Some("essentials")
     }
 }
 

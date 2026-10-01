@@ -245,7 +245,7 @@ fn unix_now() -> u64 {
 /// `mpsc` que ya existía para el pipe de instancia única, en vez de inventar uno
 /// nuevo — `ipc_tick` en `notty-ui` lo recoge igual que un `OpenPath`.
 fn spawn_update_check(cfg: notty_config::Config, tx: std::sync::mpsc::Sender<notty_ipc::Message>) {
-    if !cfg.updates.check {
+    if !cfg.updates.check || cfg.updates.managed() {
         return;
     }
     let now = unix_now();

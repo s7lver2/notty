@@ -121,6 +121,8 @@ struct State {
     preview: Preview,
     syn_pick: usize,
     syn_pick_at: Instant,
+    /// «Abrir en essentials» falló (no hay `essentials.exe` registrado).
+    essentials_missing: bool,
 }
 
 fn ensure_anim_timer(st: &mut State, hwnd: HWND) {
@@ -144,6 +146,23 @@ fn post_close(hwnd: HWND) {
 
 fn to_wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+/// «Abrir en essentials»: `essentials.exe --app notty` por App Paths. Sin diálogo de
+/// Windows si no está (`SEE_MASK_FLAG_NO_UI`): devuelve `false` y Ajustes lo dice.
+fn open_essentials(hwnd: HWND) -> bool {
+    use windows::Win32::UI::Shell::{SEE_MASK_FLAG_NO_UI, SHELLEXECUTEINFOW, ShellExecuteExW};
+    let mut info = SHELLEXECUTEINFOW {
+        cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
+        fMask: SEE_MASK_FLAG_NO_UI,
+        hwnd,
+        lpVerb: w!("open"),
+        lpFile: w!("essentials.exe"),
+        lpParameters: w!("--app notty"),
+        nShow: windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL.0,
+        ..Default::default()
+    };
+    unsafe { ShellExecuteExW(&mut info) }.is_ok()
 }
 
 fn shell_open(hwnd: HWND, file: &str, params: Option<&str>) {
@@ -273,6 +292,7 @@ pub fn open(
             preview: Preview::default(),
             syn_pick: 0,
             syn_pick_at: Instant::now(),
+            essentials_missing: false,
         });
         if start_page == Page::Fuentes {
             state.fonts = state.renderer.monospace_families();
@@ -983,6 +1003,16 @@ fn run_link(st: &mut State, hwnd: HWND, action: LinkAction) {
             }
             save_and_notify(st);
         }
+        LinkAction::OpenEssentials => st.essentials_missing = !open_essentials(hwnd),
+        LinkAction::UnmanageUpdates => {
+            st.cfg.borrow_mut().updates.managed_by = None;
+            let _ = notty_config::save_as_is(&st.cfg.borrow(), &notty_config::default_path());
+            st.essentials_missing = false;
+            // Vuelve a entrar la página normal de Actualizaciones.
+            st.page_enter = Instant::now();
+            ensure_anim_timer(st, hwnd);
+            (st.on_change)();
+        }
     }
 }
 
@@ -1209,6 +1239,7 @@ fn paint(st: &mut State) {
         syn_pick: st.syn_pick,
         syn_pick_at: st.syn_pick_at,
         system_dark,
+        essentials_missing: st.essentials_missing,
     };
     let area = Rect::new(panel.left, panel.top - scroll, panel.right, panel.bottom - scroll);
     let content_h = pages::draw_page(&mut ui, &data, area);

@@ -38,7 +38,19 @@ pub fn load(path: &Path) -> LoadResult {
     }
 }
 
+/// Guarda `cfg`. `[updates] managed_by` lo escribe essentials, no notty: se conserva el
+/// que haya en disco, para que un guardado de notty (abierto desde antes) no lo borre.
 pub fn save(cfg: &Config, path: &Path) -> std::io::Result<()> {
+    let mut cfg = cfg.clone();
+    if let LoadResult::Loaded(disk) = load(path) {
+        cfg.updates.managed_by = disk.updates.managed_by;
+    }
+    save_as_is(&cfg, path)
+}
+
+/// Guarda `cfg` tal cual, `managed_by` incluido. Solo para «Volver a gestionar yo las
+/// actualizaciones», que es lo único de notty que cambia esa clave.
+pub fn save_as_is(cfg: &Config, path: &Path) -> std::io::Result<()> {
     let text = toml::to_string_pretty(cfg).expect("Config siempre serializa");
     backup_if_broken(path)?;
     notty_io::create_parent_dirs(path)?;

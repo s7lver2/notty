@@ -98,6 +98,8 @@ pub(crate) struct PageData<'a> {
     /// Lenguaje de la vista previa de Sintaxis (índice en `syntax::LANGS`) y cuándo se eligió.
     pub syn_pick: usize,
     pub syn_pick_at: Instant,
+    /// «Abrir en essentials» falló: la tarjeta gestionada enseña el aviso y la salida.
+    pub essentials_missing: bool,
 }
 
 /// Fuentes que traen ligaduras de programación propias (etiqueta "Ligaduras").
@@ -1768,6 +1770,35 @@ fn atajo(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
 
 // --- Actualizaciones ------------------------------------------------------------------
 
+/// Actualizaciones cuando las gestiona essentials (`[updates] managed_by`): la misma
+/// tarjeta de estado que la de siempre (de abajo), con «Abrir en essentials» y, si
+/// essentials no está, el aviso en `danger` y «Volver a gestionar yo…».
+fn managed_card(ui: &mut Ui, d: &PageData, x: f32, y: f32, w: f32) -> f32 {
+    let pal = ui.pal;
+    blk(ui, d, 1);
+    let (sub, sub_c, label, primary, hit) = if d.essentials_missing {
+        (ui.tr("essentials no está instalado"), pal.danger, ui.tr("Volver a gestionar yo las actualizaciones"), false, Hit::Link(LinkAction::UnmanageUpdates))
+    } else {
+        (ui.tr("Las actualizaciones de notty se instalan desde la tienda."), pal.text_2, ui.tr("Abrir en essentials"), true, Hit::Link(LinkAction::OpenEssentials))
+    };
+    let bw = ui.button_w(label, primary);
+    let text_x = x + 22.0 + 56.0 + 18.0;
+    let text_w = (x + w - 22.0 - bw - 18.0 - text_x).max(80.0);
+    let head_h = 56.0;
+    let card = Rect::new(x, y, x + w, y + 40.0 + head_h);
+    ui.r.fill_round(card, 10.0, ui.row_c(0.0));
+    let icx = x + 22.0 + 28.0;
+    let icy = card.top + 20.0 + head_h / 2.0;
+    ui.r.fill_circle(icx, icy, 28.0, pal.accent_soft);
+    ui.icon(icon::ACTUALIZAR, icx, icy, 24.0, 2.0, pal.accent);
+    let ty = card.top + 20.0 + (head_h - 22.0 - 3.0 - DESC_LH) / 2.0;
+    ui.text(ui.tr("Gestionado por essentials"), 16.0, true, Rect::new(text_x, ty, text_x + text_w, ty + 22.0), pal.text);
+    ui.text(sub, 12.0, false, Rect::new(text_x, ty + 25.0, text_x + text_w, ty + 25.0 + DESC_LH), sub_c);
+    ui.button(Rect::new(x + w - 22.0 - bw, icy - 16.0, x + w - 22.0, icy + 16.0), label, primary, true, hit);
+    blk_end(ui);
+    card.bottom
+}
+
 fn actualizaciones(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     let cfg = d.cfg;
     let pal = ui.pal;
@@ -1777,6 +1808,9 @@ fn actualizaciones(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     blk(ui, d, 0);
     let mut y = header(ui, x, top, w, "Actualizaciones", "") + 14.0;
     blk_end(ui);
+    if cfg.updates.managed() {
+        return managed_card(ui, d, x, y, w);
+    }
 
     let (headline, sub): (String, String) = match &up.phase {
         UpdatePhase::Idle if up.up_to_date => (ui.tr("notty está al día").to_string(), ui.tr("Tienes la última versión publicada.").to_string()),
@@ -1996,6 +2030,7 @@ fn acerca(ui: &mut Ui, d: &PageData, x: f32, top: f32, w: f32) -> f32 {
     ui.r.fill_round(vr, 10.0, pal.accent_soft);
     ui.r.text_center(&ver, &fm, vr, pal.accent);
     let (st_txt, st_c) = match (&d.update.phase, d.update.up_to_date, &d.update.new_version) {
+        _ if d.cfg.updates.managed() => (ui.tr("Gestionado por essentials").to_string(), pal.text_2),
         (UpdatePhase::Found, _, Some(v)) => (format!("{}: {v}", ui.tr("Hay una versión nueva")), pal.accent),
         (UpdatePhase::Checking, _, _) => (ui.tr("Buscando actualizaciones…").to_string(), pal.text_2),
         (_, true, _) => (ui.tr("Al día").to_string(), pal.ok),
