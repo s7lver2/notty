@@ -839,6 +839,18 @@ pub fn focus_existing(hwnd: HWND, section: &str) {
     }
 }
 
+/// El tema o el acento efectivos cambiaron desde fuera (`appearance.toml` de essentials):
+/// el mismo fundido de 350 ms que al elegirlos aquí, y la fila de Apariencia al día.
+pub fn shared_theme_changed(hwnd: HWND, was_dark: bool, was_accent: notty_config::AccentColor) {
+    unsafe {
+        let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut State;
+        let Some(st) = ptr.as_mut() else { return };
+        start_theme_fade(st, hwnd, was_dark, was_accent);
+        ensure_anim_timer(st, hwnd);
+        invalidate(hwnd);
+    }
+}
+
 fn slider_to(st: &mut State, x: f32) {
     let Some(r) = hit_rect(st, Hit::Slider) else { return };
     let px = pages::slider_px(r.left + 8.0, r.width() - 16.0, x);

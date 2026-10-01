@@ -53,6 +53,17 @@ pub fn wake_for_ipc() {
         let _ = unsafe { windows::Win32::UI::WindowsAndMessaging::PostMessageW(Some(HWND(h as *mut _)), WM_IPC, WPARAM(0), LPARAM(0)) };
     }
 }
+/// Lo manda el hilo que vigila `%APPDATA%\essentials\` (`shared_theme::watch`).
+const WM_SHARED_THEME: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 10;
+
+/// Avisa a la ventana de que `appearance.toml` de essentials pudo cambiar.
+fn wake_for_shared_theme() {
+    let h = IPC_HWND.load(std::sync::atomic::Ordering::Acquire);
+    if h != 0 {
+        let _ = unsafe { windows::Win32::UI::WindowsAndMessaging::PostMessageW(Some(HWND(h as *mut _)), WM_SHARED_THEME, WPARAM(0), LPARAM(0)) };
+    }
+}
+
 /// Id del `SetTimer` de animación (60Hz): repinta mientras haya alguna animación en
 /// curso (menú/sugerencias al abrir, cambio de pestaña...) y se para en cuanto la
 /// última termina.
@@ -1917,6 +1928,7 @@ fn run_inner(
         IPC_HWND.store(hwnd.0 as usize, std::sync::atomic::Ordering::Release);
         // Lo que llegase antes de registrar la ventana.
         wake_for_ipc();
+        crate::shared_theme::watch(wake_for_shared_theme);
 
         // Recién actualizado: el popup de Novedades, una sola vez por versión.
         if let Some(w) = ptr.as_mut() {
@@ -3103,6 +3115,22 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             }
             WM_SYNTAX_READY => {
                 let _ = InvalidateRect(Some(hwnd), None, false);
+                LRESULT(0)
+            }
+            WM_SHARED_THEME => {
+                // `appearance.toml` cambió: el fundido de aquí sale solo en `WM_PAINT`
+                // (`last_dark`/`last_accent`); Ajustes, si está abierto, lo arranca aparte.
+                if let Some(w) = ptr.as_mut() {
+                    let before = w.render_ui();
+                    if crate::shared_theme::reload() {
+                        let system_dark = system_uses_dark_mode();
+                        apply_dark_mode(hwnd, crate::is_dark(w.render_ui().theme, system_dark));
+                        if let Some(raw) = OPEN_SETTINGS_HWND.with(|c| c.get()) {
+                            crate::settings_window::shared_theme_changed(HWND(raw as *mut _), crate::is_dark(before.theme, system_dark), before.accent);
+                        }
+                        let _ = InvalidateRect(Some(hwnd), None, false);
+                    }
+                }
                 LRESULT(0)
             }
             WM_GPU_READY => {
