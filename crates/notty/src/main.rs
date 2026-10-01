@@ -149,8 +149,11 @@ fn main() -> windows::core::Result<()> {
     let cfg_for_check = match &load {
         notty_config::LoadResult::Loaded(c) | notty_config::LoadResult::Missing(c) | notty_config::LoadResult::Defaulted(c, _) => c.clone(),
     };
+    // Perfil de pruebas (`tools/shot-settings.ps1`): ni registro, ni pipe de instancia
+    // única, ni atajo global, para no pisar el notty de verdad del usuario.
+    let pruebas = std::env::var_os("NOTTY_PRUEBAS").is_some();
     if let Some(p) = &path {
-        if cfg_for_check.files.open_in_existing_window {
+        if cfg_for_check.files.open_in_existing_window && !pruebas {
             let msg = notty_ipc::Message::OpenPath(absolute_path_arg(p));
             if try_forward_to_existing_instance(&msg) {
                 return Ok(());
@@ -159,14 +162,18 @@ fn main() -> windows::core::Result<()> {
     }
 
     // Cada usuario tiene su propio HKCU y el instalador solo corrió como uno de ellos.
-    notty_update::notepad::sync();
+    if !pruebas {
+        notty_update::notepad::sync();
+    }
     notty_ui::bench_log::mark("notepad_sync");
 
     // Esta instancia también escucha en el pipe mientras viva, además de abrir su
     // propia ventana con normalidad.
     let (tx, rx) = std::sync::mpsc::channel();
     let update_tx = tx.clone();
-    spawn_pipe_server(tx);
+    if !pruebas {
+        spawn_pipe_server(tx);
+    }
 
     let hotkey = cfg_for_check.hotkey;
     std::thread::spawn(move || notty_ui::global_hotkey::sync(&hotkey));

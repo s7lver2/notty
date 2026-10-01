@@ -38,6 +38,10 @@ pub fn daemon_running() -> bool {
 }
 
 pub fn sync(cfg: &HotkeyConfig) {
+    // Perfil de pruebas: ni `HKCU\…\Run` ni el daemon ni los `.lnk` del usuario.
+    if std::env::var_os("NOTTY_PRUEBAS").is_some() {
+        return;
+    }
     {
         let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
         if last.as_ref() == Some(cfg) {
