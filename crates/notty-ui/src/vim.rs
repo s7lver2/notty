@@ -72,7 +72,7 @@ impl VimState {
             return VimOutcome::Handled;
         }
         match ch {
-            Some(c) if !c.is_control() => {
+            Some(c) if !c.is_control() || c == '\t' => {
                 doc.insert(&c.to_string(), now);
                 VimOutcome::Handled
             }

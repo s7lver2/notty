@@ -260,6 +260,27 @@ fn make_format(
     }
 }
 
+/// Formato del cuerpo del editor: como `make_format`, con la tabulación a 4 columnas
+/// (4 veces el ancho de un dígito, que en una fuente monoespaciada es el de cualquier carácter).
+fn make_editor_format(
+    dwrite: &IDWriteFactory,
+    family: &str,
+    size: f32,
+    weight: windows::Win32::Graphics::DirectWrite::DWRITE_FONT_WEIGHT,
+) -> Result<IDWriteTextFormat> {
+    let fmt = make_format(dwrite, family, size, weight)?;
+    unsafe {
+        let zero = [b'0' as u16];
+        let probe = dwrite.CreateTextLayout(&zero, &fmt, f32::MAX, f32::MAX)?;
+        let mut m = DWRITE_TEXT_METRICS::default();
+        probe.GetMetrics(&mut m)?;
+        if m.width > 0.0 {
+            fmt.SetIncrementalTabStop(m.width * 4.0)?;
+        }
+    }
+    Ok(fmt)
+}
+
 /// Añade recorte con «…» (usado en pestañas, nombres largos) al formato dado.
 fn with_ellipsis_trimming(dwrite: &IDWriteFactory, fmt: &IDWriteTextFormat) -> Result<()> {
     unsafe {
@@ -445,8 +466,8 @@ impl Renderer {
             let ui_12_5_semibold = make_format(&dwrite, &ui_family, 12.5, DWRITE_FONT_WEIGHT_SEMI_BOLD)?;
             let ui_18_semibold = make_format(&dwrite, &ui_family, 18.0, DWRITE_FONT_WEIGHT_SEMI_BOLD)?;
             let ui_13_semibold = make_format(&dwrite, &ui_family, 13.0, DWRITE_FONT_WEIGHT_SEMI_BOLD)?;
-            let mono_13 = make_format(&dwrite, &mono_family, layout::FONT_MONO, DWRITE_FONT_WEIGHT_NORMAL)?;
-            let mono_13_bold = make_format(&dwrite, &mono_family, layout::FONT_MONO, DWRITE_FONT_WEIGHT_BOLD)?;
+            let mono_13 = make_editor_format(&dwrite, &mono_family, layout::FONT_MONO, DWRITE_FONT_WEIGHT_NORMAL)?;
+            let mono_13_bold = make_editor_format(&dwrite, &mono_family, layout::FONT_MONO, DWRITE_FONT_WEIGHT_BOLD)?;
             let mono_11 = make_format(&dwrite, &mono_family, layout::FONT_HINTS, DWRITE_FONT_WEIGHT_NORMAL)?;
             let mono_11_bold = make_format(&dwrite, &mono_family, layout::FONT_HINTS, DWRITE_FONT_WEIGHT_BOLD)?;
             let mono_11_5 = make_format(&dwrite, &mono_family, 11.5, DWRITE_FONT_WEIGHT_NORMAL)?;
@@ -536,8 +557,8 @@ impl Renderer {
         let fallback = resolve_family(&sys_fonts, "Cascadia Mono", "Consolas");
         let family = resolve_family(&sys_fonts, primary, &fallback);
         let size = layout::FONT_MONO * self.font_scale;
-        self.fonts.mono_13 = make_format(&self.dwrite, &family, size, DWRITE_FONT_WEIGHT_NORMAL)?;
-        self.fonts.mono_13_bold = make_format(&self.dwrite, &family, size, DWRITE_FONT_WEIGHT_BOLD)?;
+        self.fonts.mono_13 = make_editor_format(&self.dwrite, &family, size, DWRITE_FONT_WEIGHT_NORMAL)?;
+        self.fonts.mono_13_bold = make_editor_format(&self.dwrite, &family, size, DWRITE_FONT_WEIGHT_BOLD)?;
         self.mono_family = family;
         Ok(())
     }
@@ -549,8 +570,8 @@ impl Renderer {
     pub fn set_font_scale(&mut self, scale: f32) -> Result<()> {
         let scale = scale.clamp(0.5, 3.0);
         let size = layout::FONT_MONO * scale;
-        self.fonts.mono_13 = make_format(&self.dwrite, &self.mono_family, size, DWRITE_FONT_WEIGHT_NORMAL)?;
-        self.fonts.mono_13_bold = make_format(&self.dwrite, &self.mono_family, size, DWRITE_FONT_WEIGHT_BOLD)?;
+        self.fonts.mono_13 = make_editor_format(&self.dwrite, &self.mono_family, size, DWRITE_FONT_WEIGHT_NORMAL)?;
+        self.fonts.mono_13_bold = make_editor_format(&self.dwrite, &self.mono_family, size, DWRITE_FONT_WEIGHT_BOLD)?;
         self.font_scale = scale;
         Ok(())
     }
