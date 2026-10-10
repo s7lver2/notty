@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.2.0
+
+- Tabulaciones: la tecla Tab escribe una tabulación (también en modo vim, en Insert) y el editor las dibuja alineadas a 4 columnas, tanto las que escribes como las de los archivos que abres.
+
+#### English
+
+- Tabs: the Tab key now types a tab character (in vim Insert mode too), and the editor draws tabs aligned to 4 columns, both the ones you type and the ones in files you open.
+
 ## v1.1.0
 
 - notty se actualiza desde essentials, la tienda de tus apps, y ya no busca ni descarga versiones por su cuenta. Sin essentials, al abrirse sale el aviso «notty ahora se actualiza desde essentials» con «Instalar essentials», que descarga su instalador, comprueba su firma y lo abre; también está en Ajustes → Actualizaciones. Con essentials, Ajustes → Actualizaciones lleva «Abrir en essentials». Novedades sigue en Ajustes → Acerca de.
