@@ -142,7 +142,7 @@ impl EditorState {
     /// Inserta un carácter tecleado. Ignora control chars salvo los que ya
     /// llegan como `EditorAction` (Enter, Backspace, Delete).
     pub fn insert_char(&mut self, ch: char, now: std::time::Instant) {
-        if ch.is_control() {
+        if ch.is_control() && ch != '\t' {
             return;
         }
         self.doc.insert(&ch.to_string(), now);

@@ -3312,7 +3312,7 @@ fn handle_vim_char(w: &mut WindowState, ch: char) {
         // reconozca (q, w, e, p, n...) se colaba en el documento mientras la barra
         // seguía diciendo "-- NORMAL --".
         crate::VimOutcome::Bubble => {
-            if was_insert && !ch.is_control() {
+            if was_insert && (!ch.is_control() || ch == '\t') {
                 w.ws.active_mut().insert_char(ch, std::time::Instant::now());
             }
         }
